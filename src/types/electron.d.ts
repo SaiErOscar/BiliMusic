@@ -1,25 +1,4 @@
 interface BiliApi {
-  search: (keyword: string, page?: number, pageSize?: number) => Promise<any>
-  videoDetail: (bvid: string) => Promise<any>
-  playUrl: (bvid: string, cid: number) => Promise<any>
-  nav: () => Promise<any>
-  popular: (ps?: number, pn?: number) => Promise<any>
-  recommend: (ps?: number) => Promise<any>
-  musicRanking: () => Promise<any>
-  favorites: (mid: number) => Promise<any>
-  extractAudio: (bvid: string) => Promise<{
-    bvid: string
-    aid: number
-    cid: number
-    title: string
-    artist: string
-    coverUrl: string
-    duration: number
-    audioUrl: string
-    audioQuality: number
-    audioMimeType: string
-    bandwidth: number
-  }>
   downloadAudio: (audioUrl: string, filename: string) => Promise<{
     filePath: string
     size: number

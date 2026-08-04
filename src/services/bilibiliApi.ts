@@ -482,6 +482,7 @@ export interface PopularVideo {
   owner: VideoOwner
   stat: VideoStat
   duration: number
+  cid: number
 }
 
 export async function getPopularVideos(ps = 10, pn = 1): Promise<{ list: PopularVideo[] }> {

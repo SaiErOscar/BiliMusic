@@ -1,33 +1,11 @@
 /**
  * biliMusic API 适配层
  *
- * Electron 环境：通过 IPC 调用主进程 API（绕过 CORS）
- * 浏览器环境：通过 renderer 端 bilibiliApi.ts 直接调用（需要 B 站 Cookie）
+ * 渲染层直接通过浏览器 fetch 调用 B站 API（主进程已通过 webRequest 绕过 CORS）。
+ * 主进程仅保留下载、扫码登录、Cookie 管理等无法在渲染层完成的 IPC。
  */
 
 import type { TrackSource } from '@/services/bilibiliApi'
-
-function isElectron(): boolean {
-  return !!window.electronAPI?.biliApi
-}
-
-// 在 Electron 环境下直接用浏览器 fetch（CORS 已被主进程绕过）
-// 相比 IPC net.fetch，浏览器 fetch 自带完整请求头/Cookie，不会被 B站反爬拦截
-async function electronFetch<T>(path: string, params?: Record<string, string | number>): Promise<T> {
-  const url = new URL('https://api.bilibili.com' + path)
-  if (params) {
-    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)))
-  }
-  const resp = await fetch(url.toString(), {
-    credentials: 'include',
-    headers: { Referer: 'https://www.bilibili.com' },
-  })
-  const data = await resp.json()
-  if (data.code !== 0) {
-    throw { code: data.code, message: data.message, path }
-  }
-  return data.data as T
-}
 
 // ===== 搜索 =====
 
@@ -60,7 +38,6 @@ export async function searchVideo(keyword: string, page = 1, pageSize = 20): Pro
     pic: normalizePic(item.pic),
   })
 
-  // 统一走渲染进程浏览器 fetch：主进程 net.fetch 会被 B站反爬拦截（-352）
   const { searchVideo: rendererSearch } = await import('@/services/bilibiliApi')
   const data = await rendererSearch(keyword, page, pageSize)
   const totalResults = data.numResults || 0
@@ -91,7 +68,6 @@ export interface VideoInfo {
 }
 
 export async function getVideoDetail(bvid: string): Promise<VideoInfo> {
-  // 统一走渲染进程浏览器 fetch：主进程 net.fetch 会被 B站反爬拦截（-352）
   const { getVideoDetail: rendererDetail } = await import('@/services/bilibiliApi')
   const data = await rendererDetail(bvid)
   return {
@@ -171,7 +147,6 @@ export async function extractAudio(
   bvid: string,
   fallback?: { aid?: string | number; cid?: string | number },
 ): Promise<TrackSource> {
-  // 统一走渲染进程浏览器 fetch：主进程 net.fetch 会被 B站反爬拦截（-352）
   const { extractAudioFromVideo } = await import('@/services/bilibiliApi')
   return extractAudioFromVideo(bvid, fallback)
 }
@@ -179,7 +154,7 @@ export async function extractAudio(
 // ===== 下载音频 =====
 
 export async function downloadAudio(audioUrl: string, filename: string): Promise<{ filePath: string; size: number }> {
-  if (isElectron()) {
+  if (window.electronAPI?.biliApi) {
     return window.electronAPI.biliApi.downloadAudio(audioUrl, filename)
   }
 
@@ -189,7 +164,6 @@ export async function downloadAudio(audioUrl: string, filename: string): Promise
 // ===== 用户信息 =====
 
 export async function getUserInfo(): Promise<{ isLogin: boolean; mid: number; uname: string; face: string }> {
-  // 统一走渲染进程浏览器 fetch：主进程 net.fetch 会被 B站反爬拦截（-352）
   const { getNavInfo } = await import('@/services/bilibiliApi')
   const data = await getNavInfo()
   return {
@@ -225,7 +199,6 @@ export async function getMusicRanking(): Promise<VideoInfo[]> {
     }
   }
 
-  // 统一走渲染进程浏览器 fetch：主进程 net.fetch 会被 B站反爬拦截（-352）
   const { getMusicRanking: rendererRanking } = await import('@/services/bilibiliApi')
   const data = await rendererRanking()
   return (Array.isArray(data) ? data : (data as any).list || (data as any).data || []).map(parseItem)
@@ -360,11 +333,6 @@ export async function getRecommendVideos(ps = 20): Promise<VideoInfo[]> {
     },
   })
 
-  if (isElectron()) {
-    const data = await electronFetch<{ item: any[] }>('/x/web-interface/index/top/rcmd', { ps })
-    return (data.item || []).map(parseItem)
-  }
-
   const { getRecommendedVideos: rendererRec } = await import('@/services/bilibiliApi')
   const data = await rendererRec(ps)
   return (data.item || []).map(parseItem)
@@ -373,7 +341,6 @@ export async function getRecommendVideos(ps = 20): Promise<VideoInfo[]> {
 // ===== 热门/推荐 =====
 
 export async function getPopularVideos(ps = 10, pn = 1): Promise<VideoInfo[]> {
-  // 统一走渲染进程浏览器 fetch：主进程 net.fetch 会被 B站反爬拦截（-352）
   const { getPopularVideos: rendererPopular } = await import('@/services/bilibiliApi')
   const data = await rendererPopular(ps, pn)
   return data.list?.map((v) => ({
@@ -409,7 +376,7 @@ export interface QrPollResult {
 }
 
 export async function generateQrCode(): Promise<QrCodeData> {
-  if (isElectron()) {
+  if (window.electronAPI?.biliApi) {
     const data = await window.electronAPI.biliApi.qrGenerate()
     return { url: data.url, qrcodeKey: data.qrcodeKey }
   }
@@ -419,7 +386,7 @@ export async function generateQrCode(): Promise<QrCodeData> {
 }
 
 export async function pollQrCode(qrcodeKey: string): Promise<QrPollResult> {
-  if (isElectron()) {
+  if (window.electronAPI?.biliApi) {
     return window.electronAPI.biliApi.qrPoll(qrcodeKey)
   }
 
@@ -428,7 +395,7 @@ export async function pollQrCode(qrcodeKey: string): Promise<QrPollResult> {
 }
 
 export async function getLoginStatus(): Promise<{ isLoggedIn: boolean; sessdata?: string }> {
-  if (isElectron()) {
+  if (window.electronAPI?.biliApi) {
     const cookies = await window.electronAPI.biliApi.getCookies()
     return { isLoggedIn: cookies.isLoggedIn, sessdata: cookies.sessdata }
   }
@@ -439,7 +406,7 @@ export async function getLoginStatus(): Promise<{ isLoggedIn: boolean; sessdata?
 }
 
 export async function logout(): Promise<void> {
-  if (isElectron()) {
+  if (window.electronAPI?.biliApi) {
     await window.electronAPI.biliApi.logout()
     return
   }
