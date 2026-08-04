@@ -7,53 +7,19 @@ const BILI_PASSPORT = 'https://passport.bilibili.com'
 const BILI_REFERER = 'https://www.bilibili.com'
 
 // ===== IPC Handlers =====
+//
+// 注意：搜索、视频详情、播放地址、推荐、热门、排行榜等接口已迁移至渲染层
+// 直接 fetch（src/services/bilibiliApi.ts），因主进程 net.fetch 会被 B站反爬
+// 拦截（-352）。此处仅保留渲染层无法自行处理的 IPC：下载、扫码登录、Cookie 管理。
 
 export function registerBiliApiHandlers() {
-  // 搜索视频
-  ipcMain.handle('bili:search', async (_event, keyword: string, page = 1, pageSize = 20) => {
-    return fetchBiliApi(`/x/web-interface/search/type?search_type=video&keyword=${encodeURIComponent(keyword)}&page=${page}&pagesize=${pageSize}`)
-  })
-
-  // 视频详情
-  ipcMain.handle('bili:videoDetail', async (_event, bvid: string) => {
-    return fetchBiliApi(`/x/web-interface/view?bvid=${bvid}`)
-  })
-
-  // 音频流地址
-  ipcMain.handle('bili:playUrl', async (_event, bvid: string, cid: number) => {
-    return fetchBiliApi(`/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=0&fnver=0&fnval=16&fourk=1`)
-  })
-
-  // 用户信息（登录状态）
-  ipcMain.handle('bili:nav', async () => {
-    return fetchBiliApi('/x/web-interface/nav')
-  })
-
-  // 热门视频
-  ipcMain.handle('bili:popular', async (_event, ps = 10, pn = 1) => {
-    return fetchBiliApi(`/x/web-interface/popular?ps=${ps}&pn=${pn}`)
-  })
-
-  // 推荐视频
-  ipcMain.handle('bili:recommend', async (_event, ps = 10) => {
-    return fetchBiliApi(`/x/web-interface/index/top/rcmd?ps=${ps}`)
-  })
-
-  // 音乐排行榜
-  ipcMain.handle('bili:musicRanking', async () => {
-    return fetchBiliApi('/x/web-interface/ranking/region?rid=3&day=3')
-  })
-
-  // 收藏夹列表
-  ipcMain.handle('bili:favorites', async (_event, mid: number) => {
-    return fetchBiliApi(`/x/v3/fav/folder/created/list-all?up_mid=${mid}`)
-  })
-
   // 下载音频文件到本地
   ipcMain.handle('bili:downloadAudio', async (_event, audioUrl: string, filename: string) => {
+    // 过滤文件名中的危险字符，防止路径遍历
+    const safeName = filename.replace(/[..\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim()
     const downloadDir = path.join(app.getPath('userData'), 'downloads')
     await fs.mkdir(downloadDir, { recursive: true })
-    const filePath = path.join(downloadDir, filename)
+    const filePath = path.join(downloadDir, safeName)
 
     const response = await net.fetch(audioUrl, {
       headers: { Referer: BILI_REFERER },
@@ -67,31 +33,6 @@ export function registerBiliApiHandlers() {
     return { filePath, size: buffer.length }
   })
 
-  // 提取完整音频源（一键流程）
-  ipcMain.handle('bili:extractAudio', async (_event, bvid: string) => {
-    const detail = await fetchBiliApi(`/x/web-interface/view?bvid=${bvid}`)
-    const playData = await fetchBiliApi(`/x/player/playurl?bvid=${bvid}&cid=${detail.cid}&qn=0&fnver=0&fnval=16&fourk=1`)
-
-    const audioStreams = playData.dash?.audio || []
-    if (!audioStreams.length) throw new Error('No audio stream available')
-
-    const bestAudio = [...audioStreams].sort((a, b) => b.bandwidth - a.bandwidth)[0]
-
-    return {
-      bvid: detail.bvid,
-      aid: detail.aid,
-      cid: detail.cid,
-      title: detail.title,
-      artist: detail.owner?.name,
-      coverUrl: detail.pic,
-      duration: detail.duration,
-      audioUrl: bestAudio.baseUrl,
-      audioQuality: bestAudio.quality,
-      audioMimeType: bestAudio.mimeType,
-      bandwidth: bestAudio.bandwidth,
-    }
-  })
-
   // ===== 扫码登录 =====
 
   // 生成二维码
@@ -103,7 +44,9 @@ export function registerBiliApiHandlers() {
     const data = await response.json()
 
     if (data.code !== 0) {
-      throw { code: data.code, message: data.message }
+      const err = new Error(`Bilibili API Error [${data.code}]: ${data.message}`)
+      ;(err as any).code = data.code
+      throw err
     }
 
     return {
@@ -136,7 +79,8 @@ export function registerBiliApiHandlers() {
             secure: true,
             httpOnly: true,
           })
-        } catch {
+        } catch (e) {
+          console.warn('[biliApi] Cookie set failed:', e)
         }
       }
       return {
@@ -151,7 +95,8 @@ export function registerBiliApiHandlers() {
     let data: any
     try {
       data = JSON.parse(text)
-    } catch {
+    } catch (e) {
+      console.warn('[biliApi] QR poll JSON parse failed:', e)
       return { code: -1, status: -1, message: 'unknown', url: '' }
     }
 
@@ -188,32 +133,6 @@ export function registerBiliApiHandlers() {
     await session.defaultSession.cookies.remove(BILI_API, 'DedeUserID__ckMd5')
     return { success: true }
   })
-}
-
-// ===== BiliBili API Fetch Helper =====
-
-async function fetchBiliApi(urlPath: string): Promise<any> {
-  const url = `${BILI_API}${urlPath}`
-  // 从 session 中获取 Cookie，确保 API 请求携带登录态
-  const cookies = await session.defaultSession.cookies.get({ url: BILI_API })
-  const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ')
-
-  const headers: Record<string, string> = {
-    Referer: BILI_REFERER,
-    Origin: 'https://www.bilibili.com',
-  }
-  if (cookieHeader) {
-    headers['Cookie'] = cookieHeader
-  }
-
-  const response = await net.fetch(url, { headers })
-  const data = await response.json()
-
-  if (data.code !== 0) {
-    throw { code: data.code, message: data.message, path: urlPath }
-  }
-
-  return data.data
 }
 
 // ===== Cookie 解析辅助 =====

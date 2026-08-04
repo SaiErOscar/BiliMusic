@@ -18,9 +18,11 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ])
 
-// Chrome MCP 远程调试（开发时使用）
-app.commandLine.appendSwitch('remote-debugging-port', '17689')
-app.commandLine.appendSwitch('remote-allow-origins', '*')
+// Chrome MCP 远程调试（仅开发环境启用，生产环境关闭以防远程代码执行攻击）
+if (process.env.VITE_DEV_SERVER_URL) {
+  app.commandLine.appendSwitch('remote-debugging-port', '17689')
+  app.commandLine.appendSwitch('remote-allow-origins', '*')
+}
 
 // B站请求头处理
 //
@@ -342,7 +344,7 @@ function getTrayHtml() {
     </div>
   </div>
   <script>
-    const { ipcRenderer } = require('electron')
+    const { onState, getState, sendCommand } = window.trayAPI
     const $ = (id) => document.getElementById(id)
     let state = { hasTrack: false, title: '未在播放', artist: '搜索并播放音乐', coverUrl: '', isPlaying: false, queueLength: 0, theme: 'dark' }
     function render(next) {
@@ -365,13 +367,13 @@ function getTrayHtml() {
         $('fallback').style.display = 'block'
       }
     }
-    ipcRenderer.on('tray:state', (_event, next) => render(next))
-    ipcRenderer.invoke('tray:get-state').then(render)
-    $('prev').onclick = () => ipcRenderer.send('tray:command', 'prev')
-    $('play').onclick = () => ipcRenderer.send('tray:command', 'toggle-play')
-    $('next').onclick = () => ipcRenderer.send('tray:command', 'next')
-    $('show').onclick = () => ipcRenderer.send('tray:command', 'show-window')
-    $('quit').onclick = () => ipcRenderer.send('tray:command', 'quit')
+    onState((next) => render(next))
+    getState().then(render)
+    $('prev').onclick = () => sendCommand('prev')
+    $('play').onclick = () => sendCommand('toggle-play')
+    $('next').onclick = () => sendCommand('next')
+    $('show').onclick = () => sendCommand('show-window')
+    $('quit').onclick = () => sendCommand('quit')
   </script>
 </body>
 </html>`
@@ -394,8 +396,11 @@ function createTrayWindow() {
     opacity: 0,
     paintWhenInitiallyHidden: true,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: process.env.VITE_DEV_SERVER_URL
+        ? path.join(__dirname, '../electron/tray-preload.cjs')
+        : path.join(__dirname, 'tray-preload.cjs'),
     },
   })
   trayWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getTrayHtml())}`)

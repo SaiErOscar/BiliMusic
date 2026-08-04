@@ -38,7 +38,8 @@ async function fetchJson(url: string): Promise<any | null> {
     const resp = await net.fetch(url, { signal: ctrl.signal })
     if (!resp.ok) return null
     return await resp.json()
-  } catch {
+  } catch (e) {
+    console.warn("[lyricsApi] fetchJson failed:", url, e)
     return null
   } finally {
     clearTimeout(timer)

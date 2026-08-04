@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useMemo, useRef, useEffect, type ReactNode } from 'react'
 import type { Track, RepeatMode } from '@/types'
 import { extractAudio } from '@/services/api'
+import { clearAudioUrlCache, type AudioQualityPreference } from '@/services/bilibiliApi'
 import { addRecentTrack, toggleFavoriteTrack, loadFavoriteTracks } from '@/utils/storage'
 import { useAppSettings } from '@/hooks/useAppSettings'
 
@@ -138,6 +139,11 @@ function clearMediaSessionActions(actions: MediaSessionAction[]): void {
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const { settings } = useAppSettings()
+
+  // 将设置页的中文质量标签映射为 API 参数
+  const qualityPref: AudioQualityPreference =
+    settings.playQuality === '标准' ? 'standard' :
+    settings.playQuality === '高品质' ? 'high' : 'lossless'
   const restoredRef = useRef(loadPersistedPlayerState())
   const [currentTrack, setCurrentTrack] = useState<Track | null>(() => restoredRef.current.currentTrack)
   const [isPlaying, setIsPlaying] = useState(() => Boolean(restoredRef.current.currentTrack && restoredRef.current.wasPlaying))
@@ -268,7 +274,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         const fallback = currentTrack!.aid && currentTrack!.cid
           ? { aid: currentTrack!.aid, cid: currentTrack!.cid }
           : undefined
-        const source = await extractAudio(currentTrack!.bvid || currentTrack!.id, fallback)
+        const source = await extractAudio(currentTrack!.bvid || currentTrack!.id, fallback, qualityPref)
         if (cancelled) return
         const targetProgress = progress > 0 ? progress : 0
         audio.src = source.audioUrl
@@ -290,8 +296,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         addRecentTrack({ ...currentTrack!, coverUrl: source.coverUrl || currentTrack!.coverUrl })
       } catch {
         if (!cancelled) {
-          // 降级：直接用原始信息触发 play（无音频源，标记为不可播放）
-          setIsPlaying(false)
+          // 音频 URL 可能已过期，清除缓存后重试一次
+          clearAudioUrlCache()
+          try {
+            const fallback = currentTrack!.aid && currentTrack!.cid
+              ? { aid: currentTrack!.aid, cid: currentTrack!.cid }
+              : undefined
+            const source = await extractAudio(currentTrack!.bvid || currentTrack!.id, fallback, qualityPref)
+            if (cancelled) return
+            audio.src = source.audioUrl
+            if (shouldAutoplayRef.current) {
+              await audio.play()
+              setIsPlaying(true)
+            }
+            setDuration(source.duration || audio.duration || 0)
+            if (source.coverUrl) {
+              setCurrentTrack(prev => prev ? { ...prev, coverUrl: source.coverUrl } : null)
+            }
+            addRecentTrack({ ...currentTrack!, coverUrl: source.coverUrl || currentTrack!.coverUrl })
+          } catch {
+            if (!cancelled) setIsPlaying(false)
+          }
         }
       } finally {
         if (!cancelled) setLoadingAudio(false)
@@ -522,12 +547,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     currentIndexRef.current = index >= 0 ? index : 0
   }, [currentTrack?.id, isShuffled, queue])
 
+  // 主状态持久化：排除 progress，避免每秒 4 次 timeupdate 触发序列化
   useEffect(() => {
     try {
       const state: PersistedPlayerState = {
         currentTrack,
         queue,
-        progress,
+        progress: progressRef.current,
         duration,
         volume,
         isMuted,
@@ -540,7 +566,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore persistence failures
     }
-  }, [currentTrack, duration, isMuted, isPlaying, isShuffled, progress, queue, repeatMode, volume])
+  }, [currentTrack, duration, isMuted, isPlaying, isShuffled, queue, repeatMode, volume])
+
+  // 进度持久化：低频定时器（5 秒）更新 localStorage，避免高频写入
+  useEffect(() => {
+    if (!currentTrack) return
+    const timer = setInterval(() => {
+      try {
+        const raw = localStorage.getItem(PLAYER_STATE_KEY)
+        const parsed = raw ? JSON.parse(raw) : {}
+        parsed.progress = progressRef.current
+        parsed.duration = durationRef.current
+        parsed.wasPlaying = isPlaying
+        localStorage.setItem(PLAYER_STATE_KEY, JSON.stringify(parsed))
+      } catch {
+        // ignore
+      }
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [currentTrack, isPlaying])
 
   useEffect(() => {
     const pushTrayState = () => window.electronAPI?.updateTrayPlayerState?.({
