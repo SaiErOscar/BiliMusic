@@ -44,7 +44,9 @@ export function registerBiliApiHandlers() {
     const data = await response.json()
 
     if (data.code !== 0) {
-      throw { code: data.code, message: data.message }
+      const err = new Error(`Bilibili API Error [${data.code}]: ${data.message}`)
+      ;(err as any).code = data.code
+      throw err
     }
 
     return {
@@ -77,8 +79,8 @@ export function registerBiliApiHandlers() {
             secure: true,
             httpOnly: true,
           })
-        } catch {
-          // Cookie 设置失败不应阻断登录流程
+        } catch (e) {
+          console.warn('[biliApi] Cookie set failed:', e)
         }
       }
       return {
@@ -93,7 +95,8 @@ export function registerBiliApiHandlers() {
     let data: any
     try {
       data = JSON.parse(text)
-    } catch {
+    } catch (e) {
+      console.warn('[biliApi] QR poll JSON parse failed:', e)
       return { code: -1, status: -1, message: 'unknown', url: '' }
     }
 
