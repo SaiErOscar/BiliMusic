@@ -522,12 +522,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     currentIndexRef.current = index >= 0 ? index : 0
   }, [currentTrack?.id, isShuffled, queue])
 
+  // 主状态持久化：排除 progress，避免每秒 4 次 timeupdate 触发序列化
   useEffect(() => {
     try {
       const state: PersistedPlayerState = {
         currentTrack,
         queue,
-        progress,
+        progress: progressRef.current,
         duration,
         volume,
         isMuted,
@@ -540,7 +541,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore persistence failures
     }
-  }, [currentTrack, duration, isMuted, isPlaying, isShuffled, progress, queue, repeatMode, volume])
+  }, [currentTrack, duration, isMuted, isPlaying, isShuffled, queue, repeatMode, volume])
+
+  // 进度持久化：低频定时器（5 秒）更新 localStorage，避免高频写入
+  useEffect(() => {
+    if (!currentTrack) return
+    const timer = setInterval(() => {
+      try {
+        const raw = localStorage.getItem(PLAYER_STATE_KEY)
+        const parsed = raw ? JSON.parse(raw) : {}
+        parsed.progress = progressRef.current
+        parsed.duration = durationRef.current
+        parsed.wasPlaying = isPlaying
+        localStorage.setItem(PLAYER_STATE_KEY, JSON.stringify(parsed))
+      } catch {
+        // ignore
+      }
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [currentTrack, isPlaying])
 
   useEffect(() => {
     const pushTrayState = () => window.electronAPI?.updateTrayPlayerState?.({
