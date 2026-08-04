@@ -16,7 +16,9 @@
     "electron:build": "npm run build && electron-builder",
     "harmony:prepare": "npm run build && node scripts/prepare-harmony.mjs",
     "harmony:build": "npm run harmony:prepare && node scripts/build-harmony.mjs",
-    "build:ota": "npm run build && node scripts/build-ota.mjs"
+    "build:ota": "npm run build && node scripts/build-ota.mjs",
+    "lint": "eslint src/ electron/ --ext .ts,.tsx,.cjs",
+    "lint:fix": "eslint src/ electron/ --ext .ts,.tsx,.cjs --fix"
   },
   "dependencies": {
     "electron-updater": "^6.3.9",
@@ -41,7 +43,11 @@
     "vite": "^6.3.0",
     "vite-plugin-electron": "^0.29.1",
     "vite-plugin-electron-renderer": "^0.14.7",
-    "wait-on": "^8.0.0"
+    "wait-on": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "eslint-plugin-react-hooks": "^5.0.0"
   },
   "build": {
     "appId": "com.hanversion.bilimusic",
