@@ -463,13 +463,55 @@ export async function getPlayUrl(
  * 30250: 杜比全景声
  * 30251: Hi-Res 无损 FLAC
  */
-export function getBestAudioUrl(playData: PlayUrlData): string {
+export type AudioQualityPreference = 'standard' | 'high' | 'lossless'
+
+// B站音频流 ID 对照
+const AUDIO_QUALITY_IDS: Record<AudioQualityPreference, number[]> = {
+  standard: [30216],           // 64kbps MP3
+  high: [30232, 30280],        // 132kbps AAC 或 192kbps AAC
+  lossless: [30251, 30250, 30280, 30232, 30216], // Hi-Res -> 杜比 -> 高品质 -> 标准
+}
+
+export function getBestAudioUrl(playData: PlayUrlData, preference: AudioQualityPreference = 'lossless'): string {
   const audioStreams = playData.dash.audio
   if (!audioStreams?.length) throw new Error('No audio stream available')
 
-  // 按带宽降序排序，选择最高品质
+  const preferredIds = AUDIO_QUALITY_IDS[preference]
+  // 在偏好质量列表中找第一个可用的流
+  for (const id of preferredIds) {
+    const stream = audioStreams.find(s => s.id === id)
+    if (stream) return stream.baseUrl
+  }
+  // 回退：按带宽降序选最高品质
   const sorted = [...audioStreams].sort((a, b) => b.bandwidth - a.bandwidth)
   return sorted[0].baseUrl
+}
+
+// ===== 音频 URL 缓存（TTL 30 分钟）=====
+// B站音频 URL 有有效期，缓存可避免重复播放时重新请求
+interface CachedAudioSource {
+  source: TrackSource
+  ts: number
+}
+const audioUrlCache = new Map<string, CachedAudioSource>()
+const AUDIO_URL_TTL = 30 * 60 * 1000
+
+export function getCachedAudioSource(bvid: string): TrackSource | null {
+  const cached = audioUrlCache.get(bvid)
+  if (!cached) return null
+  if (Date.now() - cached.ts > AUDIO_URL_TTL) {
+    audioUrlCache.delete(bvid)
+    return null
+  }
+  return cached.source
+}
+
+export function cacheAudioSource(bvid: string, source: TrackSource): void {
+  audioUrlCache.set(bvid, { source, ts: Date.now() })
+}
+
+export function clearAudioUrlCache(): void {
+  audioUrlCache.clear()
 }
 
 // ===== 热门/推荐 =====
@@ -609,15 +651,20 @@ export async function extractAudioFromSearch(
 export async function extractAudioFromVideo(
   bvid: string,
   fallback?: { aid?: string | number; cid?: string | number },
+  quality: AudioQualityPreference = 'lossless',
 ): Promise<TrackSource> {
+  // 缓存命中时直接返回，避免重复请求
+  const cached = getCachedAudioSource(bvid)
+  if (cached) return cached
+
   try {
     const detail = await getVideoDetail(bvid)
     const playData = await getPlayUrl(bvid, detail.cid)
-    const audioUrl = getBestAudioUrl(playData)
+    const audioUrl = getBestAudioUrl(playData, quality)
 
     const bestAudio = [...playData.dash.audio].sort((a, b) => b.bandwidth - a.bandwidth)[0]
 
-    return {
+    const source: TrackSource = {
       bvid: detail.bvid,
       aid: detail.aid,
       cid: detail.cid,
@@ -629,6 +676,8 @@ export async function extractAudioFromVideo(
       audioQuality: bestAudio.quality,
       audioMimeType: bestAudio.mimeType,
     }
+    cacheAudioSource(bvid, source)
+    return source
   } catch (e) {
     if (fallback?.aid && fallback?.cid) {
       return extractAudioByAvidCid(fallback.aid, fallback.cid, bvid)

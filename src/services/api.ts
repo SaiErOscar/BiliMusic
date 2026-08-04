@@ -146,9 +146,10 @@ export async function getVideoComments(
 export async function extractAudio(
   bvid: string,
   fallback?: { aid?: string | number; cid?: string | number },
+  quality?: import('@/services/bilibiliApi').AudioQualityPreference,
 ): Promise<TrackSource> {
   const { extractAudioFromVideo } = await import('@/services/bilibiliApi')
-  return extractAudioFromVideo(bvid, fallback)
+  return extractAudioFromVideo(bvid, fallback, quality)
 }
 
 // ===== 下载音频 =====
