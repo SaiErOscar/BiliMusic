@@ -201,7 +201,7 @@ function bigrams(s: string): Set<string> {
   return set
 }
 
-function dice(a: string, b: string): number {
+export function dice(a: string, b: string): number {
   const na = norm(a)
   const nb = norm(b)
   if (!na || !nb) return 0

@@ -14,6 +14,16 @@ const biliApi = {
   // 打开下载目录
   openDownloadDir: (dirPath) =>
     ipcRenderer.invoke('bili:openDownloadDir', dirPath),
+  // 获取系统默认下载目录
+  getDefaultDownloadDir: () =>
+    ipcRenderer.invoke('bili:getDefaultDownloadDir'),
+
+  // 下载进度回调
+  onDownloadProgress: (callback) => {
+    const listener = (_event, data) => callback(data)
+    ipcRenderer.on('bili:download-progress', listener)
+    return () => ipcRenderer.removeListener('bili:download-progress', listener)
+  },
 
   // 扫码登录
   qrGenerate: () =>
@@ -40,9 +50,9 @@ const lyricsApi = {
 }
 
 const persistentStorage = {
-  getItem: (key) => ipcRenderer.sendSync('persistent-storage:get', key),
-  setItem: (key, value) => ipcRenderer.send('persistent-storage:set', key, value),
-  removeItem: (key) => ipcRenderer.send('persistent-storage:remove', key),
+  getItem: (key) => ipcRenderer.invoke('persistent-storage:get', key),
+  setItem: (key, value) => ipcRenderer.invoke('persistent-storage:set', key, value),
+  removeItem: (key) => ipcRenderer.invoke('persistent-storage:remove', key),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {

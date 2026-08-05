@@ -97,9 +97,40 @@ export function registerBiliApiHandlers() {
       headers: { Referer: BILI_REFERER },
     })
     if (!response.ok) throw new Error(`下载失败: HTTP ${response.status}`)
-    const buffer = Buffer.from(await response.arrayBuffer())
-    await fs.writeFile(filePath, buffer)
-    return { filePath, size: buffer.length }
+
+    // 流式写入：避免大文件一次性加载到内存
+    const total = Number(response.headers.get('content-length') || 0)
+    const reader = response.body?.getReader()
+    if (!reader) {
+      // 回退：不支持流式读取时仍用整体缓冲
+      const buffer = Buffer.from(await response.arrayBuffer())
+      await fs.writeFile(filePath, buffer)
+      return { filePath, size: buffer.length }
+    }
+
+    const fileHandle = await fs.open(filePath, 'w')
+    let received = 0
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (value) {
+          await fileHandle.write(value)
+          received += value.length
+          if (total > 0) {
+            _event.sender.send('bili:download-progress', {
+              filename: safeName,
+              received,
+              total,
+              percent: Math.round((received / total) * 100),
+            })
+          }
+        }
+      }
+    } finally {
+      await fileHandle.close()
+    }
+    return { filePath, size: received }
   })
 
   // 下载视频（合并画面+声音）到本地
@@ -181,6 +212,11 @@ export function registerBiliApiHandlers() {
     const target = dirPath || path.join(app.getPath('userData'), 'downloads')
     await shell.openPath(target)
     return { success: true }
+  })
+
+  // 返回系统默认音乐目录，供渲染层作为下载路径初始值
+  ipcMain.handle('bili:getDefaultDownloadDir', async () => {
+    return path.join(app.getPath('music'), 'BiliMusic')
   })
 
   // ===== 扫码登录 =====

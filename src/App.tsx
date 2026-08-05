@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import ErrorBoundary from '@/components/ErrorBoundary'
 import { Routes, Route } from 'react-router-dom'
 import { useAutoSync } from '@/hooks/useAutoSync'
 import { PlayerProvider } from '@/contexts/PlayerContext'
@@ -41,7 +42,8 @@ export default function App() {
   useAutoSync()
 
   return (
-    <AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
       <PlayerProvider>
         <NowPlayingProvider>
           <AddToPlaylistProvider>
@@ -65,5 +67,6 @@ export default function App() {
         </NowPlayingProvider>
       </PlayerProvider>
     </AuthProvider>
+    </ErrorBoundary>
   )
 }

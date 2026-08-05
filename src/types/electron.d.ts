@@ -8,6 +8,8 @@ interface BiliApi {
     size: number
   }>
   openDownloadDir: (dirPath?: string) => Promise<{ success: boolean }>
+  getDefaultDownloadDir: () => Promise<string>
+  onDownloadProgress: (callback: (data: { filename: string; received: number; total: number; percent: number }) => void) => () => void
   qrGenerate: () => Promise<{
     url: string
     qrcodeKey: string
@@ -51,10 +53,15 @@ interface LyricsApi {
 }
 
 interface PersistentStorageApi {
-  getItem: (key: string) => string | null
-  setItem: (key: string, value: string) => void
-  removeItem: (key: string) => void
+  getItem: (key: string) => Promise<string | null>
+  setItem: (key: string, value: string) => Promise<void>
+  removeItem: (key: string) => Promise<void>
 }
+
+
+
+
+
 
 export interface TrayPlayerState {
   hasTrack: boolean

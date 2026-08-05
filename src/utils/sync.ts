@@ -53,7 +53,7 @@ function setLastSync(at: string): void {
 }
 
 // 墓碑合并：同 id 取较晚的 deletedAt
-function mergeTombstones(a: Tombstone[], b: Tombstone[]): Tombstone[] {
+export function mergeTombstones(a: Tombstone[], b: Tombstone[]): Tombstone[] {
   const map = new Map<string, string>()
   for (const t of [...a, ...b]) {
     const prev = map.get(t.id)
@@ -64,7 +64,7 @@ function mergeTombstones(a: Tombstone[], b: Tombstone[]): Tombstone[] {
 
 // 通用双向合并：按 id 取版本时间戳较新者；墓碑晚于版本则删除胜出；存活项的墓碑被剪除。
 // ISO 8601 字符串可直接字典序比较时间先后。
-function mergeItems<T>(
+export function mergeItems<T>(
   local: T[],
   remote: T[],
   localTombs: Tombstone[],

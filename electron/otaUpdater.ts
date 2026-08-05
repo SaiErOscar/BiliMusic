@@ -65,16 +65,8 @@ function writeState(): void {
   }
 }
 
-// 仅比较 x.y.z 主体，忽略 -alpha 之类后缀；a > b 返回 true
-export function semverGt(a: string, b: string): boolean {
-  const pa = a.split('-')[0].split('.').map((n) => Number(n) || 0)
-  const pb = b.split('-')[0].split('.').map((n) => Number(n) || 0)
-  for (let i = 0; i < 3; i++) {
-    if ((pa[i] || 0) > (pb[i] || 0)) return true
-    if ((pa[i] || 0) < (pb[i] || 0)) return false
-  }
-  return false
-}
+import { semverGt } from '../src/utils/semver'
+export { semverGt }
 
 // 当前生效的渲染层根：OTA asar（存在）否则包内 dist。app:// 处理器据此 join 资源路径。
 export function getActiveRendererRoot(): string {
