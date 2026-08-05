@@ -735,6 +735,9 @@ export async function dealFavorite(
     }).toString(),
   })
   const data = await resp.json()
+  if (data.code !== 0) {
+    throw new Error(`收藏失败（${data.code}）：${data.message || '未知错误'}`)
+  }
   return { code: data.code, message: data.message }
 }
 

@@ -4,6 +4,8 @@
 design-system
 dist
 dist-electron
+dist-preview
+vite.preview.config.ts
 release
 node_modules
 

@@ -4,7 +4,7 @@ import { CheckSquare, ListMusic, Music, Play, Square, Trash2, X, FolderHeart, Do
 import { usePlayer } from '@/contexts/PlayerContext'
 import AddToPlaylistButton from '@/components/AddToPlaylistButton'
 import BatchDownloadDialog from '@/components/BatchDownloadDialog'
-import { getBatchState, showBatchDialog } from '@/services/batchDownloadStore'
+import { showBatchDialog } from '@/services/batchDownloadStore'
 import {
   ActionButton,
   EmptyLibrary,
@@ -127,8 +127,9 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
 
   const handleBatchDownload = () => {
     setBatchDownloading(true)
-    // 若已有后台下载任务，恢复显示进度
-    if (getBatchState().started) showBatchDialog()
+    // 确保对话框可见：首次打开时 store.visible 为 false，需手动置为 true；
+    // 已有后台任务时则恢复显示进度
+    showBatchDialog()
   }
 
   const handleDelete = () => {

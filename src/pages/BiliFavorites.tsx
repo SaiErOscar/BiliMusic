@@ -14,7 +14,7 @@ import {
 import type { Track } from '@/types'
 import type { FavoriteFolder, FavoriteItem } from '@/services/bilibiliApi'
 import BatchDownloadDialog from '@/components/BatchDownloadDialog'
-import { getBatchState, showBatchDialog } from '@/services/batchDownloadStore'
+import { showBatchDialog } from '@/services/batchDownloadStore'
 import { createPlaylist, addTrackToPlaylist, PLAYLISTS_CHANGED_EVENT } from '@/utils/storage'
 import {
   listBiliFavoriteFolders,
@@ -162,8 +162,9 @@ export default function BiliFavorites() {
 
   const handleBatchDownload = () => {
     setBatchDownloading(true)
-    // 若已有后台下载任务，恢复显示进度
-    if (getBatchState().started) showBatchDialog()
+    // 确保对话框可见：首次打开时 store.visible 为 false，需手动置为 true；
+    // 已有后台任务时则恢复显示进度
+    showBatchDialog()
   }
 
   const handlePlayAll = () => {

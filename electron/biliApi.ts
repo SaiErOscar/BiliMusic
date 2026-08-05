@@ -559,6 +559,9 @@ export function registerBiliApiHandlers() {
   ipcMain.handle('bili:dealFavorite', async (_e, rid: number, addMediaIds: number[], delMediaIds: number[] = []) => {
     const cookies = await session.defaultSession.cookies.get({ domain: '.bilibili.com' })
     const biliJct = cookies.find((c) => c.name === 'bili_jct')?.value || ''
+    if (!biliJct) {
+      throw new Error('未检测到 B站登录态（bili_jct 为空），请重新登录后再收藏')
+    }
     const body = new URLSearchParams({
       rid: String(rid),
       type: '2',
@@ -577,6 +580,9 @@ export function registerBiliApiHandlers() {
       body,
     })
     const data = await resp.json()
+    if (data.code !== 0) {
+      throw new Error(`收藏失败（${data.code}）：${data.message || '未知错误'}`)
+    }
     return { code: data.code, message: data.message }
   })
 

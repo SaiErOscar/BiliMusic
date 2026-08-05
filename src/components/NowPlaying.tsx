@@ -345,15 +345,17 @@ export default function NowPlaying() {
                       {player.isMuted || player.volume <= 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
                     </motion.button>
                     <div className="now-playing-volume-panel">
-                      <PlayerSlider
-                        ariaLabel="音量"
-                        value={player.isMuted ? 0 : player.volume}
-                        max={100}
-                        step={5}
-                        vertical
-                        onChange={(v) => { player.setVolume(Math.round(v)); if (player.isMuted && v > 0) player.setIsMuted(false) }}
-                        variant="volume"
-                      />
+                      <div className="now-playing-volume-slider-wrap">
+                        <PlayerSlider
+                          ariaLabel="音量"
+                          value={player.isMuted ? 0 : player.volume}
+                          max={100}
+                          step={5}
+                          vertical
+                          onChange={(v) => { player.setVolume(Math.round(v)); if (player.isMuted && v > 0) player.setIsMuted(false) }}
+                          variant="volume"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
