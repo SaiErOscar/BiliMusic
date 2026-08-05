@@ -3,8 +3,9 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronDown, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat,
-  Heart, Volume2, VolumeX, Search, Music, Loader2, Maximize2, Minimize2, X, MessageCircle, ExternalLink, ThumbsUp, RefreshCw,
+  Heart, Volume2, VolumeX, Search, Music, Loader2, Maximize2, Minimize2, X, MessageCircle, ExternalLink, ThumbsUp, RefreshCw, ChevronUp, RotateCcw,
 } from 'lucide-react'
+import DownloadButton from '@/components/DownloadButton'
 import { usePlayer, usePlayerProgress } from '@/contexts/PlayerContext'
 import { useNowPlaying } from '@/contexts/NowPlayingContext'
 import { useAppSettings } from '@/hooks/useAppSettings'
@@ -367,6 +368,7 @@ export default function NowPlaying() {
                   <RoundIcon active={commentsOpen} onClick={toggleComments} title="查看评论">
                     <MessageCircle size={20} />
                   </RoundIcon>
+                  <DownloadButton variant="full" size={20} />
                 </div>
               </div>
             </motion.section>
@@ -521,7 +523,7 @@ function LyricsPanel({
   onSeek: (t: number) => void
   currentTime: number
 }) {
-  const { status, result, search, choose, retry } = lyrics
+  const { status, result, search, choose, retry, offset, adjustOffset, resetOffset } = lyrics
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<LyricCandidate[]>([])
@@ -573,6 +575,34 @@ function LyricsPanel({
           </>
         )}
       </div>
+
+      {/* 歌词底部控制栏：切换歌词 + 时间偏移调整 */}
+      {(status === 'ok' || status === 'unsynced') && (
+        <div className="lyrics-panel__controls">
+          <button type="button" className="lyrics-panel__ctrl-btn" onClick={openSearch} title="切换歌词版本">
+            <Search size={15} />
+            <span>切换歌词</span>
+          </button>
+          {status === 'ok' && (
+            <div className="lyrics-panel__offset">
+              <button type="button" onClick={() => adjustOffset(-200)} title="歌词提前 0.2s">
+                <ChevronUp size={15} />
+              </button>
+              <span title="歌词时间偏移">
+                {offset > 0 ? '+' : ''}{(offset / 1000).toFixed(1)}s
+              </span>
+              <button type="button" onClick={() => adjustOffset(200)} title="歌词延后 0.2s">
+                <ChevronDown size={15} />
+              </button>
+              {offset !== 0 && (
+                <button type="button" onClick={resetOffset} title="重置偏移">
+                  <RotateCcw size={13} />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <AnimatePresence>
         {searchOpen && (

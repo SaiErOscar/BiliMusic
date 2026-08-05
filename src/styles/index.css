@@ -4054,3 +4054,84 @@ body {
     flex-direction: column;
   }
 }
+
+
+/* ===== 歌词面板控制栏 ===== */
+.lyrics-panel__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 12px;
+}
+
+.lyrics-panel__ctrl-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  font-family: inherit;
+}
+
+.lyrics-panel__ctrl-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.lyrics-panel__offset {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+.lyrics-panel__offset button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.lyrics-panel__offset button:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.lyrics-panel__offset span {
+  min-width: 44px;
+  text-align: center;
+  padding: 0 4px;
+}
+
+/* ===== 下载菜单 ===== */
+.download-menu-item:hover {
+  background: var(--sidebar-hover) !important;
+}
+
+/* ===== spin 动画 ===== */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 0.6s linear infinite;
+}

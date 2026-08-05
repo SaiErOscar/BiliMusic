@@ -1,6 +1,7 @@
 import { ListStart, Plus, Check } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import AddToPlaylistButton from '@/components/AddToPlaylistButton'
+import DownloadButton from '@/components/DownloadButton'
 import type { Track } from '@/types'
 
 /**
@@ -30,6 +31,7 @@ export default function TrackActions({ track, size = 16 }: { track: Track; size?
         color={queued ? 'var(--color-muted)' : undefined}
       />
       <AddToPlaylistButton track={track} size={size} />
+      <DownloadButton trackId={track.id} bvid={track.bvid || track.id} aid={track.aid} cid={track.cid} title={track.title} size={size} />
     </div>
   )
 }

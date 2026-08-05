@@ -26,7 +26,7 @@ import { useAppSettings } from '@/hooks/useAppSettings'
 import { useAuth } from '@/contexts/AuthContext'
 import { createPlaylistsExport, importPlaylistsFromText } from '@/utils/storage'
 import { runSync, forceUpload, forceDownload, getLastSync, SYNC_STATE_EVENT, WEBDAV_CONFIGURED_EVENT, type SyncResult } from '@/utils/sync'
-import type { AppSettings, SidebarState, ThemeMode } from '@/types'
+import type { AppSettings, DownloadFormat, SidebarState, ThemeMode } from '@/types'
 
 export default function Settings() {
   const { mode, setMode } = useTheme()
@@ -305,6 +305,22 @@ export default function Settings() {
                 onChange={(downloadQuality) => setAppSettings({ downloadQuality: downloadQuality as AppSettings['downloadQuality'] })}
                 options={['标准', '高品质', '无损']}
               />
+            </SettingsRow>
+            <SettingsRow label="默认下载格式" description="音频仅含声音，视频含画面+声音">
+              <SegmentedControl
+                options={[
+                  { value: 'audio' as DownloadFormat, label: '音频' },
+                  { value: 'video' as DownloadFormat, label: '视频' },
+                ]}
+                value={settings.downloadFormat}
+                onChange={(downloadFormat) => setAppSettings({ downloadFormat })}
+              />
+            </SettingsRow>
+            <SettingsRow label="打开目录" description="在文件管理器中打开下载目录">
+              <button type="button" onClick={() => window.electronAPI?.biliApi?.openDownloadDir?.(settings.downloadDir)}>
+                <FolderOpen size={14} />
+                打开
+              </button>
             </SettingsRow>
           </SettingsGroup>
 

@@ -1,10 +1,58 @@
-import { ipcMain, net, app, session } from 'electron'
+import { ipcMain, net, app, session, shell } from 'electron'
 import path from 'path'
 import fs from 'fs/promises'
+import { spawn } from 'child_process'
 
 const BILI_API = 'https://api.bilibili.com'
 const BILI_PASSPORT = 'https://passport.bilibili.com'
 const BILI_REFERER = 'https://www.bilibili.com'
+
+// ffmpeg-static 提供跨平台静态 ffmpeg 二进制
+let ffmpegPath: string
+try {
+  ffmpegPath = require('ffmpeg-static') as string
+} catch {
+  ffmpegPath = 'ffmpeg' // fallback to system PATH
+}
+
+// ===== 流下载辅助 =====
+
+async function downloadStream(url: string): Promise<Buffer> {
+  const response = await net.fetch(url, {
+    headers: { Referer: BILI_REFERER },
+  })
+  if (!response.ok) throw new Error(`Download failed: ${response.status}`)
+  return Buffer.from(await response.arrayBuffer())
+}
+
+/**
+ * 用 ffmpeg 合并视频流和音频流
+ * - 视频流直接复制 (-c:v copy)，不重新编码
+ * - 音频流直接复制 (-c:a copy)
+ * B站 DASH 的 m4s 格式可直接被 ffmpeg 合并为 mp4
+ */
+function mergeWithFfmpeg(videoPath: string, audioPath: string, outputPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-i', videoPath,
+      '-i', audioPath,
+      '-c:v', 'copy',
+      '-c:a', 'copy',
+      '-y', // 覆盖已有文件
+      outputPath,
+    ]
+    const proc = spawn(ffmpegPath, args, { windowsHide: true })
+    let stderr = ''
+    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+    proc.on('error', (err: Error) => {
+      reject(new Error(`ffmpeg 启动失败: ${err.message}. 请确保 ffmpeg 可用。`))
+    })
+    proc.on('close', (code: number) => {
+      if (code === 0) resolve()
+      else reject(new Error(`ffmpeg 合并失败 (exit ${code}): ${stderr.slice(-500)}`))
+    })
+  })
+}
 
 // ===== IPC Handlers =====
 //
@@ -14,10 +62,10 @@ const BILI_REFERER = 'https://www.bilibili.com'
 
 export function registerBiliApiHandlers() {
   // 下载音频文件到本地
-  ipcMain.handle('bili:downloadAudio', async (_event, audioUrl: string, filename: string) => {
+  ipcMain.handle('bili:downloadAudio', async (_event, audioUrl: string, filename: string, customDir?: string) => {
     // 过滤文件名中的危险字符，防止路径遍历
     const safeName = filename.replace(/[..\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim()
-    const downloadDir = path.join(app.getPath('userData'), 'downloads')
+    const downloadDir = customDir || path.join(app.getPath('userData'), 'downloads')
     await fs.mkdir(downloadDir, { recursive: true })
     const filePath = path.join(downloadDir, safeName)
 
@@ -31,6 +79,55 @@ export function registerBiliApiHandlers() {
     await fs.writeFile(filePath, buffer)
 
     return { filePath, size: buffer.length }
+  })
+
+  // 下载视频（合并画面+声音）到本地
+  // 分别下载视频流和音频流，用 ffmpeg 合并为 mp4
+  ipcMain.handle('bili:downloadVideo', async (
+    _event,
+    videoUrl: string,
+    audioUrl: string,
+    filename: string,
+    customDir?: string,
+  ) => {
+    const safeName = filename.replace(/[..\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim()
+    const downloadDir = customDir || path.join(app.getPath('userData'), 'downloads')
+    await fs.mkdir(downloadDir, { recursive: true })
+    const outputPath = path.join(downloadDir, safeName.endsWith('.mp4') ? safeName : `${safeName}.mp4`)
+
+    // 临时文件用于存放原始流
+    const tmpDir = path.join(downloadDir, '.tmp')
+    await fs.mkdir(tmpDir, { recursive: true })
+    const tmpVideo = path.join(tmpDir, `${Date.now()}_video.m4s`)
+    const tmpAudio = path.join(tmpDir, `${Date.now()}_audio.m4s`)
+
+    try {
+      // 并行下载视频流和音频流
+      const [videoBuf, audioBuf] = await Promise.all([
+        downloadStream(videoUrl),
+        downloadStream(audioUrl),
+      ])
+
+      await fs.writeFile(tmpVideo, videoBuf)
+      await fs.writeFile(tmpAudio, audioBuf)
+
+      // 用 ffmpeg 合并：视频流和音频流直接复制
+      await mergeWithFfmpeg(tmpVideo, tmpAudio, outputPath)
+
+      const stat = await fs.stat(outputPath)
+      return { filePath: outputPath, size: stat.size }
+    } finally {
+      // 清理临时文件
+      await fs.rm(tmpVideo, { force: true }).catch(() => {})
+      await fs.rm(tmpAudio, { force: true }).catch(() => {})
+    }
+  })
+
+  // 打开下载目录
+  ipcMain.handle('bili:openDownloadDir', async (_event, dirPath?: string) => {
+    const target = dirPath || path.join(app.getPath('userData'), 'downloads')
+    await shell.openPath(target)
+    return { success: true }
   })
 
   // ===== 扫码登录 =====

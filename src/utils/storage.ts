@@ -15,6 +15,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   sidebarState: 'auto',
   playQuality: '高品质',
   downloadQuality: '高品质',
+  downloadFormat: 'audio',
   downloadDir: 'D:\\Music\\biliMusic',
   autoPlay: true,
   showLyrics: true,

@@ -19,6 +19,7 @@ export interface LyricResult {
   trackName: string
   artistName: string
   sourceId: string
+  offset: number // 时间偏移（毫秒），正数=歌词延后，负数=歌词提前
 }
 
 export interface LyricCandidate {
@@ -279,6 +280,7 @@ function lyricToResult(candidate: LyricCandidate, content: string): LyricResult 
     trackName: candidate.trackName,
     artistName: candidate.artistName,
     sourceId: String(candidate.songId),
+    offset: 0,
   }
 }
 
@@ -325,6 +327,53 @@ export function clearLyricCache(trackId: string): void {
   writeCache(map)
 }
 
+// ===== 歌词偏移 =====
+
+const OFFSET_KEY = 'bilimusic_lyric_offset'
+
+function readOffsetMap(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(OFFSET_KEY) || '{}')
+  } catch {
+    return {}
+  }
+}
+
+function writeOffsetMap(map: Record<string, number>): void {
+  try {
+    localStorage.setItem(OFFSET_KEY, JSON.stringify(map))
+  } catch {
+    // ignore
+  }
+}
+
+export function getLyricOffset(trackId: string): number {
+  return readOffsetMap()[trackId] || 0
+}
+
+export function setLyricOffset(trackId: string, offsetMs: number): void {
+  const map = readOffsetMap()
+  if (offsetMs === 0) {
+    delete map[trackId]
+  } else {
+    map[trackId] = offsetMs
+  }
+  writeOffsetMap(map)
+}
+
+export function applyLyricOffset(result: LyricResult, trackId: string): LyricResult {
+  const offset = getLyricOffset(trackId)
+  if (offset === 0) return result
+  return {
+    ...result,
+    offset,
+    lines: result.lines.map(line => ({
+      ...line,
+      time: line.time >= 0 ? line.time + offset / 1000 : line.time,
+    })),
+  }
+}
+
 export async function getLyricForTrack(track: Track): Promise<LyricResult | null> {
   const entry = readCache()[track.id]
   if (entry?.status === 'ok') return entry.result
@@ -338,7 +387,7 @@ export async function getLyricForTrack(track: Track): Promise<LyricResult | null
   if (!result) { cacheMiss(track.id); return null }
 
   cacheOk(track.id, result)
-  return result
+  return applyLyricOffset(result, track.id)
 }
 
 export async function searchLyricCandidates(query: string): Promise<LyricCandidate[]> {
@@ -351,5 +400,5 @@ export async function chooseLyricCandidate(trackId: string, record: LyricCandida
   const content = await oiGetLyric(record.songId)
   const result = lyricToResult(record, content)
   if (result) cacheOk(trackId, result)
-  return result
+  return result ? applyLyricOffset(result, trackId) : null
 }
