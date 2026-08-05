@@ -98,26 +98,21 @@ export default function Favorites() {
         subtitle={tracks.length ? `收藏的 ${tracks.length} 首歌曲都在这里。` : '点击歌曲旁的心形按钮收藏喜欢的音乐。'}
         image={heroImage}
         tone="red"
-        action={tracks.length > 0 && (
+        action={(
           <div style={{ display: 'flex', gap: 8 }}>
             <ActionButton tone="subtle" onClick={openSync}>
               <FolderSync size={16} />
               B站收藏同步
             </ActionButton>
-            <ActionButton onClick={handlePlayAll}>
-              <Play size={17} fill="currentColor" />
-              播放全部
-            </ActionButton>
+            {tracks.length > 0 && (
+              <ActionButton onClick={handlePlayAll}>
+                <Play size={17} fill="currentColor" />
+                播放全部
+              </ActionButton>
+            )}
           </div>
         )}
       />
-
-      {tracks.length === 0 && (
-        <ActionButton tone="subtle" onClick={openSync}>
-          <FolderSync size={16} />
-          从B站收藏夹导入
-        </ActionButton>
-      )}
 
       {tracks.length === 0 ? (
         <EmptyLibrary icon={defaultIconFor('favorites')} title="暂无收藏" subtitle="喜欢的歌曲会以更精致的列表在这里出现。" />
