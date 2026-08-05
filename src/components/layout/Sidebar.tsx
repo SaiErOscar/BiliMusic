@@ -14,7 +14,6 @@ import {
   ChevronRight,
   Plus,
   X,
-  ExternalLink,
   LogOut,
   type LucideIcon,
 } from 'lucide-react'
@@ -355,59 +354,6 @@ export default function Sidebar() {
                   gap: 2,
                 }}
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    const mid = localStorage.getItem('bili_mid')
-                    if (mid) {
-                      window.electronAPI?.openExternal(`https://space.bilibili.com/${mid}`)
-                    }
-                    setUserMenuOpen(false)
-                  }}
-                  style={{
-                    padding: '8px 12px',
-                    border: 'none',
-                    borderRadius: 8,
-                    background: 'transparent',
-                    color: 'var(--sidebar-text)',
-                    fontSize: 13,
-                    fontWeight: 500,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    fontFamily: 'inherit',
-                    textAlign: 'left',
-                  }}
-                >
-                  <User size={15} />
-                  B站个人主页
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    window.electronAPI?.openExternal('https://www.bilibili.com')
-                    setUserMenuOpen(false)
-                  }}
-                  style={{
-                    padding: '8px 12px',
-                    border: 'none',
-                    borderRadius: 8,
-                    background: 'transparent',
-                    color: 'var(--sidebar-text)',
-                    fontSize: 13,
-                    fontWeight: 500,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    fontFamily: 'inherit',
-                    textAlign: 'left',
-                  }}
-                >
-                  <ExternalLink size={15} />
-                  哔哩哔后官网
-                </button>
                 <button
                   type="button"
                   onClick={() => { logout(); setUserMenuOpen(false) }}

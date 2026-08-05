@@ -1,4 +1,9 @@
-import { ipcMain, net, app, session, shell } from 'electron'
+#!/usr/bin/env python3
+"""Rewrite biliApi.ts with ESM-compatible ffmpeg resolution and improved download logic."""
+
+import os
+
+content = r'''import { ipcMain, net, app, session, shell } from 'electron'
 import path from 'path'
 import fs from 'fs/promises'
 import fsSync from 'fs'
@@ -59,43 +64,15 @@ function sanitizeFilename(filename: string): string {
     .trim()
 }
 
-// ===== ffmpeg 辅 =====
-
-/** 运行 ffmpeg 命令，返回 Promise */
-function runFfmpeg(args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(ffmpegPath, args, { windowsHide: true })
-    let stderr = ''
-    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
-    proc.on('error', (err: Error) => {
-      reject(new Error(`ffmpeg 启动失败: ${err.message}. ffmpegPath=${ffmpegPath}`))
-    })
-    proc.on('close', (code: number) => {
-      if (code === 0) resolve()
-      else reject(new Error(`ffmpeg 失败 (exit ${code}): ${stderr.slice(-500)}`))
-    })
-  })
-}
-
-type DownloadOptions = { artist?: string; title?: string; lyricContent?: string }
-
-/** 构建元数据参数 */
-function buildMetaArgs(options?: DownloadOptions): string[] {
-  const args: string[] = []
-  if (options?.artist) args.push('-metadata', `artist=${options.artist}`)
-  if (options?.title) args.push('-metadata', `title=${options.title}`)
-  return args
-}
-
 // ===== ffmpeg 合并 =====
 /**
- * 用 ffmpeg 合并视频流和音频流（带元数据）
+ * 用 ffmpeg 合并视频流和音频流
+ * 方案：直接通过 -i 本地文件方式让 ffmpeg 合并
  */
-function mergeWithFfmpegMeta(
+function mergeWithFfmpeg(
   videoPath: string,
   audioPath: string,
   outputPath: string,
-  options?: DownloadOptions,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const args = [
@@ -103,7 +80,6 @@ function mergeWithFfmpegMeta(
       '-i', audioPath,
       '-c:v', 'copy',
       '-c:a', 'copy',
-      ...buildMetaArgs(options),
       '-y',
       outputPath,
     ]
@@ -126,12 +102,11 @@ function mergeWithFfmpegMeta(
  * 备用方案：ffmpeg 直接从 URL 拉取并合并
  * 通过 -headers 参数传入 Referer 和 User-Agent，绕过 B站 CDN 来源校验
  */
-function mergeWithFfmpegDirectUrlMeta(
+function mergeWithFfmpegDirectUrl(
   videoUrl: string,
   audioUrl: string,
   outputPath: string,
   referer: string,
-  options?: DownloadOptions,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const headers = `Referer: ${referer}\r\nUser-Agent: ${BILI_UA}\r\n`
@@ -141,7 +116,6 @@ function mergeWithFfmpegDirectUrlMeta(
       '-i', audioUrl,
       '-c:v', 'copy',
       '-c:a', 'copy',
-      ...buildMetaArgs(options),
       '-y',
       outputPath,
     ]
@@ -219,7 +193,6 @@ export function registerBiliApiHandlers() {
     audioUrl: string,
     filename: string,
     customDir?: string,
-    options?: { artist?: string; title?: string; lyricContent?: string },
   ) => {
     const safeName = sanitizeFilename(filename)
     const downloadDir = customDir || path.join(app.getPath('userData'), 'downloads')
@@ -267,38 +240,6 @@ export function registerBiliApiHandlers() {
     } finally {
       await fileHandle.close()
     }
-    // 如果有元数据，用 ffmpeg 嵌入
-    if (options?.artist || options?.title) {
-      const tmpPath = filePath + '.tmp_meta'
-      await fs.rename(filePath, tmpPath)
-      const metaArgs = [
-        '-i', tmpPath,
-        '-c:a', 'copy',
-      ]
-      if (options.artist) metaArgs.push('-metadata', `artist=${options.artist}`)
-      if (options.title) metaArgs.push('-metadata', `title=${options.title}`)
-      metaArgs.push('-y', filePath)
-      try {
-        await runFfmpeg(metaArgs)
-        await fs.rm(tmpPath, { force: true }).catch(() => {})
-      } catch (e) {
-        // 元数据嵌入失败不影响下载结果
-        console.warn('[biliApi] Failed to embed metadata:', e)
-        await fs.rename(tmpPath, filePath).catch(() => {})
-      }
-    }
-
-    // 保存歌词文件
-    if (options?.lyricContent) {
-      const lyricPath = filePath.replace(/\.[^.]+$/, '.lrc')
-      try {
-        await fs.writeFile(lyricPath, options.lyricContent, 'utf-8')
-        console.log('[biliApi] Lyric saved:', lyricPath)
-      } catch (e) {
-        console.warn('[biliApi] Failed to save lyric:', e)
-      }
-    }
-
     return { filePath, size: received }
   })
 
@@ -314,7 +255,6 @@ export function registerBiliApiHandlers() {
     audioUrl: string,
     filename: string,
     customDir?: string,
-    options?: { artist?: string; title?: string; lyricContent?: string },
   ) => {
     console.log('[biliApi] downloadVideo called, ffmpegPath:', ffmpegPath)
     console.log('[biliApi] videoUrl:', videoUrl?.substring(0, 80))
@@ -346,19 +286,8 @@ export function registerBiliApiHandlers() {
       console.log(`[biliApi] Downloaded: video=${videoSize} bytes, audio=${audioSize} bytes`)
 
       console.log('[biliApi] Merging with ffmpeg...')
-      await mergeWithFfmpegMeta(tmpVideo, tmpAudio, outputPath, options)
+      await mergeWithFfmpeg(tmpVideo, tmpAudio, outputPath)
       console.log('[biliApi] Merge complete:', outputPath)
-
-      // 保存歌词文件
-      if (options?.lyricContent) {
-        const lyricPath = outputPath.replace(/\.[^.]+$/, '.lrc')
-        try {
-          await fs.writeFile(lyricPath, options.lyricContent, 'utf-8')
-          console.log('[biliApi] Lyric saved:', lyricPath)
-        } catch (e) {
-          console.warn('[biliApi] Failed to save lyric:', e)
-        }
-      }
 
       const stat = await fs.stat(outputPath)
       return { filePath: outputPath, size: stat.size }
@@ -369,7 +298,7 @@ export function registerBiliApiHandlers() {
       // ffmpeg 可以通过 -headers 参数传入 Referer 和 User-Agent
       try {
         console.log('[biliApi] Trying fallback: ffmpeg direct URL fetch...')
-        await mergeWithFfmpegDirectUrlMeta(videoUrl, audioUrl, outputPath, BILI_REFERER, options)
+        await mergeWithFfmpegDirectUrl(videoUrl, audioUrl, outputPath, BILI_REFERER)
         const stat = await fs.stat(outputPath)
         return { filePath: outputPath, size: stat.size }
       } catch (err2) {
@@ -396,32 +325,6 @@ export function registerBiliApiHandlers() {
   // 返回系统默认音乐目录，供渲染层作为下载路径初始值
   ipcMain.handle('bili:getDefaultDownloadDir', async () => {
     return path.join(app.getPath('music'), 'BiliMusic')
-  })
-
-  // 选择下载目录（弹出系统文件夹选择对话框）
-  ipcMain.handle('bili:selectDownloadFolder', async () => {
-    const { dialog } = await import('electron')
-    const result = await dialog.showOpenDialog({
-      properties: ['openDirectory', 'createDirectory'],
-      title: '选择下载位置',
-      defaultPath: await (async () => {
-        try {
-          const dir = path.join(app.getPath('music'), 'BiliMusic')
-          await fs.mkdir(dir, { recursive: true })
-          return dir
-        } catch {
-          return app.getPath('music')
-        }
-      })(),
-    })
-    if (result.canceled || result.filePaths.length === 0) return null
-    return result.filePaths[0]
-  })
-
-  // 保存歌词文件到指定路径
-  ipcMain.handle('bili:saveLyricFile', async (_event, content: string, filePath: string) => {
-    await fs.writeFile(filePath, content, 'utf-8')
-    return { success: true, filePath }
   })
 
   // ===== 扫码登录 =====
@@ -531,3 +434,10 @@ function parseCookieValue(setCookie: string): string {
   const pair = setCookie.split(';')[0]
   return pair.split('=').slice(1).join('=').trim()
 }
+'''
+
+target = r'N:\播放器\BiliMusic\electron\biliApi.ts'
+with open(target, 'w', encoding='utf-8', newline='\r\n') as f:
+    f.write(content)
+
+print(f'Written {len(content)} bytes to {target}')

@@ -1,10 +1,10 @@
 import { useState, useCallback } from 'react'
-import { Download, Loader2, Check, Music, FileText, Edit3 } from 'lucide-react'
+import { Download, Loader2, Check, Music, FileText, Edit3, FileMusic } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { usePlayer } from '@/contexts/PlayerContext'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { downloadTrack } from '@/services/api'
-import { cleanTitle } from '@/services/lyrics'
+import { cleanTitle, getLyricForTrack, formatLrc } from '@/services/lyrics'
 import type { DownloadFormat } from '@/types'
 
 type NameMode = 'video' | 'song' | 'custom'
@@ -22,6 +22,7 @@ interface DownloadButtonProps {
 /**
  * 下载按钮：支持选择下载音频或视频
  * 文件名可选：① 视频标题 ② 过滤后的歌名 ③ 自定义输入
+ * 音频下载可同时保存歌词(.lrc)，并自动将歌手信息写入文件属性
  */
 export default function DownloadButton({
   trackId,
@@ -40,6 +41,7 @@ export default function DownloadButton({
   const [menuOpen, setMenuOpen] = useState(false)
   const [nameMode, setNameMode] = useState<NameMode>('video')
   const [customName, setCustomName] = useState('')
+  const [includeLyric, setIncludeLyric] = useState(true)
 
   const actualTrack = player.currentTrack
   const actualBvid = bvid || actualTrack?.bvid || actualTrack?.id
@@ -50,6 +52,14 @@ export default function DownloadButton({
 
   const qualityPref = settings.downloadQuality === '标准' ? 'standard' :
     settings.downloadQuality === '高品质' ? 'high' : 'lossless'
+
+  // 切换到自定义模式时，预设原视频名
+  const handleNameModeChange = useCallback((mode: NameMode) => {
+    setNameMode(mode)
+    if (mode === 'custom' && !customName) {
+      setCustomName(actualTitle)
+    }
+  }, [customName, actualTitle])
 
   const getFilename = useCallback((): string => {
     if (nameMode === 'song') {
@@ -68,6 +78,34 @@ export default function DownloadButton({
     setError('')
     setDone(false)
     try {
+      // 获取歌词和歌手信息
+      let lyricContent: string | undefined
+      let artist: string | undefined
+
+      const trackForLyric = actualTrack || {
+        id: actualId!,
+        title: actualTitle,
+        artist: '',
+        coverUrl: '',
+        duration: 0,
+        videoUrl: '',
+        bvid: actualBvid,
+        aid: actualAid,
+        cid: actualCid,
+        playCount: 0,
+        isLiked: false,
+      }
+
+      const lyricResult = await getLyricForTrack(trackForLyric)
+      if (lyricResult) {
+        if (lyricResult.artistName) {
+          artist = lyricResult.artistName
+        }
+        if (includeLyric && lyricResult.synced) {
+          lyricContent = formatLrc(lyricResult)
+        }
+      }
+
       await downloadTrack(
         actualBvid,
         { aid: actualAid, cid: actualCid },
@@ -75,6 +113,7 @@ export default function DownloadButton({
         format,
         qualityPref,
         settings.downloadDir,
+        { artist, title: getFilename(), lyricContent },
       )
       setDone(true)
       setTimeout(() => setDone(false), 2500)
@@ -84,7 +123,7 @@ export default function DownloadButton({
     } finally {
       setDownloading(false)
     }
-  }, [actualBvid, actualAid, actualCid, getFilename, qualityPref, settings.downloadDir])
+  }, [actualBvid, actualAid, actualCid, actualId, actualTrack, actualTitle, getFilename, qualityPref, settings.downloadDir, includeLyric])
 
   if (!actualBvid || !actualId) return null
 
@@ -159,7 +198,7 @@ export default function DownloadButton({
                   <button
                     key={mode}
                     type="button"
-                    onClick={() => setNameMode(mode)}
+                    onClick={() => handleNameModeChange(mode)}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -207,6 +246,36 @@ export default function DownloadButton({
                   </div>
                 )}
               </div>
+
+              {/* 分隔线 */}
+              <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 0' }} />
+
+              {/* 歌词选项 */}
+              <button
+                type="button"
+                onClick={() => setIncludeLyric(v => !v)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                  padding: '6px 10px',
+                  border: 'none',
+                  borderRadius: 8,
+                  background: 'transparent',
+                  color: 'var(--color-foreground)',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  textAlign: 'left',
+                  marginBottom: 4,
+                }}
+              >
+                <FileMusic size={13} />
+                同时下载歌词
+                {includeLyric && <Check size={12} style={{ marginLeft: 'auto' }} />}
+              </button>
 
               {/* 分隔线 */}
               <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 0' }} />

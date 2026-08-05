@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { CheckSquare, ListMusic, Music, Play, Square, Trash2, X, FolderHeart } from 'lucide-react'
+import { CheckSquare, ListMusic, Music, Play, Square, Trash2, X, FolderHeart, Download } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import AddToPlaylistButton from '@/components/AddToPlaylistButton'
+import BatchDownloadDialog from '@/components/BatchDownloadDialog'
 import {
   ActionButton,
   EmptyLibrary,
@@ -93,6 +94,7 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
   const [playlist, setPlaylist] = useState<Playlist | null>(() => getPlaylist(playlistId))
   const [editing, setEditing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const [batchDownloading, setBatchDownloading] = useState(false)
   const player = usePlayer()
   const navigate = useNavigate()
 
@@ -177,10 +179,16 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
         action={(
           <>
             {tracks.length > 0 && (
-              <button className="am-action am-action--primary" onClick={() => player.playAll(tracks)}>
-                <Play size={17} fill="currentColor" />
-                播放全部
-              </button>
+              <>
+                <button className="am-action am-action--primary" onClick={() => player.playAll(tracks)}>
+                  <Play size={17} fill="currentColor" />
+                  播放全部
+                </button>
+                <button className="am-action am-action--subtle" onClick={() => setBatchDownloading(true)}>
+                  <Download size={16} />
+                  下载全部
+                </button>
+              </>
             )}
             <button className="am-action am-action--subtle" onClick={handleDelete}>
               <Trash2 size={16} />
@@ -247,6 +255,12 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
             ))}
           </TrackList>
         </MusicSection>
+      )}
+      {batchDownloading && (
+        <BatchDownloadDialog
+          tracks={tracks}
+          onClose={() => setBatchDownloading(false)}
+        />
       )}
     </MusicPageShell>
   )

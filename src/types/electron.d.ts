@@ -1,14 +1,22 @@
+export interface DownloadOptions {
+  artist?: string
+  title?: string
+  lyricContent?: string
+}
+
 interface BiliApi {
-  downloadAudio: (audioUrl: string, filename: string, customDir?: string) => Promise<{
+  downloadAudio: (audioUrl: string, filename: string, customDir?: string, options?: DownloadOptions) => Promise<{
     filePath: string
     size: number
   }>
-  downloadVideo: (videoUrl: string, audioUrl: string, filename: string, customDir?: string) => Promise<{
+  downloadVideo: (videoUrl: string, audioUrl: string, filename: string, customDir?: string, options?: DownloadOptions) => Promise<{
     filePath: string
     size: number
   }>
   openDownloadDir: (dirPath?: string) => Promise<{ success: boolean }>
   getDefaultDownloadDir: () => Promise<string>
+  selectDownloadFolder: () => Promise<string | null>
+  saveLyricFile: (content: string, filePath: string) => Promise<{ success: boolean; filePath: string }>
   onDownloadProgress: (callback: (data: { filename: string; received: number; total: number; percent: number }) => void) => () => void
   qrGenerate: () => Promise<{
     url: string

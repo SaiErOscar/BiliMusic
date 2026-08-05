@@ -17,6 +17,12 @@ const biliApi = {
   // 获取系统默认下载目录
   getDefaultDownloadDir: () =>
     ipcRenderer.invoke('bili:getDefaultDownloadDir'),
+  // 选择下载目录
+  selectDownloadFolder: () =>
+    ipcRenderer.invoke('bili:selectDownloadFolder'),
+  // 保存歌词文件
+  saveLyricFile: (content, filePath) =>
+    ipcRenderer.invoke('bili:saveLyricFile', content, filePath),
 
   // 下载进度回调
   onDownloadProgress: (callback) => {

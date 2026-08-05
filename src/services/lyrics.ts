@@ -402,3 +402,26 @@ export async function chooseLyricCandidate(trackId: string, record: LyricCandida
   if (result) cacheOk(trackId, result)
   return result ? applyLyricOffset(result, trackId) : null
 }
+
+/**
+ * 将 LyricResult 格式化为 LRC 文本（含偏移）
+ * 用于下载歌词文件
+ */
+export function formatLrc(result: LyricResult): string {
+  const lines: string[] = []
+  if (result.trackName) lines.push(`[ti:${result.trackName}]`)
+  if (result.artistName) lines.push(`[ar:${result.artistName}]`)
+  lines.push('[al:]')
+  lines.push('[by:BiliMusic]')
+  for (const line of result.lines) {
+    if (line.time >= 0) {
+      const min = Math.floor(line.time / 60)
+      const sec = Math.floor(line.time % 60)
+      const ms = Math.floor((line.time % 1) * 1000)
+      lines.push(`[${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}.${String(ms).padStart(3, '0')}]${line.text}`)
+    } else {
+      lines.push(line.text)
+    }
+  }
+  return lines.join('\n')
+}

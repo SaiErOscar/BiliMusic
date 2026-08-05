@@ -168,17 +168,28 @@ export async function extractAudio(
 
 // ===== 下载 =====
 
-export async function downloadAudio(audioUrl: string, filename: string, customDir?: string): Promise<{ filePath: string; size: number }> {
+export async function downloadAudio(
+  audioUrl: string,
+  filename: string,
+  customDir?: string,
+  options?: { artist?: string; title?: string; lyricContent?: string },
+): Promise<{ filePath: string; size: number }> {
   if (window.electronAPI?.biliApi) {
-    return window.electronAPI.biliApi.downloadAudio(audioUrl, filename, customDir)
+    return window.electronAPI.biliApi.downloadAudio(audioUrl, filename, customDir, options)
   }
 
   throw new Error('Audio download requires Electron environment')
 }
 
-export async function downloadVideo(videoUrl: string, audioUrl: string, filename: string, customDir?: string): Promise<{ filePath: string; size: number }> {
+export async function downloadVideo(
+  videoUrl: string,
+  audioUrl: string,
+  filename: string,
+  customDir?: string,
+  options?: { artist?: string; title?: string; lyricContent?: string },
+): Promise<{ filePath: string; size: number }> {
   if (window.electronAPI?.biliApi) {
-    return window.electronAPI.biliApi.downloadVideo(videoUrl, audioUrl, filename, customDir)
+    return window.electronAPI.biliApi.downloadVideo(videoUrl, audioUrl, filename, customDir, options)
   }
 
   throw new Error('Video download requires Electron environment')
@@ -187,6 +198,19 @@ export async function downloadVideo(videoUrl: string, audioUrl: string, filename
 export async function openDownloadDir(dirPath?: string): Promise<void> {
   if (window.electronAPI?.biliApi) {
     await window.electronAPI.biliApi.openDownloadDir(dirPath)
+  }
+}
+
+export async function selectDownloadFolder(): Promise<string | null> {
+  if (window.electronAPI?.biliApi) {
+    return window.electronAPI.biliApi.selectDownloadFolder()
+  }
+  return null
+}
+
+export async function saveLyricFile(content: string, filePath: string): Promise<void> {
+  if (window.electronAPI?.biliApi) {
+    await window.electronAPI.biliApi.saveLyricFile(content, filePath)
   }
 }
 
@@ -201,6 +225,7 @@ export async function downloadTrack(
   format: 'audio' | 'video',
   quality: import('@/services/bilibiliApi').AudioQualityPreference,
   customDir?: string,
+  options?: { artist?: string; title?: string; lyricContent?: string },
 ): Promise<{ filePath: string; size: number }> {
   
   // 获取播放地址
@@ -223,10 +248,10 @@ export async function downloadTrack(
 
   if (format === 'audio') {
     const ext = audioUrl.includes('.flac') ? '.flac' : '.m4a'
-    return downloadAudio(audioUrl, `${safeTitle}${ext}`, customDir)
+    return downloadAudio(audioUrl, `${safeTitle}${ext}`, customDir, options)
   } else {
     const videoUrl = getBestVideoUrl(playData)
-    return downloadVideo(videoUrl, audioUrl, `${safeTitle}.mp4`, customDir)
+    return downloadVideo(videoUrl, audioUrl, `${safeTitle}.mp4`, customDir, options)
   }
 }
 
