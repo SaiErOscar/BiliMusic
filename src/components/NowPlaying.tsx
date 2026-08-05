@@ -3,9 +3,10 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronDown, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat,
-  Heart, Volume2, VolumeX, Search, Music, Loader2, Maximize2, Minimize2, X, MessageCircle, ExternalLink, ThumbsUp, RefreshCw, ChevronUp, RotateCcw,
+  Heart, Volume2, VolumeX, Search, Music, Loader2, Maximize2, Minimize2, X, MessageCircle, ExternalLink, ThumbsUp, RefreshCw, ChevronUp, RotateCcw, Star,
 } from 'lucide-react'
 import DownloadButton from '@/components/DownloadButton'
+import BiliFavoriteDialog from '@/components/BiliFavoriteDialog'
 import { usePlayer, usePlayerProgress } from '@/contexts/PlayerContext'
 import { useNowPlaying } from '@/contexts/NowPlayingContext'
 import { useAppSettings } from '@/hooks/useAppSettings'
@@ -37,6 +38,7 @@ export default function NowPlaying() {
   const [fullscreen, setFullscreen] = useState(false)
   const [controlsVisible, setControlsVisible] = useState(true)
   const [commentsOpen, setCommentsOpen] = useState(false)
+  const [biliFavOpen, setBiliFavOpen] = useState(false)
   const [commentsStatus, setCommentsStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [comments, setComments] = useState<VideoComment[]>([])
   const [commentsPage, setCommentsPage] = useState(1)
@@ -289,6 +291,26 @@ export default function NowPlaying() {
                 >
                   <Heart size={22} fill={track.isLiked ? 'currentColor' : 'none'} />
                 </motion.button>
+                <motion.button
+                  type="button"
+                  className="now-playing-ui"
+                  onClick={() => setBiliFavOpen(true)}
+                  whileHover={{ scale: 1.08 }}
+                  whileTap={{ scale: 0.88 }}
+                  title="收藏到B站收藏夹"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--now-playing-muted, rgba(255,255,255,0.6))',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 6,
+                  }}
+                >
+                  <Star size={20} />
+                </motion.button>
               </div>
 
               <div className="now-playing-progress now-playing-ui" style={sliderTheme}>
@@ -308,28 +330,34 @@ export default function NowPlaying() {
               </div>
 
               <div className="now-playing-controls now-playing-ui now-playing-ui--controls">
-                <div className="now-playing-volume-popover" style={sliderTheme}>
-                  <motion.button
-                    type="button"
-                    className="now-playing-volume-trigger"
-                    onClick={() => player.setIsMuted(!player.isMuted)}
-                    title={player.isMuted ? '取消静音' : '静音'}
-                    whileHover={{ scale: 1.08, y: -1 }}
-                    whileTap={{ scale: 0.9 }}
-                  >
-                    {player.isMuted || player.volume <= 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
-                  </motion.button>
-                  <div className="now-playing-volume-panel">
-                    <PlayerSlider
-                      ariaLabel="音量"
-                      value={player.isMuted ? 0 : player.volume}
-                      max={100}
-                      step={5}
-                      onChange={(v) => { player.setVolume(Math.round(v)); if (player.isMuted && v > 0) player.setIsMuted(false) }}
-                      variant="volume"
-                    />
+                {/* 左侧：下载按钮 + 音量 */}
+                <div className="now-playing-controls-left">
+                  <DownloadButton variant="full" size={20} />
+                  <div className="now-playing-volume-popover" style={sliderTheme}>
+                    <motion.button
+                      type="button"
+                      className="now-playing-volume-trigger"
+                      onClick={() => player.setIsMuted(!player.isMuted)}
+                      title={player.isMuted ? '取消静音' : '静音'}
+                      whileHover={{ scale: 1.08, y: -1 }}
+                      whileTap={{ scale: 0.9 }}
+                    >
+                      {player.isMuted || player.volume <= 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                    </motion.button>
+                    <div className="now-playing-volume-panel">
+                      <PlayerSlider
+                        ariaLabel="音量"
+                        value={player.isMuted ? 0 : player.volume}
+                        max={100}
+                        step={5}
+                        onChange={(v) => { player.setVolume(Math.round(v)); if (player.isMuted && v > 0) player.setIsMuted(false) }}
+                        variant="volume"
+                      />
+                    </div>
                   </div>
                 </div>
+
+                {/* 中间：随机 + 上一首 + 播放 + 下一首 + 循环 */}
                 <div className="now-playing-control-cluster">
                   <RoundIcon active={player.isShuffled} onClick={() => player.setIsShuffled(!player.isShuffled)} title="随机播放">
                     <Shuffle size={20} />
@@ -365,10 +393,13 @@ export default function NowPlaying() {
                       {player.repeatMode === 'one' && <span>1</span>}
                     </span>
                   </RoundIcon>
+                </div>
+
+                {/* 右侧：评论按钮 */}
+                <div className="now-playing-controls-right">
                   <RoundIcon active={commentsOpen} onClick={toggleComments} title="查看评论">
                     <MessageCircle size={20} />
                   </RoundIcon>
-                  <DownloadButton variant="full" size={20} />
                 </div>
               </div>
             </motion.section>
@@ -409,6 +440,14 @@ export default function NowPlaying() {
           </AnimatePresence>
         </motion.div>
       )}
+
+      {track && <BiliFavoriteDialog
+        open={biliFavOpen}
+        onClose={() => setBiliFavOpen(false)}
+        aid={track.aid}
+        bvid={track.bvid || track.id}
+        title={track.title}
+      />}
     </AnimatePresence>
   )
 }

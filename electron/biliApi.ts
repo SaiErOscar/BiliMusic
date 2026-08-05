@@ -8,9 +8,13 @@ const BILI_PASSPORT = 'https://passport.bilibili.com'
 const BILI_REFERER = 'https://www.bilibili.com'
 
 // ffmpeg-static 提供跨平台静态 ffmpeg 二进制
+// 打包后 ffmpeg.exe 位于 app.asar.unpacked 内，需修正路径
 let ffmpegPath: string
 try {
-  ffmpegPath = require('ffmpeg-static') as string
+  const rawPath = require('ffmpeg-static') as string
+  // 打包后 require 返回 app.asar/node_modules/... 路径，
+  // 但 asarUnpack 将二进制解压到 app.asar.unpacked/node_modules/...
+  ffmpegPath = rawPath.replace('app.asar', 'app.asar.unpacked')
 } catch {
   ffmpegPath = 'ffmpeg' // fallback to system PATH
 }
@@ -64,7 +68,7 @@ export function registerBiliApiHandlers() {
   // 下载音频文件到本地
   ipcMain.handle('bili:downloadAudio', async (_event, audioUrl: string, filename: string, customDir?: string) => {
     // 过滤文件名中的危险字符，防止路径遍历
-    const safeName = filename.replace(/[..\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim()
+    const safeName = filename.replace(/\.\./g, '_').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim()
     const downloadDir = customDir || path.join(app.getPath('userData'), 'downloads')
     await fs.mkdir(downloadDir, { recursive: true })
     const filePath = path.join(downloadDir, safeName)
@@ -90,7 +94,7 @@ export function registerBiliApiHandlers() {
     filename: string,
     customDir?: string,
   ) => {
-    const safeName = filename.replace(/[..\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim()
+    const safeName = filename.replace(/\.\./g, '_').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim()
     const downloadDir = customDir || path.join(app.getPath('userData'), 'downloads')
     await fs.mkdir(downloadDir, { recursive: true })
     const outputPath = path.join(downloadDir, safeName.endsWith('.mp4') ? safeName : `${safeName}.mp4`)

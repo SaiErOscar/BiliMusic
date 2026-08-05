@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Plus,
   X,
+  LogOut,
   type LucideIcon,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -59,11 +60,12 @@ const spring = {
 } as const
 
 export default function Sidebar() {
-  const { isLoggedIn, username, avatar, setShowLogin } = useAuth()
+  const { isLoggedIn, username, avatar, setShowLogin, logout } = useAuth()
   const { settings } = useAppSettings()
   const navigate = useNavigate()
   const [playlists, setPlaylists] = useState<Playlist[]>(() => loadPlaylists())
   const [creating, setCreating] = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [isNarrow, setIsNarrow] = useState(() => window.innerWidth < 1100)
   const collapsed = settings.sidebarState === 'collapsed' || (settings.sidebarState === 'auto' && isNarrow)
 
@@ -210,15 +212,15 @@ export default function Sidebar() {
       >
         <SidebarLink item={{ icon: Settings, label: '设置', path: '/settings' }} compact collapsed={collapsed} />
 
+        <div style={{ position: 'relative', marginTop: 6 }}>
         <motion.button
           type="button"
-          onClick={() => !isLoggedIn && setShowLogin(true)}
+          onClick={() => isLoggedIn ? setUserMenuOpen(o => !o) : setShowLogin(true)}
           whileHover={{ backgroundColor: 'var(--sidebar-hover)' }}
-          whileTap={{ scale: isLoggedIn ? 1 : 0.985 }}
+          whileTap={{ scale: 0.985 }}
           transition={{ duration: 0.18 }}
           style={{
             width: '100%',
-            marginTop: 6,
             padding: 8,
             border: 'none',
             borderRadius: 13,
@@ -228,7 +230,7 @@ export default function Sidebar() {
             alignItems: 'center',
             justifyContent: collapsed ? 'center' : 'flex-start',
             gap: 10,
-            cursor: isLoggedIn ? 'default' : 'pointer',
+            cursor: 'pointer',
             textAlign: 'left',
             fontFamily: 'inherit',
           }}
@@ -312,6 +314,110 @@ export default function Sidebar() {
             }}
           />}
         </motion.button>
+
+        {/* 用户二级菜单 */}
+        <AnimatePresence>
+          {userMenuOpen && isLoggedIn && (
+            <>
+              <div
+                style={{ position: 'fixed', inset: 0, zIndex: 99 }}
+                onClick={() => setUserMenuOpen(false)}
+              />
+              <motion.div
+                initial={{ opacity: 0, y: 6, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, scale: 0.96 }}
+                transition={{ duration: 0.15 }}
+                style={{
+                  position: 'absolute',
+                  bottom: '100%',
+                  left: 0,
+                  right: 0,
+                  marginBottom: 4,
+                  padding: '6px',
+                  borderRadius: 12,
+                  background: 'var(--glass-bg-heavy)',
+                  backdropFilter: 'blur(20px)',
+                  WebkitBackdropFilter: 'blur(20px)',
+                  border: '1px solid var(--glass-border)',
+                  boxShadow: 'var(--shadow-lg)',
+                  zIndex: 100,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => { navigate('/favorites'); setUserMenuOpen(false) }}
+                  style={{
+                    padding: '8px 12px',
+                    border: 'none',
+                    borderRadius: 8,
+                    background: 'transparent',
+                    color: 'var(--sidebar-text)',
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    fontFamily: 'inherit',
+                    textAlign: 'left',
+                  }}
+                >
+                  <Heart size={15} />
+                  我喜欢
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { navigate('/settings'); setUserMenuOpen(false) }}
+                  style={{
+                    padding: '8px 12px',
+                    border: 'none',
+                    borderRadius: 8,
+                    background: 'transparent',
+                    color: 'var(--sidebar-text)',
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    fontFamily: 'inherit',
+                    textAlign: 'left',
+                  }}
+                >
+                  <Settings size={15} />
+                  设置
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { logout(); setUserMenuOpen(false) }}
+                  style={{
+                    padding: '8px 12px',
+                    border: 'none',
+                    borderRadius: 8,
+                    background: 'transparent',
+                    color: '#ff375f',
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    fontFamily: 'inherit',
+                    textAlign: 'left',
+                  }}
+                >
+                  <LogOut size={15} />
+                  退出登录
+                </button>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+        </div>
       </div>
       </motion.nav>
 
