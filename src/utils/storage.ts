@@ -43,6 +43,10 @@ export function addRecentTrack(track: Track) {
   const recent = loadRecentTracks().filter(t => t.id !== track.id)
   recent.unshift({ ...track, isLiked: track.isLiked })
   saveRecentTracks(recent)
+  // 通知最近播放页面实时刷新
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('bilimusic:recent-changed'))
+  }
 }
 
 export function loadFavoriteTracks(): Track[] {

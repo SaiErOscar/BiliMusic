@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Clock, Play, Trash2 } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import { loadRecentTracks, saveRecentTracks } from '@/utils/storage'
@@ -17,6 +17,17 @@ import type { Track } from '@/types'
 export default function Recent() {
   const [tracks, setTracks] = useState<Track[]>(() => loadRecentTracks())
   const player = usePlayer()
+
+  // 监听播放记录变化（跨页面同步）
+  useEffect(() => {
+    const sync = () => setTracks(loadRecentTracks())
+    window.addEventListener('storage', sync)
+    window.addEventListener('bilimusic:recent-changed', sync)
+    return () => {
+      window.removeEventListener('storage', sync)
+      window.removeEventListener('bilimusic:recent-changed', sync)
+    }
+  }, [])
 
   const handleClear = useCallback(() => {
     saveRecentTracks([])

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createContext, useContext } from 'react'
 import type { Track, RepeatMode } from '@/types'
 import { useAppSettings } from '@/hooks/useAppSettings'
-import { toggleFavoriteTrack, loadFavoriteTracks } from '@/utils/storage'
+import { toggleFavoriteTrack, loadFavoriteTracks, addRecentTrack } from '@/utils/storage'
 
 function shuffleArray<T>(arr: T[]): T[] {
   const result = [...arr]
@@ -280,6 +280,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     audio.addEventListener('ended', handleTrackEnd)
     return () => audio.removeEventListener('ended', handleTrackEnd)
   }, [handleTrackEnd])
+
+  // 当 currentTrack 变化时记录最近播放（去重）
+  useEffect(() => {
+    if (currentTrack) addRecentTrack(currentTrack)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTrack?.id])
 
   // 当 currentTrack 变化时加载并播放音频
   useEffect(() => {
