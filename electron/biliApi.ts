@@ -14,8 +14,19 @@ try {
   const rawPath = require('ffmpeg-static') as string
   // 打包后 require 返回 app.asar/node_modules/... 路径，
   // 但 asarUnpack 将二进制解压到 app.asar.unpacked/node_modules/...
-  ffmpegPath = rawPath.replace('app.asar', 'app.asar.unpacked')
-} catch {
+  const fixedPath = rawPath.includes('app.asar')
+    ? rawPath.replace('app.asar', 'app.asar.unpacked')
+    : rawPath
+  // 验证文件是否存在（同步 fs）
+  const fsSync = require('fs')
+  if (fsSync.existsSync(fixedPath)) {
+    ffmpegPath = fixedPath
+  } else {
+    console.warn('[biliApi] ffmpeg not found at:', fixedPath, ', falling back to system PATH')
+    ffmpegPath = 'ffmpeg'
+  }
+} catch (e) {
+  console.warn('[biliApi] ffmpeg-static require failed:', e)
   ffmpegPath = 'ffmpeg' // fallback to system PATH
 }
 

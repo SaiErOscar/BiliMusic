@@ -5,6 +5,7 @@ import {
   Compass,
   Clock,
   Heart,
+  FolderHeart,
   ListMusic,
   Download,
   Settings,
@@ -13,6 +14,7 @@ import {
   ChevronRight,
   Plus,
   X,
+  ExternalLink,
   LogOut,
   type LucideIcon,
 } from 'lucide-react'
@@ -42,6 +44,12 @@ const menuGroups: Array<{ title: string; items: NavItem[] }> = [
       { icon: Clock, label: '最近播放', path: '/recent' },
       { icon: Heart, label: '我喜欢', path: '/favorites' },
       { icon: Download, label: '本地下载', path: '/downloads' },
+    ],
+  },
+  {
+    title: '收藏夹',
+    items: [
+      { icon: FolderHeart, label: 'B站收藏夹', path: '/bili-favorites' },
     ],
   },
   {
@@ -349,7 +357,13 @@ export default function Sidebar() {
               >
                 <button
                   type="button"
-                  onClick={() => { navigate('/favorites'); setUserMenuOpen(false) }}
+                  onClick={() => {
+                    const mid = localStorage.getItem('bili_mid')
+                    if (mid) {
+                      window.electronAPI?.openExternal(`https://space.bilibili.com/${mid}`)
+                    }
+                    setUserMenuOpen(false)
+                  }}
                   style={{
                     padding: '8px 12px',
                     border: 'none',
@@ -366,12 +380,15 @@ export default function Sidebar() {
                     textAlign: 'left',
                   }}
                 >
-                  <Heart size={15} />
-                  我喜欢
+                  <User size={15} />
+                  B站个人主页
                 </button>
                 <button
                   type="button"
-                  onClick={() => { navigate('/settings'); setUserMenuOpen(false) }}
+                  onClick={() => {
+                    window.electronAPI?.openExternal('https://www.bilibili.com')
+                    setUserMenuOpen(false)
+                  }}
                   style={{
                     padding: '8px 12px',
                     border: 'none',
@@ -388,8 +405,8 @@ export default function Sidebar() {
                     textAlign: 'left',
                   }}
                 >
-                  <Settings size={15} />
-                  设置
+                  <ExternalLink size={15} />
+                  哔哩哔后官网
                 </button>
                 <button
                   type="button"

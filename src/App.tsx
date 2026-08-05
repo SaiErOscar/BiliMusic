@@ -14,6 +14,7 @@ import Recent from '@/pages/Recent'
 import Favorites from '@/pages/Favorites'
 import Playlists from '@/pages/Playlists'
 import Downloads from '@/pages/Downloads'
+import BiliFavorites from '@/pages/BiliFavorites'
 import Settings from '@/pages/Settings'
 
 function GlobalLoginDialog() {
@@ -55,6 +56,7 @@ export default function App() {
                 <Route path="/playlists" element={<Playlists />} />
                 <Route path="/playlists/:playlistId" element={<Playlists />} />
                 <Route path="/downloads" element={<Downloads />} />
+                <Route path="/bili-favorites" element={<BiliFavorites />} />
                 <Route path="/settings" element={<Settings />} />
               </Route>
             </Routes>

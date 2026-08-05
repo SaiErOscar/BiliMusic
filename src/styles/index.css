@@ -2017,13 +2017,7 @@ body {
     transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.now-playing-controls:has(.now-playing-volume-popover:hover) .now-playing-control-cluster,
-.now-playing-controls:has(.now-playing-volume-popover:focus-within) .now-playing-control-cluster {
-  opacity: 0;
-  filter: blur(12px) saturate(0.82);
-  pointer-events: none;
-  transform: translate3d(18px, 0, 0) scale(0.965);
-}
+/* Volume panel now expands upward, no need to blur control cluster */
 
 .now-playing-round,
 .now-playing-volume-trigger {
@@ -2103,14 +2097,16 @@ body {
 
 .now-playing-volume-panel {
   position: absolute;
-  left: calc(100% + 10px);
-  top: 50%;
-  width: min(312px, 48vw);
-  height: 46px;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  width: 46px;
+  height: min(200px, 30vh);
   display: flex;
+  flex-direction: column;
   align-items: center;
-  padding: 0 18px;
-  border-radius: 999px;
+  justify-content: center;
+  padding: 18px 0;
+  border-radius: 18px;
   background: rgba(28, 28, 31, 0.66);
   border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow: 0 20px 44px rgba(0, 0, 0, 0.36), inset 0 1px rgba(255, 255, 255, 0.12);
@@ -2118,8 +2114,8 @@ body {
   -webkit-backdrop-filter: blur(24px) saturate(1.45);
   opacity: 0;
   pointer-events: none;
-  transform: translate3d(-12px, -50%, 0) scaleX(0.74);
-  transform-origin: left center;
+  transform: translate3d(-50%, 12px, 0) scaleY(0.74);
+  transform-origin: bottom center;
   transition:
     opacity 170ms ease 70ms,
     transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -2128,17 +2124,36 @@ body {
 .now-playing-volume-panel::after {
   content: '';
   position: absolute;
-  left: -12px;
-  top: 0;
-  bottom: 0;
-  width: 12px;
+  left: 0;
+  right: 0;
+  bottom: -12px;
+  height: 12px;
 }
 
 .now-playing-volume-popover:hover .now-playing-volume-panel,
 .now-playing-volume-popover:focus-within .now-playing-volume-panel {
   opacity: 1;
   pointer-events: auto;
-  transform: translate3d(0, -50%, 0) scaleX(1);
+  transform: translate3d(-50%, 0, 0) scaleY(1);
+}
+
+/* Volume slider in vertical mode */
+.now-playing-volume-panel .player-slider {
+  height: 100% !important;
+  width: 4px !important;
+}
+
+.now-playing-volume-panel .player-slider__track {
+  width: 4px !important;
+}
+
+.now-playing-volume-panel .player-slider__fill {
+  width: 4px !important;
+}
+
+.now-playing-volume-panel .player-slider__thumb {
+  width: 14px !important;
+  height: 14px !important;
 }
 
 .now-playing-lyrics-card {

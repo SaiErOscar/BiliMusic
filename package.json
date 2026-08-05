@@ -1,7 +1,7 @@
 {
   "name": "bilimusic",
   "private": true,
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "BiliMusic - 基于 Bilibili 的桌面音乐播放器",
   "author": "Hanversion",
   "type": "module",
@@ -69,7 +69,9 @@
     },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*"
+      "dist-electron/**/*",
+      "node_modules/ffmpeg-static/**",
+      "node_modules/fluent-ffmpeg/**"
     ],
     "win": {
       "target": "nsis",
