@@ -2099,13 +2099,13 @@ body {
   position: absolute;
   bottom: calc(100% + 10px);
   left: 50%;
-  width: 46px;
-  height: min(96px, 20vh);
+  width: 40px;
+  height: min(240px, 36vh);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 10px 0;
+  padding: 8px 0;
   border-radius: 18px;
   background: rgba(28, 28, 31, 0.66);
   border: 1px solid rgba(255, 255, 255, 0.14);

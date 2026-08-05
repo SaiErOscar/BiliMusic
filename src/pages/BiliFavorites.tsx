@@ -14,6 +14,7 @@ import {
 import type { Track } from '@/types'
 import type { FavoriteFolder, FavoriteItem } from '@/services/bilibiliApi'
 import BatchDownloadDialog from '@/components/BatchDownloadDialog'
+import { getBatchState, showBatchDialog } from '@/services/batchDownloadStore'
 import { createPlaylist, addTrackToPlaylist, PLAYLISTS_CHANGED_EVENT } from '@/utils/storage'
 import {
   listBiliFavoriteFolders,
@@ -159,6 +160,12 @@ export default function BiliFavorites() {
     setTimeout(() => setExportMessage(''), 4000)
   }
 
+  const handleBatchDownload = () => {
+    setBatchDownloading(true)
+    // 若已有后台下载任务，恢复显示进度
+    if (getBatchState().started) showBatchDialog()
+  }
+
   const handlePlayAll = () => {
     if (tracks.length > 0) player.playAll(tracks)
   }
@@ -267,7 +274,7 @@ export default function BiliFavorites() {
             </ActionButton>
             {tracks.length > 0 && (
               <>
-                <ActionButton tone="subtle" onClick={() => setBatchDownloading(true)}>
+                <ActionButton tone="subtle" onClick={handleBatchDownload}>
                   <Download size={15} />
                   下载全部
                 </ActionButton>

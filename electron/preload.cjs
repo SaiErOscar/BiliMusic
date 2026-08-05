@@ -41,6 +41,10 @@ const biliApi = {
   getCookies: () =>
     ipcRenderer.invoke('bili:getCookies'),
 
+  // 收藏到 B站收藏夹
+  dealFavorite: (rid, addMediaIds, delMediaIds) =>
+    ipcRenderer.invoke('bili:dealFavorite', rid, addMediaIds, delMediaIds),
+
   logout: () =>
     ipcRenderer.invoke('bili:logout'),
 }

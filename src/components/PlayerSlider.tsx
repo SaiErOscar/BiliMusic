@@ -83,7 +83,7 @@ export default function PlayerSlider({
         top: 0,
         bottom: 0,
         left: '50%',
-        width: isActive ? 6 : 4,
+        width: isActive ? 5 : 3,
         transform: 'translateX(-50%)',
         background: 'var(--track-bg, var(--color-border))',
         borderRadius: 'var(--radius-full)',
@@ -207,7 +207,7 @@ export default function PlayerSlider({
       }}
       style={{
         flex: vertical ? 1 : width === '100%' ? 1 : undefined,
-        width: vertical ? 4 : width,
+        width: vertical ? 3 : width,
         height: vertical ? '100%' : 20,
         position: 'relative',
         display: 'flex',

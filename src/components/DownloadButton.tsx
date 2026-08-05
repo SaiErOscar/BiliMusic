@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { Download, Loader2, Check, Music, FileText, Edit3, FileMusic } from 'lucide-react'
+import { Download, Loader2, Check, Music, FileText, Edit3, FileMusic, Tag } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { usePlayer } from '@/contexts/PlayerContext'
 import { useAppSettings } from '@/hooks/useAppSettings'
@@ -44,6 +44,7 @@ export default function DownloadButton({
   const [nameMode, setNameMode] = useState<NameMode>('video')
   const [customName, setCustomName] = useState('')
   const [includeLyric, setIncludeLyric] = useState(true)
+  const [embedMeta, setEmbedMeta] = useState(true)
 
   const actualTrack = player.currentTrack
   const actualBvid = bvid || actualTrack?.bvid || actualTrack?.id
@@ -80,7 +81,7 @@ export default function DownloadButton({
     setError('')
     setDone(false)
     try {
-      // 获取歌词和歌手信息
+      // 获取歌词和歌手信息（拆分为两个独立选项：修改属性 / 下载歌词）
       let lyricContent: string | undefined
       let artist: string | undefined
 
@@ -98,13 +99,15 @@ export default function DownloadButton({
         isLiked: false,
       }
 
-      const lyricResult = await getLyricForTrack(trackForLyric)
-      if (lyricResult) {
-        if (lyricResult.artistName) {
-          artist = lyricResult.artistName
-        }
-        if (includeLyric && lyricResult.lines.length > 0) {
-          lyricContent = formatLrc(lyricResult)
+      if (embedMeta || includeLyric) {
+        const lyricResult = await getLyricForTrack(trackForLyric)
+        if (lyricResult) {
+          if (embedMeta && lyricResult.artistName) {
+            artist = lyricResult.artistName
+          }
+          if (includeLyric && lyricResult.lines.length > 0) {
+            lyricContent = formatLrc(lyricResult)
+          }
         }
       }
 
@@ -136,7 +139,7 @@ export default function DownloadButton({
     } finally {
       setDownloading(false)
     }
-  }, [actualBvid, actualAid, actualCid, actualId, actualTrack, actualTitle, getFilename, qualityPref, settings.downloadDir, includeLyric])
+  }, [actualBvid, actualAid, actualCid, actualId, actualTrack, actualTitle, getFilename, qualityPref, settings.downloadDir, includeLyric, embedMeta])
 
   if (!actualBvid || !actualId) return null
 
@@ -263,32 +266,57 @@ export default function DownloadButton({
               {/* 分隔线 */}
               <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 0' }} />
 
-              {/* 歌词选项 */}
-              <button
-                type="button"
-                onClick={() => setIncludeLyric(v => !v)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  width: '100%',
-                  padding: '6px 10px',
-                  border: 'none',
-                  borderRadius: 8,
-                  background: 'transparent',
-                  color: 'var(--color-foreground)',
-                  fontSize: 12,
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  textAlign: 'left',
-                  marginBottom: 4,
-                }}
-              >
-                <FileMusic size={13} />
-                同时下载歌词
-                {includeLyric && <Check size={12} style={{ marginLeft: 'auto' }} />}
-              </button>
+              {/* 歌词选项（拆分为两个独立选项） */}
+              <div style={{ marginBottom: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => setIncludeLyric(v => !v)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    width: '100%',
+                    padding: '6px 10px',
+                    border: 'none',
+                    borderRadius: 8,
+                    background: 'transparent',
+                    color: 'var(--color-foreground)',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    textAlign: 'left',
+                  }}
+                >
+                  <FileMusic size={13} />
+                  同时下载歌词(.lrc)
+                  {includeLyric && <Check size={12} style={{ marginLeft: 'auto' }} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEmbedMeta(v => !v)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    width: '100%',
+                    padding: '6px 10px',
+                    border: 'none',
+                    borderRadius: 8,
+                    background: 'transparent',
+                    color: 'var(--color-foreground)',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    textAlign: 'left',
+                  }}
+                >
+                  <Tag size={13} />
+                  修改文件属性(写入歌手)
+                  {embedMeta && <Check size={12} style={{ marginLeft: 'auto' }} />}
+                </button>
+              </div>
 
               {/* 分隔线 */}
               <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 0' }} />

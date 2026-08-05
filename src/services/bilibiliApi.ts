@@ -712,6 +712,11 @@ export async function dealFavorite(
   addMediaIds: number[],
   delMediaIds: number[] = [],
 ): Promise<{ code: number; message: string }> {
+  // 优先走主进程 net.fetch（自动携带 Cookie 且无 CORS 限制），收藏更可靠
+  if (window.electronAPI?.biliApi?.dealFavorite) {
+    return window.electronAPI.biliApi.dealFavorite(rid, addMediaIds, delMediaIds)
+  }
+  // 浏览器回退：渲染层 fetch（带 Cookie）
   const cookies = await getCookiesForRequest()
   const resp = await fetch(`${BILI_API}/x/v3/fav/resource/deal`, {
     method: 'POST',

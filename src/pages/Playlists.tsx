@@ -4,6 +4,7 @@ import { CheckSquare, ListMusic, Music, Play, Square, Trash2, X, FolderHeart, Do
 import { usePlayer } from '@/contexts/PlayerContext'
 import AddToPlaylistButton from '@/components/AddToPlaylistButton'
 import BatchDownloadDialog from '@/components/BatchDownloadDialog'
+import { getBatchState, showBatchDialog } from '@/services/batchDownloadStore'
 import {
   ActionButton,
   EmptyLibrary,
@@ -124,6 +125,12 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
     )
   }
 
+  const handleBatchDownload = () => {
+    setBatchDownloading(true)
+    // 若已有后台下载任务，恢复显示进度
+    if (getBatchState().started) showBatchDialog()
+  }
+
   const handleDelete = () => {
     deletePlaylist(playlist.id)
     navigate('/playlists')
@@ -184,7 +191,7 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
                   <Play size={17} fill="currentColor" />
                   播放全部
                 </button>
-                <button className="am-action am-action--subtle" onClick={() => setBatchDownloading(true)}>
+                <button className="am-action am-action--subtle" onClick={handleBatchDownload}>
                   <Download size={16} />
                   下载全部
                 </button>

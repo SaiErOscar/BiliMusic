@@ -59,6 +59,44 @@ function sanitizeFilename(filename: string): string {
     .trim()
 }
 
+// ===== 下载目录辅助 =====
+
+/** 默认下载目录 */
+function defaultDownloadDir(): string {
+  return path.join(app.getPath('music'), 'BiliMusic')
+}
+
+/** 设置 Windows 隐藏属性（attrib +h） */
+function setHiddenWindows(p: string): Promise<void> {
+  return new Promise((resolve) => {
+    const proc = spawn('attrib', ['+h', p], { windowsHide: true })
+    proc.on('close', () => resolve())
+    proc.on('error', () => resolve())
+  })
+}
+
+/**
+ * 标记下载文件夹用途：
+ * 若目标文件夹为默认下载目录，或非空（排除 .tmp 与已有标记），或已有标记，则不操作。
+ * 否则在空文件夹中创建隐藏标记文件（视频/音频），持久化其用途。
+ */
+async function markFolderPurpose(downloadDir: string, kind: 'video' | 'audio') {
+  try {
+    if (path.resolve(downloadDir) === path.resolve(defaultDownloadDir())) return
+    const entries = await fs.readdir(downloadDir)
+    const markers = entries.filter((e) => e === '.bilimusic-video' || e === '.bilimusic-audio')
+    if (markers.length > 0) return // 已有用途标记，不重复
+    const meaningful = entries.filter((e) => e !== '.tmp' && !e.startsWith('.bilimusic-'))
+    if (meaningful.length > 0) return // 非空文件夹，不标记
+    const marker = path.join(downloadDir, kind === 'video' ? '.bilimusic-video' : '.bilimusic-audio')
+    await fs.writeFile(marker, '', 'utf-8')
+    await setHiddenWindows(marker)
+    console.log(`[biliApi] Marked folder as ${kind}:`, downloadDir)
+  } catch (e) {
+    console.warn('[biliApi] markFolderPurpose failed:', e)
+  }
+}
+
 // ===== ffmpeg 辅 =====
 
 /** 运行 ffmpeg 命令，返回 Promise */
@@ -226,6 +264,9 @@ export function registerBiliApiHandlers() {
     await fs.mkdir(downloadDir, { recursive: true })
     const filePath = path.join(downloadDir, safeName)
 
+    // 若目标文件夹为空且非默认目录，标记为音频文件夹
+    await markFolderPurpose(downloadDir, 'audio')
+
     // 使用 session 的 fetch 确保带 Cookie
     const response = await net.fetch(audioUrl, {
       headers: {
@@ -328,12 +369,16 @@ export function registerBiliApiHandlers() {
       safeName.endsWith('.mp4') ? safeName : `${safeName}.mp4`,
     )
 
-    // 临时文件
+    // 临时文件（隐藏辅助文件夹 .tmp）
     const tmpDir = path.join(downloadDir, '.tmp')
     await fs.mkdir(tmpDir, { recursive: true })
+    await setHiddenWindows(tmpDir)
     const ts = Date.now()
     const tmpVideo = path.join(tmpDir, `${ts}_video.m4s`)
     const tmpAudio = path.join(tmpDir, `${ts}_audio.m4s`)
+
+    // 若目标文件夹为空且非默认目录，标记为视频文件夹
+    await markFolderPurpose(downloadDir, 'video')
 
     try {
       // 方案 A：主进程 net.fetch 流式下载到临时文件
@@ -380,9 +425,8 @@ export function registerBiliApiHandlers() {
         )
       }
     } finally {
-      // 清理临时文件
-      await fs.rm(tmpVideo, { force: true }).catch(() => {})
-      await fs.rm(tmpAudio, { force: true }).catch(() => {})
+      // 清理临时文件夹（下载完后删除 .tmp）
+      await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
     }
   })
 
@@ -509,6 +553,31 @@ export function registerBiliApiHandlers() {
       biliJct: biliJct?.value || '',
       dedeUserId: dedeUserId?.value || '',
     }
+  })
+
+  // 收藏到 B站收藏夹（主进程 net.fetch，自动带 Cookie 且无 CORS 限制）
+  ipcMain.handle('bili:dealFavorite', async (_e, rid: number, addMediaIds: number[], delMediaIds: number[] = []) => {
+    const cookies = await session.defaultSession.cookies.get({ domain: '.bilibili.com' })
+    const biliJct = cookies.find((c) => c.name === 'bili_jct')?.value || ''
+    const body = new URLSearchParams({
+      rid: String(rid),
+      type: '2',
+      add_media_ids: addMediaIds.join(','),
+      del_media_ids: delMediaIds.join(','),
+      csrf: biliJct,
+      platform: 'web',
+    }).toString()
+    const resp = await net.fetch(`${BILI_API}/x/v3/fav/resource/deal`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Referer: 'https://www.bilibili.com',
+        'User-Agent': BILI_UA,
+      },
+      body,
+    })
+    const data = await resp.json()
+    return { code: data.code, message: data.message }
   })
 
   ipcMain.handle('bili:logout', async () => {
