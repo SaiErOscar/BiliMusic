@@ -7,18 +7,18 @@
   <p>
     <a href="./README.en.md">English</a>
     ·
+    <a href="./CHANGELOG-v1.0.2-to-v1.2.8.md">更新日志 v1.0.2 → v1.2.8</a>
+    ·
     <a href="#-快速开始">快速开始</a>
     ·
     <a href="#-harmonyos-pc">HarmonyOS PC</a>
-    ·
-    <a href="https://github.com/HanversionOvO/BiliMusic">GitHub</a>
   </p>
   <p>
     <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=111" />
     <img alt="Electron" src="https://img.shields.io/badge/Electron-36-47848F?style=for-the-badge&logo=electron&logoColor=fff" />
     <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?style=for-the-badge&logo=vite&logoColor=fff" />
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=fff" />
-    <img alt="HarmonyOS" src="https://img.shields.io/badge/HarmonyOS-PC-D81E06?style=for-the-badge" />
+    <img alt="Version" src="https://img.shields.io/badge/version-1.2.8-30d158?style=for-the-badge" />
   </p>
 </div>
 
@@ -27,189 +27,124 @@
 <div align="center">
   <table>
     <tr>
-      <td align="center" width="25%">
+      <td align="center" width="20%">
         <h3>Apple Music 视觉</h3>
-        <p>玻璃拟态、沉浸背景、弹簧动效、柔和光晕。</p>
+        <p>玻璃拟态、沉浸背景、弹簧动效、柔和光晕</p>
       </td>
-      <td align="center" width="25%">
+      <td align="center" width="20%">
         <h3>Bilibili 音乐源</h3>
-        <p>搜索、推荐、排行榜、UP 主空间，一键转为音乐曲目。</p>
+        <p>搜索、推荐、排行榜、收藏夹、UP 主空间</p>
       </td>
-      <td align="center" width="25%">
+      <td align="center" width="20%">
+        <h3>下载与离线</h3>
+        <p>音频/视频下载、歌词导出、批量下载、歌手元数据</p>
+      </td>
+      <td align="center" width="20%">
         <h3>桌面级播放器</h3>
-        <p>托盘、队列、歌单、歌词、播放状态持久化。</p>
+        <p>托盘、队列、歌单、歌词、WebDAV 同步、OTA 热更新</p>
       </td>
-      <td align="center" width="25%">
+      <td align="center" width="20%">
         <h3>HarmonyOS PC</h3>
-        <p>鸿蒙 Electron 工程与 PC 端窗口行为专项适配。</p>
+        <p>鸿蒙 Electron 工程与窗口行为适配</p>
       </td>
     </tr>
   </table>
 </div>
 
-<br />
-
-<div align="center">
-  <pre>
-┌──────────────────────────────────────────────────────────────┐
-│                        BiliMusic                             │
-│  Discover · Search · Queue · Lyrics · Playlists · HarmonyOS   │
-└──────────────────────────────────────────────────────────────┘
-  </pre>
-</div>
-
 ## 目录
 
 - [项目愿景](#-项目愿景)
-- [体验亮点](#-体验亮点)
 - [功能全景](#-功能全景)
-- [界面设计](#-界面设计)
 - [技术架构](#-技术架构)
 - [快速开始](#-快速开始)
 - [桌面端构建](#-桌面端构建)
 - [HarmonyOS PC](#-harmonyos-pc)
 - [项目结构](#-项目结构)
 - [数据持久化](#-数据持久化)
-- [开发说明](#-开发说明)
 - [路线图](#-路线图)
 - [免责声明](#-免责声明)
 
 ## 项目愿景
 
-BiliMusic 不是简单地“把 B 站视频拿来播放”。它试图做的是另一件事：把 Bilibili 上庞大、松散、标题复杂、形态各异的音乐内容，整理成一个真正适合聆听的桌面音乐体验。
+BiliMusic 不是简单地"把 B 站视频拿来播放"。它试图做的是另一件事：把 Bilibili 上庞大、松散、标题复杂、形态各异的音乐内容，整理成一个真正适合聆听的桌面音乐体验。
 
 在 BiliMusic 里，视频标题会被清洗成更适合歌词搜索的关键词；搜索结果会被组织成音乐列表；UP 主空间可以像音乐人主页一样浏览；播放队列、喜欢、最近播放和歌单会像资料库一样自然地沉淀下来。界面则尽量靠近 Apple Music 的质感：安静、透亮、柔和，但在交互上保留桌面软件应有的效率。
 
-这也是一个跨平台实验项目。除了常规 Electron 桌面端，它还把 `platform/HarmonyOS` 下的鸿蒙 PC Electron 工程纳入主流程，针对鸿蒙托盘、窗口三键、无边框窗口、播放器沉浸界面等行为做了单独适配。
-
-## 体验亮点
-
-### 1. 像音乐 App，而不是网页播放器
-
-- 主页、推荐、搜索、歌单、设置页面均采用统一的 Apple Music 风格设计语言。
-- 页面切换、卡片悬停、播放器展开、歌词滚动都带有细腻动画。
-- 底部播放器始终保持轻量，展开后进入沉浸式播放空间。
-- 歌曲封面、背景光晕、唱片旋转和歌词运动共同构成完整的播放氛围。
-
-### 2. 把 Bilibili 视频整理成可听的音乐
-
-- 支持 Bilibili 视频搜索。
-- 支持用户搜索与 UP 主空间视频浏览。
-- 支持发现页、推荐页和音乐排行榜。
-- 视频结果会转换为统一的曲目模型，进入队列、歌单、喜欢和最近播放。
-
-### 3. 适合长期使用的资料库
-
-- 最近播放自动记录。
-- 喜欢的歌曲独立聚合。
-- 自定义歌单持久化保存。
-- 支持导入/导出歌单 JSON。
-- 播放队列和播放状态可恢复，退出重开后不丢上下文。
-
-### 4. 深度桌面化
-
-- Electron 主进程代理 Bilibili 和歌词 API 请求。
-- 关闭窗口时最小化到托盘。
-- 托盘菜单/弹窗可控制播放。
-- 支持 Windows/macOS/Linux 的 electron-builder 配置。
-- 支持 HarmonyOS PC 的 Electron 工程资源同步与 HAP 构建准备。
-
 ## 功能全景
 
-### 搜索
+### 搜索与发现
 
-搜索页不仅是一个输入框。它参考 Apple Music 搜索体验重新设计：
-
-- 支持视频搜索和用户搜索。
-- 搜索结果以专辑/歌曲列表风格展示。
-- 用户结果可进入对应空间，继续浏览该 UP 主视频。
-- 搜索空状态、加载状态、错误状态均有独立视觉。
-- 每条曲目都支持播放、下一首播放、加入队列、添加至歌单。
-
-### 推荐与发现
-
-- 推荐页展示 Bilibili 推荐音乐内容。
-- 发现页聚合音乐排行榜等内容。
-- 首页式 hero 区块使用封面作为视觉焦点。
-- 曲目列表保持高密度但不拥挤，适合快速扫视。
+- Bilibili 视频搜索与用户搜索
+- 发现页、推荐页和音乐排行榜
+- UP 主空间浏览，像音乐人主页一样使用
+- 搜索结果以专辑/歌曲列表风格展示，每条曲目支持播放、下一首播放、加入队列、添加至歌单
 
 ### 播放器
 
-底部播放器提供常用控制：
-
-- 播放/暂停。
-- 上一首/下一首。
-- 随机播放。
-- 循环模式。
-- 播放进度拖动。
-- 音量控制与静音。
-- 打开播放队列。
-- 添加当前歌曲至歌单。
-- 展开沉浸播放页。
-
-沉浸播放器提供更强的视觉表达：
-
-- 大封面与动态背景。
-- 旋转唱片装饰。
-- 歌词面板与手动歌词匹配。
-- 全屏/退出全屏。
-- 关闭到托盘。
-- 收起回主界面。
+- 底部播放栏：播放/暂停、上一首/下一首、循环/随机、进度拖动、音量、队列、下载
+- 沉浸播放页：大封面与动态背景、旋转唱片、歌词面板、全屏
+- 播放状态持久化：退出重开后不丢上下文
+- 播放音质设置（标准/高品质/无损），音频 URL 缓存与 403 自动重试
 
 ### 歌词
 
-Bilibili 视频标题常常包含“官方 MV”“完整版”“翻唱”“Live”“高音质”等噪声。BiliMusic 在搜索歌词前会做一层标题处理：
+- Bilibili 视频标题清洗：去除"官方 MV""完整版""翻唱"等噪声词，提取书名号/引号中的候选歌名
+- QQ 音乐歌词源匹配，按标题相似度、歌手、专辑、时长评分
+- 支持手动搜索并选择歌词版本
+- 歌词时间偏移调整（±0.2s 步进，按曲目独立保存）
+- 下载音频时可同时导出 `.lrc` 歌词文件，保留偏移设置
 
-- 去除常见视频标题噪声。
-- 提取书名号、引号中的候选歌名。
-- 生成多组搜索关键词。
-- 对歌词候选按标题相似度、歌手、专辑、时长进行评分。
-- 缓存匹配成功和失败结果，减少重复请求。
-- 支持手动搜索歌词并选择具体版本。
+### 下载
+
+- 音频下载（m4a/flac）与视频下载（MP4，ffmpeg 合并音视频流）
+- 文件名选择：视频标题 / 过滤歌名 / 自定义输入（预设原视频名）
+- 流式写入文件，避免大文件内存峰值
+- 下载进度实时反馈
+- 下载时自动将歌词中的歌手信息写入文件"艺术家"属性（ffmpeg metadata）
+
+### 批量下载
+
+- 歌单一键下载全部曲目
+- B站收藏夹一键下载全部内容
+- 可选择下载位置（系统文件夹选择对话框）
+- 可选择文件名格式：视频标题 / 过滤歌名 / 自定义模板（`{title}` `{artist}` `{index}` 占位符）
+- 实时显示下载进度：当前/总数、成功/失败计数、进度条
 
 ### 歌单
 
-- 侧边栏播放列表区域可新建歌单。
-- 新建歌单弹窗支持歌单名和描述。
-- 歌单显示在“所有歌单”与侧边栏列表中。
-- 歌曲可从任意页面添加至歌单。
-- 歌单详情页支持播放全部、删除歌单、单曲移出、批量移出。
-- 批量操作进入编辑模式后才显示选择框，避免常态界面杂乱。
+- 侧边栏新建歌单，支持名称和描述
+- 歌曲可从任意页面添加至歌单
+- 歌单详情页支持播放全部、删除歌单、单曲移出、批量移出
+- 歌单导入/导出 JSON
+- B站收藏夹可一键导出为本地歌单
 
-### 播放队列
+### B站收藏夹
 
-- 查看当前播放队列。
-- 当前播放曲目有动态均衡器指示。
-- 支持将队列歌曲加入歌单。
-- 支持单首移出队列。
-- 支持选择编辑模式与批量移除。
+- 登录后获取收藏夹列表
+- 导入收藏夹到本地
+- 双向同步：本地收藏 ↔ B站收藏夹
+- 批量下载收藏夹内容
+- 导出收藏夹为本地歌单
+
+### 歌词下载与元数据
+
+- 下载音频时可选同时保存 `.lrc` 歌词文件（含 `[ti:]` `[ar:]` 元数据头，时间戳精确到毫秒）
+- 下载视频/音频时自动从歌词中提取歌手信息，通过 ffmpeg 写入文件属性的"艺术家"字段
 
 ### 设置
 
-设置页按照 Apple Music / macOS 偏好设置风格重构：
+- 浅色 / 深色 / 跟随系统
+- 侧边栏展开 / 折叠 / 自动
+- 播放音质 / 下载音质 / 下载格式
+- 自动播放 / 歌词显示
+- 下载目录配置
+- 歌单导入 / 导出
+- 扫码登录
 
-- 浅色 / 深色 / 跟随系统。
-- 侧边栏展开 / 折叠 / 自动。
-- 播放音质。
-- 自动播放。
-- 歌词显示。
-- 下载目录。
-- 下载音质。
-- 歌单导入 / 导出。
-- 登录状态显示与扫码登录入口。
+### WebDAV 同步与 OTA 热更新
 
-## 界面设计
-
-BiliMusic 的设计目标不是“炫技”，而是让复杂功能保持音乐应用应有的轻盈感。
-
-| 设计元素   | 使用方式                                     |
-| ---------- | -------------------------------------------- |
-| 玻璃拟态   | 用于侧边栏、播放器、弹窗和面板，制造轻微层次 |
-| 动态封面   | 用作推荐页 hero、播放器背景、歌单封面        |
-| 弹簧动效   | 用于播放器展开、歌词滚动、按钮反馈           |
-| 图标按钮   | 操作尽量使用 lucide 图标，保持桌面工具感     |
-| 暗色/浅色  | 两套主题完整覆盖，不只适配深色模式           |
-| 高密度列表 | 歌曲列表可快速扫视，控制按钮悬停浮现         |
+- WebDAV 双向同步歌单和收藏，墓碑机制防止删除项被对端复活
+- OTA 渲染热补丁：asar 包 + SHA-512 校验 + 心跳回滚
 
 ## 技术架构
 
@@ -221,12 +156,12 @@ BiliMusic 的设计目标不是“炫技”，而是让复杂功能保持音乐�
                                │ window.electronAPI
 ┌──────────────────────────────▼───────────────────────────────┐
 │                    Electron Preload Bridge                    │
-│ Bili API · Lyrics API · Window Control · Tray Control         │
+│ Bili API · Lyrics API · Download · Window · Tray · Storage    │
 └──────────────────────────────┬───────────────────────────────┘
                                │ IPC
 ┌──────────────────────────────▼───────────────────────────────┐
 │                    Electron Main Process                      │
-│ Protocol · BrowserWindow · Tray · API Proxy · Persistence     │
+│ Protocol · BrowserWindow · Tray · API Proxy · ffmpeg · OTA    │
 └──────────────────────────────┬───────────────────────────────┘
                                │
         ┌──────────────────────┴──────────────────────┐
@@ -237,59 +172,40 @@ BiliMusic 的设计目标不是“炫技”，而是让复杂功能保持音乐�
 └────────────────┘                          └───────────────────┘
 ```
 
-### 前端层
+### 技术栈
 
-- `pages/` 负责路由页面。
-- `components/` 负责播放器、歌词、队列、布局和复用 UI。
-- `contexts/` 管理播放、登录、播放页、添加歌单等全局状态。
-- `services/` 封装 Bilibili 数据、歌词匹配和本地资料库。
-- `hooks/` 封装主题、设置、歌词等状态逻辑。
-
-### Electron 层
-
-- 主进程注册 Bilibili API、歌词 API 和窗口控制 IPC。
-- 使用自定义 `app://` 协议加载生产环境前端资源，避免 `file://` 下 ESM/CORS 问题。
-- 托盘和主窗口生命周期在主进程统一管理。
-- `preload.cjs` 暴露有限的安全 bridge 给渲染进程。
-
-### HarmonyOS PC 层
-
-- `scripts/prepare-harmony.mjs` 将构建产物同步到鸿蒙工程资源目录。
-- `scripts/build-harmony.mjs` 尝试调用 Hvigor 构建 HAP。
-- `platform/HarmonyOS/web_engine` 中包含鸿蒙 Electron 适配层。
-- 针对 `process.platform === "openharmony"` 做平台差异处理。
+| 层 | 技术 |
+|----|------|
+| 前端框架 | React 19 + TypeScript 5 |
+| 构建工具 | Vite 6 |
+| 样式 | Tailwind CSS 4 + CSS Variables |
+| 动画 | Framer Motion |
+| 桌面运行时 | Electron 36（ESM） |
+| 音视频合并 | ffmpeg-static（跨平台静态二进制） |
+| 测试 | Vitest + jsdom（26 个用例） |
+| 代码质量 | ESLint 9 flat config |
+| 同步 | WebDAV |
+| 热更新 | OTA asar 渲染补丁 |
 
 ## 快速开始
 
 ### 环境要求
 
-- Node.js 20 或更高版本。
-- npm。
-- 桌面打包需要对应平台环境。
-- HarmonyOS PC 构建需要 DevEco Studio 和鸿蒙 Electron 工程环境。
+- Node.js 20+
+- npm
 
-### 安装依赖
+### 安装与开发
 
 ```bash
 npm install
-```
-
-### 开发模式
-
-```bash
 npm run dev
 ```
 
 ### 构建
 
 ```bash
-npm run build
-```
-
-### 启动 Electron
-
-```bash
-npm run electron:start
+npm run build        # 构建前端 + Electron 主进程
+npm run electron:start  # 构建后启动 Electron
 ```
 
 ## 桌面端构建
@@ -298,218 +214,71 @@ npm run electron:start
 npm run electron:build
 ```
 
-构建产物输出到：
+产物输出到 `release/`，已配置：
 
-```text
-release/
-```
+| 平台 | 格式 |
+|------|------|
+| Windows | NSIS 安装包 (.exe) |
+| macOS | DMG + ZIP |
+| Linux | AppImage + DEB |
 
-当前 electron-builder 已配置：
-
-- Windows: NSIS 安装包。
-- macOS: DMG 与 ZIP。
-- Linux: AppImage 与 DEB。
+CI 自动构建：推送 `v*` 格式的 tag 即可触发 GitHub Actions 三平台并行构建并发布 Release。
 
 ## HarmonyOS PC
 
-鸿蒙 PC Electron 工程位于：
-
-```text
-platform/HarmonyOS
-```
-
-### 准备资源
+鸿蒙 PC Electron 工程位于 `platform/HarmonyOS`。
 
 ```bash
-npm run harmony:prepare
+npm run harmony:prepare  # 构建并同步资源
+npm run harmony:build    # 同步资源并尝试构建 HAP
 ```
 
-该命令会：
-
-1. 执行 `npm run build`。
-2. 清理旧的鸿蒙 app 资源目录。
-3. 复制 `dist/`。
-4. 复制 `dist-electron/`。
-5. 写入最小运行时 `package.json`。
-
-目标目录：
-
-```text
-platform/HarmonyOS/web_engine/src/main/resources/resfile/resources/app
-```
-
-### 构建 HAP
-
-```bash
-npm run harmony:build
-```
-
-如果当前命令行环境找不到 `hvigor` 或 `hvigorw`，请使用 DevEco Studio 打开：
-
-```text
-platform/HarmonyOS
-```
-
-然后执行：
-
-```text
-Build -> Build Hap(s)/APP(s) -> Build Hap(s)
-```
-
-### 鸿蒙专项行为
-
-| 场景         | 处理                                                      |
-| ------------ | --------------------------------------------------------- |
-| 平台判断     | `process.platform === "openharmony"`                      |
-| 托盘图标     | 使用 `electron/tray.png`                                  |
-| 托盘右键窗口 | 鸿蒙禁用，避免黑色浮窗                                    |
-| 主窗口       | 保持无边框，同时通过适配层显示鸿蒙原生三键                |
-| 播放器界面   | 隐藏鸿蒙原生三键，退出后恢复                              |
-| 全屏         | 保持播放器和系统全屏状态同步                              |
-| 资源         | AppScope 与 electron 模块图标、启动图标、托盘图标均已替换 |
-
-## 常用脚本
-
-| 命令                      | 说明                       |
-| ------------------------- | -------------------------- |
-| `npm run dev`             | 启动 Vite 开发服务器       |
-| `npm run build`           | 构建前端与 Electron 主进程 |
-| `npm run preview`         | 预览前端构建产物           |
-| `npm run electron:start`  | 构建后启动 Electron        |
-| `npm run electron:build`  | 打包桌面安装包             |
-| `npm run harmony:prepare` | 构建并同步鸿蒙资源         |
-| `npm run harmony:build`   | 同步资源并尝试构建 HAP     |
+若命令行找不到 `hvigor`，使用 DevEco Studio 打开 `platform/HarmonyOS` 手动构建。
 
 ## 项目结构
 
 ```text
 BiliMusic
 ├─ electron/
-│  ├─ main.ts                Electron 主进程入口
-│  ├─ preload.cjs            渲染层安全 bridge
-│  ├─ biliApi.ts             Bilibili API 代理
-│  ├─ lyricsApi.ts           歌词 API 代理
-│  ├─ icon.png               桌面应用图标
-│  └─ tray.png               HarmonyOS 托盘图标
+│  ├─ main.ts             主进程入口
+│  ├─ preload.cjs          渲染层安全 bridge
+│  ├─ biliApi.ts           Bilibili API 代理 + 下载 + ffmpeg
+│  ├─ lyricsApi.ts         歌词 API 代理
+│  ├─ otaUpdater.ts        OTA 渲染热补丁
+│  ├─ webdav.ts            WebDAV 同步
+│  └─ tray-preload.cjs     托盘专用 preload
 ├─ src/
-│  ├─ assets/                前端资源
-│  ├─ components/            播放器、队列、歌词、布局和通用组件
-│  ├─ contexts/              播放、登录、播放页、歌单弹窗状态
-│  ├─ hooks/                 主题、设置、歌词等 hooks
-│  ├─ pages/                 发现、搜索、推荐、歌单、下载、设置
-│  ├─ services/              Bilibili 数据、歌词匹配、本地存储
-│  ├─ styles/                全局样式与 Apple Music 风格系统
-│  └─ types/                 Electron bridge 与业务类型
-├─ scripts/
-│  ├─ prepare-harmony.mjs    同步 HarmonyOS app 资源
-│  └─ build-harmony.mjs      尝试调用 Hvigor 构建 HAP
-├─ platform/HarmonyOS/       HarmonyOS PC Electron 工程
-├─ dist/                     前端构建产物
-├─ dist-electron/            Electron 构建产物
-└─ release/                  桌面端安装包输出
+│  ├─ components/          播放器、歌词、队列、下载、布局
+│  ├─ contexts/            播放、登录、播放页状态
+│  ├─ hooks/               主题、设置、歌词
+│  ├─ pages/               发现、搜索、推荐、歌单、收藏夹、设置
+│  ├─ services/            Bilibili 数据、歌词匹配、下载、收藏夹同步
+│  ├─ styles/              全局样式与 Apple Music 风格系统
+│  └─ types/               类型定义
+├─ tests/                  Vitest 单元测试
+├─ scripts/                构建、鸿蒙同步脚本
+├─ platform/HarmonyOS/     鸿蒙 PC Electron 工程
+└─ release/                安装包输出
 ```
 
 ## 数据持久化
 
-项目会在本地保存：
-
-- 当前播放曲目。
-- 播放队列。
-- 播放进度。
-- 音量、静音、随机、循环。
-- 最近播放。
-- 我喜欢。
-- 自定义歌单。
-- 歌词缓存和手动匹配结果。
-- 主题和设置项。
-- 登录用户基础信息。
-
-主要存储方式：
-
-- `localStorage`：前端状态、资料库、歌单、歌词缓存。
-- Electron `userData`：下载目录等桌面端数据。
-
-## 开发说明
-
-### 标题清洗与歌词匹配
-
-歌词匹配逻辑集中在 `src/services/lyrics.ts`。它会对 Bilibili 标题做多轮处理：
-
-- Unicode 规范化。
-- 去除常见视频噪声词。
-- 提取引号和书名号内容。
-- 去掉投稿描述、合集、排行、直播等非歌名信息。
-- 构建多个候选搜索词。
-- 对候选歌词按相似度评分。
-
-### 播放队列与状态
-
-播放状态集中在 `src/contexts/PlayerContext.tsx`：
-
-- 队列。
-- 当前曲目。
-- 播放/暂停。
-- 音量。
-- 进度。
-- 随机和循环。
-- 自动播放。
-- 托盘状态同步。
-
-### 歌单系统
-
-歌单相关能力由本地服务和 UI 共同完成：
-
-- `src/services/playlists.ts` 保存歌单数据。
-- `Sidebar` 负责新建歌单入口。
-- `AddToPlaylistContext` 提供通用添加弹窗。
-- `Playlists` 页面负责总览、详情、批量编辑。
-
-### 桌面窗口策略
-
-窗口逻辑集中在 `electron/main.ts`：
-
-- 普通平台使用自绘标题栏按钮。
-- HarmonyOS PC 使用原生三键。
-- 关闭窗口默认隐藏到托盘。
-- 生产环境使用 `app://local/index.html` 加载页面。
-- 播放器界面会要求隐藏平台原生三键。
+- **localStorage**：播放状态、队列、歌单、收藏、歌词缓存、设置
+- **Electron userData**：下载文件
+- **WebDAV**：歌单和收藏的云端双向同步
 
 ## 路线图
 
-- [ ] 更完整的本地下载管理。
-- [ ] 歌词源配置与多源回退。
-- [ ] 更精确的 Bilibili 音频质量选择。
-- [ ] 歌单封面编辑。
-- [ ] 播放历史统计。
-- [ ] Mini Player / 迷你播放窗。
-- [ ] HarmonyOS PC 行为继续细化。
-- [ ] 更完整的自动化测试。
-
-## 贡献
-
-欢迎提交 issue、建议和 PR。这个项目更偏向产品体验驱动，因此 UI、动效、交互、歌词匹配、跨平台行为和稳定性都很重要。
-
-建议提交前至少确认：
-
-```bash
-npm run build
-```
-
-如果修改了 HarmonyOS 工程：
-
-```bash
-npm run harmony:prepare
-```
-
-并在 DevEco Studio 中重新构建验证。
+- [ ] 更完整的下载管理器（任务列表、暂停/继续）
+- [ ] 多歌词源配置与回退
+- [ ] Mini Player / 迷你播放窗
+- [ ] 播放历史统计
+- [ ] HarmonyOS PC 行为继续细化
 
 ## 免责声明
 
-BiliMusic 仅用于学习、研究和个人使用。项目与 Bilibili、Apple Music、Apple Inc. 及相关服务提供方没有从属、授权或商业合作关系。项目不内置任何音频、视频或歌词资源。
-
-请遵守相关平台服务条款、版权规定和当地法律法规。不要将本项目用于侵犯版权、规避平台限制或违反服务条款的用途。
+BiliMusic 仅用于学习、研究和个人使用。项目与 Bilibili、Apple Music、Apple Inc. 及相关服务提供方没有从属、授权或商业合作关系。项目不内置任何音频、视频或歌词资源。请遵守相关平台服务条款、版权规定和当地法律法规。
 
 ## 作者
 
 由 MikannQAQ 设计与开发。
-
