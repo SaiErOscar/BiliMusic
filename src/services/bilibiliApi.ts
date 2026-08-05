@@ -487,6 +487,26 @@ export function getBestAudioUrl(playData: PlayUrlData, preference: AudioQualityP
   return sorted[0].baseUrl
 }
 
+/**
+ * 获取最高品质的视频流 URL（用于视频下载）
+ *
+ * B站视频流 ID 对照（部分）：
+ * 120: 4K HDR
+ * 116: 1080P60
+ * 112: 1080P+ (高码率)
+ * 80:  1080P
+ * 64:  720P
+ * 32:  480P
+ * 16:  360P
+ */
+export function getBestVideoUrl(playData: PlayUrlData): string {
+  const videoStreams = playData.dash.video
+  if (!videoStreams?.length) throw new Error('No video stream available')
+  // 按带宽降序选最高品质
+  const sorted = [...videoStreams].sort((a, b) => b.bandwidth - a.bandwidth)
+  return sorted[0].baseUrl
+}
+
 // ===== 音频 URL 缓存（TTL 30 分钟）=====
 // B站音频 URL 有有效期，缓存可避免重复播放时重新请求
 interface CachedAudioSource {
@@ -607,6 +627,121 @@ export interface FavoriteFolder {
 
 export async function getFavoriteFolders(mid: number): Promise<{ count: number; list: FavoriteFolder[] }> {
   return biliFetch('/x/v3/fav/folder/created/list-all', { params: { up_mid: mid } })
+}
+
+// ===== 收藏夹内容 =====
+
+export interface FavoriteItem {
+  bvid: string
+  aid: number
+  title: string
+  pic: string
+  duration: number
+  cid: number
+  upper: { mid: number; name: string; face: string }
+  fav_time: number
+  cnt_info: { play: number; collect: number; danmaku: number }
+}
+
+export interface FavoriteFolderContent {
+  info: {
+    id: number
+    title: string
+    media_count: number
+  }
+  medias: FavoriteItem[] | null
+  has_more: boolean
+}
+
+/**
+ * 获取收藏夹内容
+ * @param folderId 收藏夹 ID
+ * @param page 页码
+ * @param pageSize 每页数量
+ */
+export async function getFavoriteFolderContent(
+  folderId: number,
+  page = 1,
+  pageSize = 20,
+): Promise<FavoriteFolderContent> {
+  return biliFetch('/x/v3/fav/resource/list', {
+    params: {
+      media_id: folderId,
+      pn: page,
+      ps: pageSize,
+      keyword: '',
+      order: 'mtime',
+      type: 0,
+      tid: 0,
+      platform: 'web',
+    },
+  })
+}
+
+/**
+ * 获取收藏夹全部内容（自动翻页）
+ */
+export async function getAllFavoriteFolderContent(folderId: number): Promise<{ title: string; items: FavoriteItem[] }> {
+  const all: FavoriteItem[] = []
+  let page = 1
+  let title = ''
+  const pageSize = 20
+  while (true) {
+    const data = await getFavoriteFolderContent(folderId, page, pageSize)
+    title = data.info?.title || ''
+    if (data.medias?.length) {
+      all.push(...data.medias)
+    }
+    if (!data.has_more) break
+    page++
+    if (page > 50) break // 安全上限
+  }
+  return { title, items: all }
+}
+
+// ===== 收藏夹操作 =====
+
+/**
+ * 将视频添加到收藏夹
+ * @param rid 视频 aid
+ * @param addMediaIds 要添加到的收藏夹 ID 列表
+ * @param csrf bili_jct CSRF token
+ */
+export async function dealFavorite(
+  rid: number,
+  addMediaIds: number[],
+  delMediaIds: number[] = [],
+): Promise<{ code: number; message: string }> {
+  const cookies = await getCookiesForRequest()
+  const resp = await fetch(`${BILI_API}/x/v3/fav/resource/deal`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Referer: 'https://www.bilibili.com',
+    },
+    body: new URLSearchParams({
+      rid: String(rid),
+      type: '2',
+      add_media_ids: addMediaIds.join(','),
+      del_media_ids: delMediaIds.join(','),
+      csrf: cookies.biliJct,
+      platform: 'web',
+    }).toString(),
+  })
+  const data = await resp.json()
+  return { code: data.code, message: data.message }
+}
+
+// 获取 CSRF token (bili_jct) 用于收藏操作
+async function getCookiesForRequest(): Promise<{ biliJct: string }> {
+  // 渲染层通过 credentials: 'include' 自动带上 Cookie
+  // 但 bili_jct 需要从主进程获取
+  if (window.electronAPI?.biliApi) {
+    const cookies = await window.electronAPI.biliApi.getCookies()
+    return { biliJct: cookies.biliJct }
+  }
+  return { biliJct: '' }
 }
 
 // ===== 完整流程：搜索 → 详情 → 音频 =====

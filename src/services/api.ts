@@ -152,14 +152,69 @@ export async function extractAudio(
   return extractAudioFromVideo(bvid, fallback, quality)
 }
 
-// ===== 下载音频 =====
+// ===== 下载 =====
 
-export async function downloadAudio(audioUrl: string, filename: string): Promise<{ filePath: string; size: number }> {
+export async function downloadAudio(audioUrl: string, filename: string, customDir?: string): Promise<{ filePath: string; size: number }> {
   if (window.electronAPI?.biliApi) {
-    return window.electronAPI.biliApi.downloadAudio(audioUrl, filename)
+    return window.electronAPI.biliApi.downloadAudio(audioUrl, filename, customDir)
   }
 
   throw new Error('Audio download requires Electron environment')
+}
+
+export async function downloadVideo(videoUrl: string, audioUrl: string, filename: string, customDir?: string): Promise<{ filePath: string; size: number }> {
+  if (window.electronAPI?.biliApi) {
+    return window.electronAPI.biliApi.downloadVideo(videoUrl, audioUrl, filename, customDir)
+  }
+
+  throw new Error('Video download requires Electron environment')
+}
+
+export async function openDownloadDir(dirPath?: string): Promise<void> {
+  if (window.electronAPI?.biliApi) {
+    await window.electronAPI.biliApi.openDownloadDir(dirPath)
+  }
+}
+
+/**
+ * 下载当前播放曲目（音频或视频）
+ * 需要先获取播放地址，再根据格式选择下载方式
+ */
+export async function downloadTrack(
+  bvid: string,
+  fallback: { aid?: string | number; cid?: string | number },
+  title: string,
+  format: 'audio' | 'video',
+  quality: import('@/services/bilibiliApi').AudioQualityPreference,
+  customDir?: string,
+): Promise<{ filePath: string; size: number }> {
+  const { getVideoDetail, getPlayUrl, getBestAudioUrl, getBestVideoUrl } = await import('@/services/bilibiliApi')
+  
+  // 获取播放地址
+  let cid: number | undefined
+  try {
+    const detail = await getVideoDetail(bvid)
+    cid = detail.cid
+  } catch {
+    cid = undefined
+  }
+
+  if (!cid && fallback.cid) {
+    cid = Number(fallback.cid)
+  }
+  if (!cid) throw new Error('无法获取视频 cid')
+
+  const playData = await getPlayUrl(bvid, cid)
+  const audioUrl = getBestAudioUrl(playData, quality)
+  const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_').trim()
+
+  if (format === 'audio') {
+    const ext = audioUrl.includes('.flac') ? '.flac' : '.m4a'
+    return downloadAudio(audioUrl, `${safeTitle}${ext}`, customDir)
+  } else {
+    const videoUrl = getBestVideoUrl(playData)
+    return downloadVideo(videoUrl, audioUrl, `${safeTitle}.mp4`, customDir)
+  }
 }
 
 // ===== 用户信息 =====

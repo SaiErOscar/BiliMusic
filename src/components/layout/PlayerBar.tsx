@@ -21,6 +21,7 @@ import { useNowPlaying } from '@/contexts/NowPlayingContext'
 import { useAddToPlaylist } from '@/contexts/AddToPlaylistContext'
 import PlayQueue from '@/components/PlayQueue'
 import PlayerSlider from '@/components/PlayerSlider'
+import DownloadButton from '@/components/DownloadButton'
 
 const spring = {
   type: 'spring',
@@ -242,6 +243,7 @@ export default function PlayerBar() {
                 fill={player.currentTrack.isLiked ? 'currentColor' : 'none'}
               />
             </IconButton>
+            <DownloadButton size={16} />
           </>
         )}
       </div>

@@ -1,8 +1,13 @@
 interface BiliApi {
-  downloadAudio: (audioUrl: string, filename: string) => Promise<{
+  downloadAudio: (audioUrl: string, filename: string, customDir?: string) => Promise<{
     filePath: string
     size: number
   }>
+  downloadVideo: (videoUrl: string, audioUrl: string, filename: string, customDir?: string) => Promise<{
+    filePath: string
+    size: number
+  }>
+  openDownloadDir: (dirPath?: string) => Promise<{ success: boolean }>
   qrGenerate: () => Promise<{
     url: string
     qrcodeKey: string

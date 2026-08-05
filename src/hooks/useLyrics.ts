@@ -5,6 +5,8 @@ import {
   searchLyricCandidates,
   chooseLyricCandidate,
   clearLyricCache,
+  getLyricOffset,
+  setLyricOffset,
   type LyricResult,
   type LyricCandidate,
 } from '@/services/lyrics'
@@ -18,6 +20,7 @@ export type LyricStatus = 'idle' | 'loading' | 'ok' | 'unsynced' | 'empty'
 export function useLyrics(track: Track | null, enabled: boolean) {
   const [status, setStatus] = useState<LyricStatus>('idle')
   const [result, setResult] = useState<LyricResult | null>(null)
+  const [offset, setOffset] = useState(0)
   const reqIdRef = useRef(0)
 
   const load = useCallback(async (t: Track) => {
@@ -33,6 +36,7 @@ export function useLyrics(track: Track | null, enabled: boolean) {
     }
     setResult(res)
     setStatus(res.synced ? 'ok' : 'unsynced')
+    setOffset(getLyricOffset(t.id))
   }, [])
 
   useEffect(() => {
@@ -55,6 +59,7 @@ export function useLyrics(track: Track | null, enabled: boolean) {
     }
     setResult(res)
     setStatus(res.synced ? 'ok' : 'unsynced')
+    setOffset(getLyricOffset(track.id))
   }, [track])
 
   const retry = useCallback(() => {
@@ -63,5 +68,33 @@ export function useLyrics(track: Track | null, enabled: boolean) {
     load(track)
   }, [track, load])
 
-  return { status, result, search, choose, retry }
+  const adjustOffset = useCallback((deltaMs: number) => {
+    if (!track) return
+    const newOffset = offset + deltaMs
+    setLyricOffset(track.id, newOffset)
+    setOffset(newOffset)
+    // 重新加载歌词以应用新偏移
+    if (result) {
+      const baseLines = result.lines.map(line => ({
+        ...line,
+        time: line.time >= 0 ? line.time - (offset / 1000) + (newOffset / 1000) : line.time,
+      }))
+      setResult({ ...result, lines: baseLines, offset: newOffset })
+    }
+  }, [track, result, offset])
+
+  const resetOffset = useCallback(() => {
+    if (!track) return
+    setLyricOffset(track.id, 0)
+    setOffset(0)
+    if (result) {
+      const baseLines = result.lines.map(line => ({
+        ...line,
+        time: line.time >= 0 ? line.time - (offset / 1000) : line.time,
+      }))
+      setResult({ ...result, lines: baseLines, offset: 0 })
+    }
+  }, [track, result, offset])
+
+  return { status, result, search, choose, retry, offset, adjustOffset, resetOffset }
 }
