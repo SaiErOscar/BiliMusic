@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { CheckSquare, ListMusic, Music, Play, Square, Trash2, X } from 'lucide-react'
+import { CheckSquare, ListMusic, Music, Play, Square, Trash2, X, FolderHeart } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import AddToPlaylistButton from '@/components/AddToPlaylistButton'
 import {
+  ActionButton,
   EmptyLibrary,
   MusicHero,
   MusicPageShell,
@@ -26,6 +27,7 @@ export default function Playlists() {
 }
 
 function PlaylistOverview() {
+  const navigate = useNavigate()
   const [playlists, setPlaylists] = useState<Playlist[]>(() => loadPlaylists())
 
   useEffect(() => {
@@ -48,6 +50,12 @@ function PlaylistOverview() {
         subtitle={playlists.length ? `你创建了 ${playlists.length} 个歌单。` : '点击侧边栏播放列表右侧的 +，创建第一个歌单。'}
         image={heroImage}
         tone="purple"
+        action={(
+          <ActionButton tone="subtle" onClick={() => navigate('/bili-favorites')}>
+            <FolderHeart size={16} />
+            B站收藏夹
+          </ActionButton>
+        )}
       />
 
       {playlists.length === 0 ? (
