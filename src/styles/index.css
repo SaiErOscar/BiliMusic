@@ -2100,12 +2100,12 @@ body {
   bottom: calc(100% + 10px);
   left: 50%;
   width: 46px;
-  height: min(200px, 30vh);
+  height: min(96px, 20vh);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 18px 0;
+  padding: 10px 0;
   border-radius: 18px;
   background: rgba(28, 28, 31, 0.66);
   border: 1px solid rgba(255, 255, 255, 0.14);

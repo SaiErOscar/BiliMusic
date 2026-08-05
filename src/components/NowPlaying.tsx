@@ -350,6 +350,7 @@ export default function NowPlaying() {
                         value={player.isMuted ? 0 : player.volume}
                         max={100}
                         step={5}
+                        vertical
                         onChange={(v) => { player.setVolume(Math.round(v)); if (player.isMuted && v > 0) player.setIsMuted(false) }}
                         variant="volume"
                       />
