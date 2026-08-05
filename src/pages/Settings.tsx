@@ -23,6 +23,7 @@ import {
 import { ActionButton, MusicHero, MusicPageShell, MusicSection } from '@/components/AppleMusicPage'
 import { useTheme } from '@/hooks/useTheme'
 import { useAppSettings } from '@/hooks/useAppSettings'
+import { selectDownloadFolder } from '@/services/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { createPlaylistsExport, importPlaylistsFromText } from '@/utils/storage'
 import { runSync, forceUpload, forceDownload, getLastSync, SYNC_STATE_EVENT, WEBDAV_CONFIGURED_EVENT, type SyncResult } from '@/utils/sync'
@@ -133,9 +134,9 @@ export default function Settings() {
     setSyncBusy(false)
   }
 
-  const changeDownloadDir = () => {
-    const next = window.prompt('请输入下载目录', settings.downloadDir)
-    if (next?.trim()) setAppSettings({ downloadDir: next.trim() })
+  const changeDownloadDir = async () => {
+    const dir = await selectDownloadFolder()
+    if (dir) setAppSettings({ downloadDir: dir })
   }
 
   const exportPlaylists = () => {
