@@ -2006,7 +2006,7 @@ body {
 
 .now-playing-control-cluster {
   display: grid;
-  grid-template-columns: 54px 78px 54px 46px;
+  grid-template-columns: 46px 70px 46px;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;

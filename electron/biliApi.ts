@@ -1,32 +1,54 @@
 import { ipcMain, net, app, session, shell } from 'electron'
 import path from 'path'
 import fs from 'fs/promises'
+import fsSync from 'fs'
 import { spawn } from 'child_process'
+import { createRequire } from 'module'
 
+const require = createRequire(import.meta.url)
 const BILI_API = 'https://api.bilibili.com'
 const BILI_PASSPORT = 'https://passport.bilibili.com'
 const BILI_REFERER = 'https://www.bilibili.com'
+const BILI_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
 // ===== ffmpeg 路径解析 =====
 // ffmpeg-static 提供跨平台静态 ffmpeg 二进制
+// ESM 中无 require，通过 createRequire 桥接
 // 打包后 ffmpeg.exe 位于 app.asar.unpacked 内，需修正路径
-let ffmpegPath: string
-try {
-  const rawPath = require('ffmpeg-static') as string
-  const fixedPath = rawPath.includes('app.asar')
-    ? rawPath.replace('app.asar', 'app.asar.unpacked')
-    : rawPath
-  const fsSync = require('fs')
-  if (fsSync.existsSync(fixedPath)) {
-    ffmpegPath = fixedPath
-  } else {
-    console.warn('[biliApi] ffmpeg not found at:', fixedPath, ', falling back to system PATH')
-    ffmpegPath = 'ffmpeg'
+function resolveFfmpegPath(): string {
+  // 策略 1：通过 createRequire 解析 ffmpeg-static
+  try {
+    const rawPath = require('ffmpeg-static') as string
+    const fixedPath = rawPath.includes('app.asar')
+      ? rawPath.replace('app.asar', 'app.asar.unpacked')
+      : rawPath
+    if (fsSync.existsSync(fixedPath)) {
+      console.log('[biliApi] ffmpeg resolved (ffmpeg-static):', fixedPath)
+      return fixedPath
+    }
+    console.warn('[biliApi] ffmpeg-static path not exists:', fixedPath)
+  } catch (e) {
+    console.warn('[biliApi] ffmpeg-static require failed:', e)
   }
-} catch (e) {
-  console.warn('[biliApi] ffmpeg-static require failed:', e)
-  ffmpegPath = 'ffmpeg'
+
+  // 策略 2：直接检查常见路径
+  const candidates: string[] = [
+    path.join(__dirname, '../node_modules/ffmpeg-static/ffmpeg.exe'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked/node_modules/ffmpeg-static/ffmpeg.exe'),
+    path.join(__dirname, '../../node_modules/ffmpeg-static/ffmpeg.exe'),
+  ]
+  for (const p of candidates) {
+    if (fsSync.existsSync(p)) {
+      console.log('[biliApi] ffmpeg resolved (fallback):', p)
+      return p
+    }
+  }
+
+  console.warn('[biliApi] ffmpeg not found, falling back to system PATH')
+  return 'ffmpeg'
 }
+
+const ffmpegPath = resolveFfmpegPath()
 
 // ===== 文件名安全过滤 =====
 function sanitizeFilename(filename: string): string {
@@ -40,8 +62,7 @@ function sanitizeFilename(filename: string): string {
 // ===== ffmpeg 合并 =====
 /**
  * 用 ffmpeg 合并视频流和音频流
- * 方案：直接通过 -i URL 方式让 ffmpeg 从网络拉取流，避免主进程下载被 B站反爬拦截
- * ffmpeg 自带 Referer 头支持，可绕过 B站 CDN 的来源校验
+ * 方案：直接通过 -i 本地文件方式让 ffmpeg 合并
  */
 function mergeWithFfmpeg(
   videoPath: string,
@@ -59,10 +80,6 @@ function mergeWithFfmpeg(
     ]
     const proc = spawn(ffmpegPath, args, {
       windowsHide: true,
-      env: {
-        ...process.env,
-        // ffmpeg 不会自动带 Referer，通过 headers 参数传入
-      },
     })
     let stderr = ''
     proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
@@ -74,6 +91,91 @@ function mergeWithFfmpeg(
       else reject(new Error(`ffmpeg 合并失败 (exit ${code}): ${stderr.slice(-500)}`))
     })
   })
+}
+
+/**
+ * 备用方案：ffmpeg 直接从 URL 拉取并合并
+ * 通过 -headers 参数传入 Referer 和 User-Agent，绕过 B站 CDN 来源校验
+ */
+function mergeWithFfmpegDirectUrl(
+  videoUrl: string,
+  audioUrl: string,
+  outputPath: string,
+  referer: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const headers = `Referer: ${referer}\r\nUser-Agent: ${BILI_UA}\r\n`
+    const args = [
+      '-headers', headers,
+      '-i', videoUrl,
+      '-i', audioUrl,
+      '-c:v', 'copy',
+      '-c:a', 'copy',
+      '-y',
+      outputPath,
+    ]
+    const proc = spawn(ffmpegPath, args, { windowsHide: true })
+    let stderr = ''
+    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+    proc.on('error', (err: Error) => {
+      reject(new Error(`ffmpeg direct URL 启动失败: ${err.message}`))
+    })
+    proc.on('close', (code: number) => {
+      if (code === 0) resolve()
+      else reject(new Error(`ffmpeg direct URL 合并失败 (exit ${code}): ${stderr.slice(-500)}`))
+    })
+  })
+}
+
+// ===== 流下载辅助 =====
+
+/**
+ * 流式下载 URL 内容到文件，避免大文件内存峰值
+ * 使用 Electron net.fetch 确保携带 Cookie 和 Referer
+ */
+async function downloadStreamToFile(
+  url: string,
+  filePath: string,
+  progressLabel?: string,
+): Promise<number> {
+  const response = await net.fetch(url, {
+    headers: {
+      Referer: BILI_REFERER,
+      'User-Agent': BILI_UA,
+    },
+  })
+  if (!response.ok) {
+    throw new Error(`下载流失败: HTTP ${response.status} ${response.statusText}`)
+  }
+
+  const total = Number(response.headers.get('content-length') || 0)
+  const reader = response.body?.getReader()
+
+  if (!reader) {
+    // 回退：不支持流式读取时用整体缓冲
+    const buffer = Buffer.from(await response.arrayBuffer())
+    await fs.writeFile(filePath, buffer)
+    return buffer.length
+  }
+
+  const fileHandle = await fs.open(filePath, 'w')
+  let received = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value) {
+        await fileHandle.write(value)
+        received += value.length
+        if (total > 0 && progressLabel) {
+          console.log(`[biliApi] ${progressLabel}: ${Math.round((received / total) * 100)}% (${received}/${total})`)
+        }
+      }
+    }
+  } finally {
+    await fileHandle.close()
+  }
+  return received
 }
 
 // ===== IPC Handlers =====
@@ -94,7 +196,10 @@ export function registerBiliApiHandlers() {
 
     // 使用 session 的 fetch 确保带 Cookie
     const response = await net.fetch(audioUrl, {
-      headers: { Referer: BILI_REFERER },
+      headers: {
+        Referer: BILI_REFERER,
+        'User-Agent': BILI_UA,
+      },
     })
     if (!response.ok) throw new Error(`下载失败: HTTP ${response.status}`)
 
@@ -136,9 +241,9 @@ export function registerBiliApiHandlers() {
   // 下载视频（合并画面+声音）到本地
   // 重构方案：
   // 1. 渲染层获取 video/audio CDN URL 后传入主进程
-  // 2. 主进程将 URL 写入临时 m3u8 或直接用 ffmpeg -i URL 拉取
+  // 2. 主进程流式下载到临时文件（带 Referer + User-Agent 头）
   // 3. ffmpeg 合并为 mp4
-  // 注意：B站 CDN URL 需要 Referer 头，net.fetch 可以带
+  // 4. 如果主方案失败，备用方案用 ffmpeg 直接从 URL 拉取
   ipcMain.handle('bili:downloadVideo', async (
     _event,
     videoUrl: string,
@@ -166,17 +271,14 @@ export function registerBiliApiHandlers() {
     const tmpAudio = path.join(tmpDir, `${ts}_audio.m4s`)
 
     try {
-      // 方案 A：主进程 net.fetch 下载流到临时文件
+      // 方案 A：主进程 net.fetch 流式下载到临时文件
       // net.fetch 使用 Electron session，自动携带 Cookie 和 CORS 头
-      console.log('[biliApi] Downloading video stream...')
-      const [videoBuf, audioBuf] = await Promise.all([
-        downloadStream(videoUrl),
-        downloadStream(audioUrl),
+      console.log('[biliApi] Downloading video stream to file...')
+      const [videoSize, audioSize] = await Promise.all([
+        downloadStreamToFile(videoUrl, tmpVideo, 'video'),
+        downloadStreamToFile(audioUrl, tmpAudio, 'audio'),
       ])
-      console.log(`[biliApi] Downloaded: video=${videoBuf.length} bytes, audio=${audioBuf.length} bytes`)
-
-      await fs.writeFile(tmpVideo, videoBuf)
-      await fs.writeFile(tmpAudio, audioBuf)
+      console.log(`[biliApi] Downloaded: video=${videoSize} bytes, audio=${audioSize} bytes`)
 
       console.log('[biliApi] Merging with ffmpeg...')
       await mergeWithFfmpeg(tmpVideo, tmpAudio, outputPath)
@@ -185,10 +287,10 @@ export function registerBiliApiHandlers() {
       const stat = await fs.stat(outputPath)
       return { filePath: outputPath, size: stat.size }
     } catch (err) {
-      console.error('[biliApi] downloadVideo failed:', err)
+      console.error('[biliApi] downloadVideo plan A failed:', err)
 
       // 方案 B 备用：如果方案 A 失败，尝试用 ffmpeg 直接从 URL 拉取
-      // ffmpeg 可以通过 -headers 参数传入 Referer
+      // ffmpeg 可以通过 -headers 参数传入 Referer 和 User-Agent
       try {
         console.log('[biliApi] Trying fallback: ffmpeg direct URL fetch...')
         await mergeWithFfmpegDirectUrl(videoUrl, audioUrl, outputPath, BILI_REFERER)
@@ -202,6 +304,7 @@ export function registerBiliApiHandlers() {
         )
       }
     } finally {
+      // 清理临时文件
       await fs.rm(tmpVideo, { force: true }).catch(() => {})
       await fs.rm(tmpAudio, { force: true }).catch(() => {})
     }
@@ -312,49 +415,6 @@ export function registerBiliApiHandlers() {
     await session.defaultSession.cookies.remove(BILI_API, 'DedeUserID')
     await session.defaultSession.cookies.remove(BILI_API, 'DedeUserID__ckMd5')
     return { success: true }
-  })
-}
-
-// ===== 流下载辅助 =====
-
-async function downloadStream(url: string): Promise<Buffer> {
-  const response = await net.fetch(url, {
-    headers: { Referer: BILI_REFERER },
-  })
-  if (!response.ok) throw new Error(`下载流失败: HTTP ${response.status}`)
-  return Buffer.from(await response.arrayBuffer())
-}
-
-/**
- * 备用方案：ffmpeg 直接从 URL 拉取并合并
- * 通过 -headers 参数传入 Referer，绕过 B站 CDN 来源校验
- */
-function mergeWithFfmpegDirectUrl(
-  videoUrl: string,
-  audioUrl: string,
-  outputPath: string,
-  referer: string,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const args = [
-      '-headers', `Referer: ${referer}\r\n`,
-      '-i', videoUrl,
-      '-i', audioUrl,
-      '-c:v', 'copy',
-      '-c:a', 'copy',
-      '-y',
-      outputPath,
-    ]
-    const proc = spawn(ffmpegPath, args, { windowsHide: true })
-    let stderr = ''
-    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
-    proc.on('error', (err: Error) => {
-      reject(new Error(`ffmpeg direct URL 启动失败: ${err.message}`))
-    })
-    proc.on('close', (code: number) => {
-      if (code === 0) resolve()
-      else reject(new Error(`ffmpeg direct URL 合并失败 (exit ${code}): ${stderr.slice(-500)}`))
-    })
   })
 }
 

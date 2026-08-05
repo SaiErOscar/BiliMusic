@@ -357,7 +357,7 @@ export default function NowPlaying() {
                   </div>
                 </div>
 
-                {/* 中间：上一首 + 播放 + 下一首 + 循环/随机 */}
+                {/* 中间：上一首 + 播放 + 下一首（对称布局） */}
                 <div className="now-playing-control-cluster">
                   <RoundIcon onClick={player.prev} title="上一首">
                     <SkipBack size={27} />
@@ -377,6 +377,10 @@ export default function NowPlaying() {
                   <RoundIcon onClick={player.next} title="下一首">
                     <SkipForward size={27} />
                   </RoundIcon>
+                </div>
+
+                {/* 右侧：循环/随机 + 评论按钮 */}
+                <div className="now-playing-controls-right">
                   <RoundIcon
                     active={player.repeatMode !== 'none'}
                     onClick={() => {
@@ -394,10 +398,6 @@ export default function NowPlaying() {
                       {player.repeatMode === 'one' && <span>1</span>}
                     </span>
                   </RoundIcon>
-                </div>
-
-                {/* 右侧：评论按钮 */}
-                <div className="now-playing-controls-right">
                   <RoundIcon active={commentsOpen} onClick={toggleComments} title="查看评论">
                     <MessageCircle size={20} />
                   </RoundIcon>
