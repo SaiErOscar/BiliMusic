@@ -32,7 +32,7 @@ function getArtworkType(url: string): string {
   }
 }
 
-interface PlayerContext {
+interface PlayerContextValue {
   currentTrack: Track | null
   isPlaying: boolean
   volume: number
@@ -71,7 +71,7 @@ interface PlayerProgress {
   setProgress: (p: number) => void
 }
 
-const PlayerContext = createContext<PlayerContext | null>(null)
+const PlayerContext = createContext<PlayerContextValue | null>(null)
 const PlayerProgressContext = createContext<PlayerProgress | null>(null)
 const PLAYER_STATE_KEY = 'bilimusic_player_state'
 
@@ -661,7 +661,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
   }, [currentTrack, duration, progress])
 
-  const value = useMemo<PlayerContext>(() => ({
+  const value = useMemo<PlayerContextValue>(() => ({
     currentTrack,
     isPlaying,
     volume,
@@ -737,7 +737,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function usePlayer(): PlayerContext {
+export function usePlayer(): PlayerContextValue {
   const ctx = useContext(PlayerContext)
   if (!ctx) throw new Error('usePlayer must be used within PlayerProvider')
   return ctx

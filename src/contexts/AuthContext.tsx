@@ -17,9 +17,9 @@ interface AuthActions {
   setShowLogin: (open: boolean) => void
 }
 
-type AuthContext = AuthState & AuthActions
+type AuthContextValue = AuthState & AuthActions
 
-const AuthContext = createContext<AuthContext | null>(null)
+const AuthContext = createContext<AuthContextValue | null>(null)
 
 function loadCachedUser() {
   try {
@@ -103,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 }
 
-export function useAuth(): AuthContext {
+export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext)
   if (!ctx) throw new Error('useAuth must be used within AuthProvider')
   return ctx

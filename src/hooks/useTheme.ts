@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { ThemeMode } from '@/types'
-import { readStoredItem, writeStoredItem } from '@/utils/persistentStorage'
+import { readStoredItemSync, writeStoredItem } from '@/utils/persistentStorage'
 
 const THEME_MODE_KEY = 'theme-mode'
 
@@ -14,7 +14,7 @@ function applyTheme(mode: ThemeMode) {
 }
 
 function readStoredMode(): ThemeMode {
-  return (readStoredItem(THEME_MODE_KEY) as ThemeMode) || 'system'
+  return (readStoredItemSync(THEME_MODE_KEY) as ThemeMode) || 'system'
 }
 
 // 首次加载时同步设置主题，避免 FOUC

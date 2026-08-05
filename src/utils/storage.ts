@@ -1,5 +1,6 @@
 import type { AppSettings, Playlist, Tombstone, Track } from '@/types'
-import { readStoredItem, writeStoredItem } from '@/utils/persistentStorage'
+import { readStoredItemSync, writeStoredItem } from '@/utils/persistentStorage'
+import { safeSetItem } from '@/utils/safeStorage'
 
 const RECENT_KEY = 'bilimusic_recent'
 const FAVORITES_KEY = 'bilimusic_favorites'
@@ -16,7 +17,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   playQuality: '高品质',
   downloadQuality: '高品质',
   downloadFormat: 'audio',
-  downloadDir: 'D:\\Music\\biliMusic',
+  downloadDir: '',
   autoPlay: true,
   showLyrics: true,
 }
@@ -34,7 +35,7 @@ export function loadRecentTracks(): Track[] {
 
 export function saveRecentTracks(tracks: Track[]) {
   try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(tracks.slice(0, 50)))
+    safeSetItem(RECENT_KEY, JSON.stringify(tracks.slice(0, 50)))
   } catch { /* ignore */ }
 }
 
@@ -53,7 +54,7 @@ export function loadFavoriteTracks(): Track[] {
 
 export function saveFavoriteTracks(tracks: Track[]) {
   try {
-    localStorage.setItem(FAVORITES_KEY, JSON.stringify(tracks))
+    safeSetItem(FAVORITES_KEY, JSON.stringify(tracks))
     window.dispatchEvent(new CustomEvent(FAVORITES_CHANGED_EVENT))
   } catch { /* ignore */ }
 }
@@ -102,7 +103,7 @@ function loadTombstones(key: string): Tombstone[] {
 }
 function saveTombstones(key: string, list: Tombstone[]): void {
   try {
-    localStorage.setItem(key, JSON.stringify(list))
+    safeSetItem(key, JSON.stringify(list))
   } catch {
     /* ignore */
   }
@@ -139,7 +140,7 @@ export function loadPlaylists(): Playlist[] {
 
 export function savePlaylists(playlists: Playlist[]) {
   try {
-    localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(playlists))
+    safeSetItem(PLAYLISTS_KEY, JSON.stringify(playlists))
     notifyPlaylistsChanged()
   } catch {
     // ignore
@@ -195,7 +196,7 @@ export function addTrackToPlaylist(playlistId: string, track: Track): Playlist |
 
 export function loadAppSettings(): AppSettings {
   try {
-    const raw = readStoredItem(SETTINGS_KEY)
+    const raw = readStoredItemSync(SETTINGS_KEY)
     if (!raw) return DEFAULT_APP_SETTINGS
     return { ...DEFAULT_APP_SETTINGS, ...JSON.parse(raw) }
   } catch {
@@ -205,7 +206,7 @@ export function loadAppSettings(): AppSettings {
 
 export function saveAppSettings(settings: AppSettings) {
   try {
-    writeStoredItem(SETTINGS_KEY, JSON.stringify(settings))
+    void writeStoredItem(SETTINGS_KEY, JSON.stringify(settings))
     notifySettingsChanged()
   } catch {
     // ignore

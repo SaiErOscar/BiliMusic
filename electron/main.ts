@@ -429,7 +429,7 @@ function showTrayWindowAt(x: number, y: number) {
   if (!win) return
   if (!trayWindowReady) {
     pendingTrayShow = { x, y }
-    return
+
   }
   win.setPosition(x, y, false)
   updateTrayState()
@@ -450,7 +450,7 @@ function toggleTrayWindow() {
   if (win.isVisible()) {
     win.setOpacity(0)
     win.hide()
-    return
+
   }
 
   const bounds = tray.getBounds()
@@ -486,14 +486,14 @@ function sendTrayCommand(command: TrayCommand) {
   if (command === 'show-window') {
     showMainWindow()
     trayWindow?.hide()
-    return
+
   }
   if (command === 'quit') {
     isQuitting = true
     trayWindow?.close()
     mainWindow?.destroy()
     app.quit()
-    return
+
   }
   mainWindow?.webContents.send('tray:player-command', command)
 }
@@ -599,20 +599,19 @@ ipcMain.on('tray:player-state', (_event, state: TrayPlayerState) => {
 })
 ipcMain.on('tray:command', (_event, command: TrayCommand) => sendTrayCommand(command))
 ipcMain.handle('tray:get-state', () => trayPlayerState)
-ipcMain.on('persistent-storage:get', (event, key: string) => {
+ipcMain.handle('persistent-storage:get', (_event, key: string) => {
   if (typeof key !== 'string') {
-    event.returnValue = null
-    return
+    return null
   }
-  event.returnValue = readPersistentStore()[key] ?? null
+  return readPersistentStore()[key] ?? null
 })
-ipcMain.on('persistent-storage:set', (_event, key: string, value: string) => {
+ipcMain.handle('persistent-storage:set', (_event, key: string, value: string) => {
   if (typeof key !== 'string' || typeof value !== 'string') return
   const store = readPersistentStore()
   store[key] = value
   writePersistentStore(store)
 })
-ipcMain.on('persistent-storage:remove', (_event, key: string) => {
+ipcMain.handle('persistent-storage:remove', (_event, key: string) => {
   if (typeof key !== 'string') return
   const store = readPersistentStore()
   delete store[key]

@@ -5,7 +5,26 @@
  * 主进程仅保留下载、扫码登录、Cookie 管理等无法在渲染层完成的 IPC。
  */
 
-import type { TrackSource } from '@/services/bilibiliApi'
+import {
+  searchVideo as rendererSearch,
+  getVideoDetail as rendererDetail,
+  getVideoComments as rendererComments,
+  extractAudioFromVideo,
+  getMusicRanking as rendererRanking,
+  getMusicComprehensiveRank,
+  getNewMusic,
+  searchUser,
+  getUserVideos as rendererUserVideos,
+  getRecommendedVideos as rendererRec,
+  getPopularVideos as rendererPopular,
+  getNavInfo,
+  generateQrCode as rendererGen,
+  pollQrCode as rendererPoll,
+  getPlayUrl,
+  getBestAudioUrl,
+  getBestVideoUrl,
+  type TrackSource,
+} from '@/services/bilibiliApi'
 
 // ===== 搜索 =====
 
@@ -37,8 +56,6 @@ export async function searchVideo(keyword: string, page = 1, pageSize = 20): Pro
     duration: item.duration,
     pic: normalizePic(item.pic),
   })
-
-  const { searchVideo: rendererSearch } = await import('@/services/bilibiliApi')
   const data = await rendererSearch(keyword, page, pageSize)
   const totalResults = data.numResults || 0
   return {
@@ -68,7 +85,6 @@ export interface VideoInfo {
 }
 
 export async function getVideoDetail(bvid: string): Promise<VideoInfo> {
-  const { getVideoDetail: rendererDetail } = await import('@/services/bilibiliApi')
   const data = await rendererDetail(bvid)
   return {
     bvid: data.bvid,
@@ -105,7 +121,6 @@ export async function getVideoComments(
   page = 1,
   pageSize = 20,
 ): Promise<{ items: VideoComment[]; total: number }> {
-  const { getVideoDetail: rendererDetail, getVideoComments: rendererComments } = await import('@/services/bilibiliApi')
   let oid = 0
 
   if (target.bvid) {
@@ -148,7 +163,6 @@ export async function extractAudio(
   fallback?: { aid?: string | number; cid?: string | number },
   quality?: import('@/services/bilibiliApi').AudioQualityPreference,
 ): Promise<TrackSource> {
-  const { extractAudioFromVideo } = await import('@/services/bilibiliApi')
   return extractAudioFromVideo(bvid, fallback, quality)
 }
 
@@ -188,7 +202,6 @@ export async function downloadTrack(
   quality: import('@/services/bilibiliApi').AudioQualityPreference,
   customDir?: string,
 ): Promise<{ filePath: string; size: number }> {
-  const { getVideoDetail, getPlayUrl, getBestAudioUrl, getBestVideoUrl } = await import('@/services/bilibiliApi')
   
   // 获取播放地址
   let cid: number | undefined
@@ -220,7 +233,6 @@ export async function downloadTrack(
 // ===== 用户信息 =====
 
 export async function getUserInfo(): Promise<{ isLogin: boolean; mid: number; uname: string; face: string }> {
-  const { getNavInfo } = await import('@/services/bilibiliApi')
   const data = await getNavInfo()
   return {
     isLogin: data.isLogin,
@@ -254,8 +266,6 @@ export async function getMusicRanking(): Promise<VideoInfo[]> {
       },
     }
   }
-
-  const { getMusicRanking: rendererRanking } = await import('@/services/bilibiliApi')
   const data = await rendererRanking()
   return (Array.isArray(data) ? data : (data as any).list || (data as any).data || []).map(parseItem)
 }
@@ -295,14 +305,12 @@ function mapMusicSong(x: import('@/services/bilibiliApi').MusicCenterItem): Musi
 
 // 综合热歌榜
 export async function getMusicCenterRank(ps = 30): Promise<MusicSong[]> {
-  const { getMusicComprehensiveRank } = await import('@/services/bilibiliApi')
   const list = await getMusicComprehensiveRank(ps)
   return list.filter((x) => playableBvid(x)).map(mapMusicSong)
 }
 
 // 新歌速递
 export async function getNewSongs(): Promise<MusicSong[]> {
-  const { getNewMusic } = await import('@/services/bilibiliApi')
   const list = await getNewMusic()
   return list.filter((x) => x.bvid).map(mapMusicSong)
 }
@@ -320,7 +328,6 @@ export interface UserResult {
 }
 
 export async function searchUsers(keyword: string, page = 1, pageSize = 20): Promise<{ items: UserResult[]; totalPages: number; totalResults: number }> {
-  const { searchUser } = await import('@/services/bilibiliApi')
   const data = await searchUser(keyword, page, pageSize)
   const items = (data.result || []).map((u) => ({
     mid: u.mid,
@@ -356,7 +363,6 @@ function parseLength(len: string): number {
 }
 
 export async function getUserVideos(mid: number, page = 1, pageSize = 30): Promise<{ items: UpVideo[]; total: number }> {
-  const { getUserVideos: rendererUserVideos } = await import('@/services/bilibiliApi')
   const data = await rendererUserVideos(mid, page, pageSize)
   const items = (data.list?.vlist || []).map((v) => ({
     bvid: v.bvid,
@@ -388,8 +394,6 @@ export async function getRecommendVideos(ps = 20): Promise<VideoInfo[]> {
       favorite: v.stat?.favorite || v.favorites || 0,
     },
   })
-
-  const { getRecommendedVideos: rendererRec } = await import('@/services/bilibiliApi')
   const data = await rendererRec(ps)
   return (data.item || []).map(parseItem)
 }
@@ -397,7 +401,6 @@ export async function getRecommendVideos(ps = 20): Promise<VideoInfo[]> {
 // ===== 热门/推荐 =====
 
 export async function getPopularVideos(ps = 10, pn = 1): Promise<VideoInfo[]> {
-  const { getPopularVideos: rendererPopular } = await import('@/services/bilibiliApi')
   const data = await rendererPopular(ps, pn)
   return data.list?.map((v) => ({
     bvid: v.bvid,
@@ -436,8 +439,6 @@ export async function generateQrCode(): Promise<QrCodeData> {
     const data = await window.electronAPI.biliApi.qrGenerate()
     return { url: data.url, qrcodeKey: data.qrcodeKey }
   }
-
-  const { generateQrCode: rendererGen } = await import('@/services/bilibiliApi')
   return rendererGen()
 }
 
@@ -445,8 +446,6 @@ export async function pollQrCode(qrcodeKey: string): Promise<QrPollResult> {
   if (window.electronAPI?.biliApi) {
     return window.electronAPI.biliApi.qrPoll(qrcodeKey)
   }
-
-  const { pollQrCode: rendererPoll } = await import('@/services/bilibiliApi')
   return rendererPoll(qrcodeKey)
 }
 
