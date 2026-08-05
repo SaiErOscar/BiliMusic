@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { Download, Loader2, Check, X, FolderOpen, Music, FileText, Edit3, FileMusic } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { downloadTrack, selectDownloadFolder } from '@/services/api'
+import { useAppSettings } from '@/hooks/useAppSettings'
 import { cleanTitle, getLyricForTrack, formatLrc } from '@/services/lyrics'
 import type { Track, DownloadFormat } from '@/types'
 
@@ -26,8 +27,9 @@ interface DownloadProgress {
  * 支持同时下载歌词和自动填充歌手属性
  */
 export default function BatchDownloadDialog({ tracks, onClose }: BatchDownloadDialogProps) {
+  const { settings } = useAppSettings()
   const [format, setFormat] = useState<DownloadFormat>('audio')
-  const [downloadDir, setDownloadDir] = useState('')
+  const [downloadDir, setDownloadDir] = useState(settings.downloadDir || '')
   const [nameMode, setNameMode] = useState<NameMode>('video')
   const [customName, setCustomName] = useState('')
   const [includeLyric, setIncludeLyric] = useState(true)
@@ -86,7 +88,7 @@ export default function BatchDownloadDialog({ tracks, onClose }: BatchDownloadDi
           if (lyricResult.artistName) {
             artist = lyricResult.artistName
           }
-          if (includeLyric && lyricResult.synced) {
+          if (includeLyric && lyricResult.lines.length > 0) {
             lyricContent = formatLrc(lyricResult)
           }
         }

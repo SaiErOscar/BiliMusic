@@ -101,7 +101,7 @@ export default function DownloadButton({
         if (lyricResult.artistName) {
           artist = lyricResult.artistName
         }
-        if (includeLyric && lyricResult.synced) {
+        if (includeLyric && lyricResult.lines.length > 0) {
           lyricContent = formatLrc(lyricResult)
         }
       }

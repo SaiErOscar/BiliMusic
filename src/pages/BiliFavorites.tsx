@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Play, RefreshCw, Loader2, FolderHeart, Check, ChevronDown } from 'lucide-react'
+import { Play, RefreshCw, Loader2, FolderHeart, Check, ChevronDown, Download, ListPlus } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -13,6 +13,8 @@ import {
 } from '@/components/AppleMusicPage'
 import type { Track } from '@/types'
 import type { FavoriteFolder, FavoriteItem } from '@/services/bilibiliApi'
+import BatchDownloadDialog from '@/components/BatchDownloadDialog'
+import { createPlaylist, addTrackToPlaylist, PLAYLISTS_CHANGED_EVENT } from '@/utils/storage'
 import {
   listBiliFavoriteFolders,
   importBiliFavorites,
@@ -52,6 +54,8 @@ export default function BiliFavorites() {
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
   const [folderDropdownOpen, setFolderDropdownOpen] = useState(false)
+  const [batchDownloading, setBatchDownloading] = useState(false)
+  const [exportMessage, setExportMessage] = useState('')
 
   // Load folders on mount
   const loadFolders = useCallback(async () => {
@@ -138,6 +142,21 @@ export default function BiliFavorites() {
     } finally {
       setSyncing(false)
     }
+  }
+
+  const handleExportToPlaylist = () => {
+    if (!tracks.length || !selectedFolderInfo) return
+    const playlist = createPlaylist({
+      name: selectedFolderInfo.title,
+      description: `从 B站收藏夹导入 · ${new Date().toLocaleDateString()}`,
+      coverUrl: tracks[0]?.coverUrl || '',
+    })
+    for (const track of tracks) {
+      addTrackToPlaylist(playlist.id, track)
+    }
+    window.dispatchEvent(new CustomEvent(PLAYLISTS_CHANGED_EVENT))
+    setExportMessage(`已导出 ${tracks.length} 首到歌单「${selectedFolderInfo.title}」`)
+    setTimeout(() => setExportMessage(''), 4000)
   }
 
   const handlePlayAll = () => {
@@ -247,10 +266,20 @@ export default function BiliFavorites() {
               双向同步
             </ActionButton>
             {tracks.length > 0 && (
-              <ActionButton onClick={handlePlayAll}>
-                <Play size={16} fill="currentColor" />
-                播放全部
-              </ActionButton>
+              <>
+                <ActionButton tone="subtle" onClick={() => setBatchDownloading(true)}>
+                  <Download size={15} />
+                  下载全部
+                </ActionButton>
+                <ActionButton tone="subtle" onClick={handleExportToPlaylist}>
+                  <ListPlus size={15} />
+                  导出为歌单
+                </ActionButton>
+                <ActionButton onClick={handlePlayAll}>
+                  <Play size={16} fill="currentColor" />
+                  播放全部
+                </ActionButton>
+              </>
             )}
           </div>
         )}
@@ -266,6 +295,19 @@ export default function BiliFavorites() {
           fontSize: 13,
         }}>
           {syncMessage}
+        </div>
+      )}
+
+      {exportMessage && (
+        <div style={{
+          margin: '0 24px 12px',
+          padding: '10px 16px',
+          borderRadius: 12,
+          background: 'rgba(48, 209, 88, 0.12)',
+          color: '#30d158',
+          fontSize: 13,
+        }}>
+          {exportMessage}
         </div>
       )}
 
@@ -301,6 +343,12 @@ export default function BiliFavorites() {
             ))}
           </TrackList>
         </MusicSection>
+      )}
+      {batchDownloading && (
+        <BatchDownloadDialog
+          tracks={tracks}
+          onClose={() => setBatchDownloading(false)}
+        />
       )}
     </MusicPageShell>
   )

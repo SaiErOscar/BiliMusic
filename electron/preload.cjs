@@ -4,12 +4,12 @@ console.log('[preload] Electron preload script starting...')
 
 const biliApi = {
   // 下载音频文件到本地
-  downloadAudio: (audioUrl, filename, customDir) =>
-    ipcRenderer.invoke('bili:downloadAudio', audioUrl, filename, customDir),
+  downloadAudio: (audioUrl, filename, customDir, options) =>
+    ipcRenderer.invoke('bili:downloadAudio', audioUrl, filename, customDir, options),
 
   // 下载视频（合并画面+声音）
-  downloadVideo: (videoUrl, audioUrl, filename, customDir) =>
-    ipcRenderer.invoke('bili:downloadVideo', videoUrl, audioUrl, filename, customDir),
+  downloadVideo: (videoUrl, audioUrl, filename, customDir, options) =>
+    ipcRenderer.invoke('bili:downloadVideo', videoUrl, audioUrl, filename, customDir, options),
 
   // 打开下载目录
   openDownloadDir: (dirPath) =>
