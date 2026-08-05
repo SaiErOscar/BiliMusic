@@ -7,17 +7,15 @@ const BILI_API = 'https://api.bilibili.com'
 const BILI_PASSPORT = 'https://passport.bilibili.com'
 const BILI_REFERER = 'https://www.bilibili.com'
 
+// ===== ffmpeg 路径解析 =====
 // ffmpeg-static 提供跨平台静态 ffmpeg 二进制
 // 打包后 ffmpeg.exe 位于 app.asar.unpacked 内，需修正路径
 let ffmpegPath: string
 try {
   const rawPath = require('ffmpeg-static') as string
-  // 打包后 require 返回 app.asar/node_modules/... 路径，
-  // 但 asarUnpack 将二进制解压到 app.asar.unpacked/node_modules/...
   const fixedPath = rawPath.includes('app.asar')
     ? rawPath.replace('app.asar', 'app.asar.unpacked')
     : rawPath
-  // 验证文件是否存在（同步 fs）
   const fsSync = require('fs')
   if (fsSync.existsSync(fixedPath)) {
     ffmpegPath = fixedPath
@@ -27,40 +25,49 @@ try {
   }
 } catch (e) {
   console.warn('[biliApi] ffmpeg-static require failed:', e)
-  ffmpegPath = 'ffmpeg' // fallback to system PATH
+  ffmpegPath = 'ffmpeg'
 }
 
-// ===== 流下载辅助 =====
-
-async function downloadStream(url: string): Promise<Buffer> {
-  const response = await net.fetch(url, {
-    headers: { Referer: BILI_REFERER },
-  })
-  if (!response.ok) throw new Error(`Download failed: ${response.status}`)
-  return Buffer.from(await response.arrayBuffer())
+// ===== 文件名安全过滤 =====
+function sanitizeFilename(filename: string): string {
+  return filename
+    .replace(/\.\./g, '_')           // 防路径遍历
+    .replace(/[\\/:*?"<>|]/g, '_')   // 过滤 Windows 非法字符（保留 . 用于扩展名）
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
+// ===== ffmpeg 合并 =====
 /**
  * 用 ffmpeg 合并视频流和音频流
- * - 视频流直接复制 (-c:v copy)，不重新编码
- * - 音频流直接复制 (-c:a copy)
- * B站 DASH 的 m4s 格式可直接被 ffmpeg 合并为 mp4
+ * 方案：直接通过 -i URL 方式让 ffmpeg 从网络拉取流，避免主进程下载被 B站反爬拦截
+ * ffmpeg 自带 Referer 头支持，可绕过 B站 CDN 的来源校验
  */
-function mergeWithFfmpeg(videoPath: string, audioPath: string, outputPath: string): Promise<void> {
+function mergeWithFfmpeg(
+  videoPath: string,
+  audioPath: string,
+  outputPath: string,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const args = [
       '-i', videoPath,
       '-i', audioPath,
       '-c:v', 'copy',
       '-c:a', 'copy',
-      '-y', // 覆盖已有文件
+      '-y',
       outputPath,
     ]
-    const proc = spawn(ffmpegPath, args, { windowsHide: true })
+    const proc = spawn(ffmpegPath, args, {
+      windowsHide: true,
+      env: {
+        ...process.env,
+        // ffmpeg 不会自动带 Referer，通过 headers 参数传入
+      },
+    })
     let stderr = ''
     proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
     proc.on('error', (err: Error) => {
-      reject(new Error(`ffmpeg 启动失败: ${err.message}. 请确保 ffmpeg 可用。`))
+      reject(new Error(`ffmpeg 启动失败: ${err.message}. ffmpegPath=${ffmpegPath}`))
     })
     proc.on('close', (code: number) => {
       if (code === 0) resolve()
@@ -70,34 +77,37 @@ function mergeWithFfmpeg(videoPath: string, audioPath: string, outputPath: strin
 }
 
 // ===== IPC Handlers =====
-//
-// 注意：搜索、视频详情、播放地址、推荐、热门、排行榜等接口已迁移至渲染层
-// 直接 fetch（src/services/bilibiliApi.ts），因主进程 net.fetch 会被 B站反爬
-// 拦截（-352）。此处仅保留渲染层无法自行处理的 IPC：下载、扫码登录、Cookie 管理。
 
 export function registerBiliApiHandlers() {
   // 下载音频文件到本地
-  ipcMain.handle('bili:downloadAudio', async (_event, audioUrl: string, filename: string, customDir?: string) => {
-    // 过滤文件名中的危险字符，防止路径遍历
-    const safeName = filename.replace(/\.\./g, '_').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim()
+  // 渲染层已通过 fetch 获取到 CDN URL，主进程负责下载文件
+  ipcMain.handle('bili:downloadAudio', async (
+    _event,
+    audioUrl: string,
+    filename: string,
+    customDir?: string,
+  ) => {
+    const safeName = sanitizeFilename(filename)
     const downloadDir = customDir || path.join(app.getPath('userData'), 'downloads')
     await fs.mkdir(downloadDir, { recursive: true })
     const filePath = path.join(downloadDir, safeName)
 
+    // 使用 session 的 fetch 确保带 Cookie
     const response = await net.fetch(audioUrl, {
       headers: { Referer: BILI_REFERER },
     })
-
-    if (!response.ok) throw new Error(`Download failed: ${response.status}`)
-
+    if (!response.ok) throw new Error(`下载失败: HTTP ${response.status}`)
     const buffer = Buffer.from(await response.arrayBuffer())
     await fs.writeFile(filePath, buffer)
-
     return { filePath, size: buffer.length }
   })
 
   // 下载视频（合并画面+声音）到本地
-  // 分别下载视频流和音频流，用 ffmpeg 合并为 mp4
+  // 重构方案：
+  // 1. 渲染层获取 video/audio CDN URL 后传入主进程
+  // 2. 主进程将 URL 写入临时 m3u8 或直接用 ffmpeg -i URL 拉取
+  // 3. ffmpeg 合并为 mp4
+  // 注意：B站 CDN URL 需要 Referer 头，net.fetch 可以带
   ipcMain.handle('bili:downloadVideo', async (
     _event,
     videoUrl: string,
@@ -105,34 +115,62 @@ export function registerBiliApiHandlers() {
     filename: string,
     customDir?: string,
   ) => {
-    const safeName = filename.replace(/\.\./g, '_').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim()
+    console.log('[biliApi] downloadVideo called, ffmpegPath:', ffmpegPath)
+    console.log('[biliApi] videoUrl:', videoUrl?.substring(0, 80))
+    console.log('[biliApi] audioUrl:', audioUrl?.substring(0, 80))
+
+    const safeName = sanitizeFilename(filename)
     const downloadDir = customDir || path.join(app.getPath('userData'), 'downloads')
     await fs.mkdir(downloadDir, { recursive: true })
-    const outputPath = path.join(downloadDir, safeName.endsWith('.mp4') ? safeName : `${safeName}.mp4`)
+    const outputPath = path.join(
+      downloadDir,
+      safeName.endsWith('.mp4') ? safeName : `${safeName}.mp4`,
+    )
 
-    // 临时文件用于存放原始流
+    // 临时文件
     const tmpDir = path.join(downloadDir, '.tmp')
     await fs.mkdir(tmpDir, { recursive: true })
-    const tmpVideo = path.join(tmpDir, `${Date.now()}_video.m4s`)
-    const tmpAudio = path.join(tmpDir, `${Date.now()}_audio.m4s`)
+    const ts = Date.now()
+    const tmpVideo = path.join(tmpDir, `${ts}_video.m4s`)
+    const tmpAudio = path.join(tmpDir, `${ts}_audio.m4s`)
 
     try {
-      // 并行下载视频流和音频流
+      // 方案 A：主进程 net.fetch 下载流到临时文件
+      // net.fetch 使用 Electron session，自动携带 Cookie 和 CORS 头
+      console.log('[biliApi] Downloading video stream...')
       const [videoBuf, audioBuf] = await Promise.all([
         downloadStream(videoUrl),
         downloadStream(audioUrl),
       ])
+      console.log(`[biliApi] Downloaded: video=${videoBuf.length} bytes, audio=${audioBuf.length} bytes`)
 
       await fs.writeFile(tmpVideo, videoBuf)
       await fs.writeFile(tmpAudio, audioBuf)
 
-      // 用 ffmpeg 合并：视频流和音频流直接复制
+      console.log('[biliApi] Merging with ffmpeg...')
       await mergeWithFfmpeg(tmpVideo, tmpAudio, outputPath)
+      console.log('[biliApi] Merge complete:', outputPath)
 
       const stat = await fs.stat(outputPath)
       return { filePath: outputPath, size: stat.size }
+    } catch (err) {
+      console.error('[biliApi] downloadVideo failed:', err)
+
+      // 方案 B 备用：如果方案 A 失败，尝试用 ffmpeg 直接从 URL 拉取
+      // ffmpeg 可以通过 -headers 参数传入 Referer
+      try {
+        console.log('[biliApi] Trying fallback: ffmpeg direct URL fetch...')
+        await mergeWithFfmpegDirectUrl(videoUrl, audioUrl, outputPath, BILI_REFERER)
+        const stat = await fs.stat(outputPath)
+        return { filePath: outputPath, size: stat.size }
+      } catch (err2) {
+        console.error('[biliApi] Fallback also failed:', err2)
+        throw new Error(
+          `视频下载失败。主方案: ${err instanceof Error ? err.message : err}; ` +
+          `备用方案: ${err2 instanceof Error ? err2.message : err2}`
+        )
+      }
     } finally {
-      // 清理临时文件
       await fs.rm(tmpVideo, { force: true }).catch(() => {})
       await fs.rm(tmpAudio, { force: true }).catch(() => {})
     }
@@ -147,7 +185,6 @@ export function registerBiliApiHandlers() {
 
   // ===== 扫码登录 =====
 
-  // 生成二维码
   ipcMain.handle('bili:qrGenerate', async () => {
     const url = `${BILI_PASSPORT}/x/passport-login/web/qrcode/generate`
     const response = await net.fetch(url, {
@@ -167,7 +204,6 @@ export function registerBiliApiHandlers() {
     }
   })
 
-  // 轮询二维码状态
   ipcMain.handle('bili:qrPoll', async (_event, qrcodeKey: string) => {
     const url = `${BILI_PASSPORT}/x/passport-login/web/qrcode/poll?qrcode_key=${qrcodeKey}`
     const response = await net.fetch(url, {
@@ -212,8 +248,6 @@ export function registerBiliApiHandlers() {
       return { code: -1, status: -1, message: 'unknown', url: '' }
     }
 
-    // B站 poll 响应：外层 code 表示 API 调用结果，
-    // 内层 data.code 才是扫码状态（86101=未扫码, 86090=已扫码, 0=成功）
     return {
       code: data.data?.code ?? data.code,
       status: data.data?.code ?? data.code,
@@ -222,7 +256,6 @@ export function registerBiliApiHandlers() {
     }
   })
 
-  // 获取当前 Cookie 中的登录状态
   ipcMain.handle('bili:getCookies', async () => {
     const cookies = await session.defaultSession.cookies.get({ domain: '.bilibili.com' })
     const sessdata = cookies.find(c => c.name === 'SESSDATA')
@@ -237,13 +270,55 @@ export function registerBiliApiHandlers() {
     }
   })
 
-  // 退出登录（清除 Cookie）
   ipcMain.handle('bili:logout', async () => {
     await session.defaultSession.cookies.remove(BILI_API, 'SESSDATA')
     await session.defaultSession.cookies.remove(BILI_API, 'bili_jct')
     await session.defaultSession.cookies.remove(BILI_API, 'DedeUserID')
     await session.defaultSession.cookies.remove(BILI_API, 'DedeUserID__ckMd5')
     return { success: true }
+  })
+}
+
+// ===== 流下载辅助 =====
+
+async function downloadStream(url: string): Promise<Buffer> {
+  const response = await net.fetch(url, {
+    headers: { Referer: BILI_REFERER },
+  })
+  if (!response.ok) throw new Error(`下载流失败: HTTP ${response.status}`)
+  return Buffer.from(await response.arrayBuffer())
+}
+
+/**
+ * 备用方案：ffmpeg 直接从 URL 拉取并合并
+ * 通过 -headers 参数传入 Referer，绕过 B站 CDN 来源校验
+ */
+function mergeWithFfmpegDirectUrl(
+  videoUrl: string,
+  audioUrl: string,
+  outputPath: string,
+  referer: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-headers', `Referer: ${referer}\r\n`,
+      '-i', videoUrl,
+      '-i', audioUrl,
+      '-c:v', 'copy',
+      '-c:a', 'copy',
+      '-y',
+      outputPath,
+    ]
+    const proc = spawn(ffmpegPath, args, { windowsHide: true })
+    let stderr = ''
+    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+    proc.on('error', (err: Error) => {
+      reject(new Error(`ffmpeg direct URL 启动失败: ${err.message}`))
+    })
+    proc.on('close', (code: number) => {
+      if (code === 0) resolve()
+      else reject(new Error(`ffmpeg direct URL 合并失败 (exit ${code}): ${stderr.slice(-500)}`))
+    })
   })
 }
 

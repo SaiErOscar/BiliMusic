@@ -261,13 +261,6 @@ export default function PlayerBar() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 22 }}>
-          <TransportButton
-            active={player.isShuffled}
-            onClick={() => player.setIsShuffled(!player.isShuffled)}
-            ariaLabel="随机播放"
-          >
-            <Shuffle size={18} />
-          </TransportButton>
           <TransportButton onClick={player.prev} ariaLabel="上一首">
             <SkipBack size={21} />
           </TransportButton>
@@ -282,14 +275,18 @@ export default function PlayerBar() {
           <TransportButton
             active={player.repeatMode !== 'none'}
             onClick={() => {
-              const modes = ['none', 'all', 'one'] as const
+              const modes = ['none', 'all', 'one', 'shuffle'] as const
               const idx = modes.indexOf(player.repeatMode)
-              player.setRepeatMode(modes[(idx + 1) % 3])
+              player.setRepeatMode(modes[(idx + 1) % 4])
             }}
-            ariaLabel="循环模式"
+            ariaLabel={
+              player.repeatMode === 'none' ? '顺序播放' :
+              player.repeatMode === 'all' ? '列表循环' :
+              player.repeatMode === 'one' ? '单曲循环' : '随机播放'
+            }
           >
             <span style={{ position: 'relative', display: 'flex' }}>
-              <Repeat size={18} />
+              {player.repeatMode === 'shuffle' ? <Shuffle size={18} /> : <Repeat size={18} />}
               {player.repeatMode === 'one' && (
                 <span
                   style={{

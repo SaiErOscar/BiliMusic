@@ -357,11 +357,8 @@ export default function NowPlaying() {
                   </div>
                 </div>
 
-                {/* 中间：随机 + 上一首 + 播放 + 下一首 + 循环 */}
+                {/* 中间：上一首 + 播放 + 下一首 + 循环/随机 */}
                 <div className="now-playing-control-cluster">
-                  <RoundIcon active={player.isShuffled} onClick={() => player.setIsShuffled(!player.isShuffled)} title="随机播放">
-                    <Shuffle size={20} />
-                  </RoundIcon>
                   <RoundIcon onClick={player.prev} title="上一首">
                     <SkipBack size={27} />
                   </RoundIcon>
@@ -383,13 +380,17 @@ export default function NowPlaying() {
                   <RoundIcon
                     active={player.repeatMode !== 'none'}
                     onClick={() => {
-                      const modes = ['none', 'all', 'one'] as const
-                      player.setRepeatMode(modes[(modes.indexOf(player.repeatMode) + 1) % 3])
+                      const modes = ['none', 'all', 'one', 'shuffle'] as const
+                      player.setRepeatMode(modes[(modes.indexOf(player.repeatMode) + 1) % 4])
                     }}
-                    title="循环模式"
+                    title={
+                      player.repeatMode === 'none' ? '顺序播放' :
+                      player.repeatMode === 'all' ? '列表循环' :
+                      player.repeatMode === 'one' ? '单曲循环' : '随机播放'
+                    }
                   >
                     <span className="now-playing-repeat">
-                      <Repeat size={20} />
+                      {player.repeatMode === 'shuffle' ? <Shuffle size={20} /> : <Repeat size={20} />}
                       {player.repeatMode === 'one' && <span>1</span>}
                     </span>
                   </RoundIcon>

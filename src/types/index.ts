@@ -31,7 +31,7 @@ export interface Tombstone {
 }
 
 export type ThemeMode = 'light' | 'dark' | 'system'
-export type RepeatMode = 'none' | 'one' | 'all'
+export type RepeatMode = 'none' | 'all' | 'one' | 'shuffle'
 export type SidebarState = 'expanded' | 'collapsed' | 'auto'
 export type DownloadFormat = 'audio' | 'video'
 

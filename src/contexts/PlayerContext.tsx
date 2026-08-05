@@ -1,22 +1,47 @@
-import { createContext, useContext, useState, useCallback, useMemo, useRef, useEffect, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { createContext, useContext } from 'react'
 import type { Track, RepeatMode } from '@/types'
-import { extractAudio } from '@/services/api'
-import { clearAudioUrlCache, type AudioQualityPreference } from '@/services/bilibiliApi'
-import { addRecentTrack, toggleFavoriteTrack, loadFavoriteTracks } from '@/utils/storage'
 import { useAppSettings } from '@/hooks/useAppSettings'
+import { toggleFavoriteTrack, loadFavoriteTracks } from '@/utils/storage'
 
-interface PlayerState {
+function shuffleArray<T>(arr: T[]): T[] {
+  const result = [...arr]
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[result[i], result[j]] = [result[j], result[i]]
+  }
+  return result
+}
+
+function shouldIgnoreSpaceShortcut(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  if (!el) return false
+  const tag = el.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
+}
+
+function getArtworkType(url: string): string {
+  const ext = url.split('.').pop()?.toLowerCase()
+  switch (ext) {
+    case 'png': return 'image/png'
+    case 'jpg':
+    case 'jpeg': return 'image/jpeg'
+    case 'webp': return 'image/webp'
+    case 'gif': return 'image/gif'
+    default: return 'image/png'
+  }
+}
+
+interface PlayerContext {
   currentTrack: Track | null
   isPlaying: boolean
   volume: number
   isMuted: boolean
   repeatMode: RepeatMode
+  /** 派生：repeatMode === 'shuffle' */
   isShuffled: boolean
   queue: Track[]
   loadingAudio: boolean
-}
-
-interface PlayerActions {
   play: (track: Track) => void
   pause: () => void
   togglePlay: () => void
@@ -25,12 +50,13 @@ interface PlayerActions {
   setVolume: (v: number) => void
   setIsMuted: (m: boolean) => void
   setRepeatMode: (m: RepeatMode) => void
+  /** 已废弃：请使用 setRepeatMode('shuffle') 代替 */
   setIsShuffled: (s: boolean) => void
   addToQueue: (track: Track) => void
   addTracksToQueue: (tracks: Track[]) => void
   removeFromQueue: (trackId: string) => void
   removeMultipleFromQueue: (trackIds: string[]) => void
-  moveInQueue: (fromIndex: number, toIndex: number) => void
+  moveInQueue: (from: number, to: number) => void
   playNow: (track: Track) => void
   playNext: (track: Track) => void
   clearQueue: () => void
@@ -45,7 +71,9 @@ interface PlayerProgress {
   setProgress: (p: number) => void
 }
 
-type PlayerContext = PlayerState & PlayerActions
+const PlayerContext = createContext<PlayerContext | null>(null)
+const PlayerProgressContext = createContext<PlayerProgress | null>(null)
+const PLAYER_STATE_KEY = 'bilimusic_player_state'
 
 interface PersistedPlayerState {
   currentTrack: Track | null
@@ -59,10 +87,6 @@ interface PersistedPlayerState {
   wasPlaying: boolean
   currentIndex: number
 }
-
-const PlayerContext = createContext<PlayerContext | null>(null)
-const PlayerProgressContext = createContext<PlayerProgress | null>(null)
-const PLAYER_STATE_KEY = 'bilimusic_player_state'
 
 function loadPersistedPlayerState(): PersistedPlayerState {
   const fallbackVolume = localStorage.getItem('bilimusic_volume')
@@ -84,6 +108,15 @@ function loadPersistedPlayerState(): PersistedPlayerState {
     if (!raw) return fallback
     const parsed = JSON.parse(raw) as Partial<PersistedPlayerState>
     const queue = Array.isArray(parsed.queue) ? parsed.queue : []
+
+    // 迁移：旧版本有独立的 isShuffled，新版合并到 repeatMode
+    let repeatMode: RepeatMode = 'none'
+    if (parsed.repeatMode === 'one' || parsed.repeatMode === 'all' || parsed.repeatMode === 'shuffle') {
+      repeatMode = parsed.repeatMode
+    } else if (parsed.isShuffled) {
+      repeatMode = 'shuffle'  // 迁移旧的 shuffle 状态
+    }
+
     return {
       ...fallback,
       ...parsed,
@@ -93,55 +126,17 @@ function loadPersistedPlayerState(): PersistedPlayerState {
       duration: Math.max(0, Number(parsed.duration || 0)),
       volume: Math.min(100, Math.max(0, Number(parsed.volume ?? fallback.volume))),
       currentIndex: Number.isFinite(parsed.currentIndex) ? Number(parsed.currentIndex) : -1,
-      repeatMode: parsed.repeatMode === 'one' || parsed.repeatMode === 'all' ? parsed.repeatMode : 'none',
+      repeatMode,
+      isShuffled: repeatMode === 'shuffle',
     }
   } catch {
     return fallback
   }
 }
 
-function shuffleArray<T>(arr: T[]): T[] {
-  const a = [...arr]
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]]
-  }
-  return a
-}
-
-function shouldIgnoreSpaceShortcut(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  if (target.isContentEditable) return true
-  const tagName = target.tagName.toLowerCase()
-  if (['input', 'textarea', 'select', 'button'].includes(tagName)) return true
-  const role = target.getAttribute('role')
-  return Boolean(role && ['button', 'textbox', 'searchbox', 'slider', 'switch', 'combobox'].includes(role))
-}
-
-function getArtworkType(url: string): string | undefined {
-  if (/\.webp($|\?)/i.test(url)) return 'image/webp'
-  if (/\.png($|\?)/i.test(url)) return 'image/png'
-  if (/\.(jpe?g)($|\?)/i.test(url)) return 'image/jpeg'
-  return undefined
-}
-
-function setMediaSessionAction(action: MediaSessionAction, handler: MediaSessionActionHandler | null): void {
-  try {
-    navigator.mediaSession.setActionHandler(action, handler)
-  } catch {
-    // Some Chromium/Electron platform builds expose only part of the action set.
-  }
-}
-
-function clearMediaSessionActions(actions: MediaSessionAction[]): void {
-  actions.forEach(action => setMediaSessionAction(action, null))
-}
-
-export function PlayerProvider({ children }: { children: ReactNode }) {
+export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const { settings } = useAppSettings()
-
-  // 将设置页的中文质量标签映射为 API 参数
-  const qualityPref: AudioQualityPreference =
+  const qualityPreference =
     settings.playQuality === '标准' ? 'standard' :
     settings.playQuality === '高品质' ? 'high' : 'lossless'
   const restoredRef = useRef(loadPersistedPlayerState())
@@ -151,11 +146,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [duration, setDuration] = useState(() => restoredRef.current.duration)
   const [volume, setVolumeState] = useState(() => restoredRef.current.volume)
   const [isMuted, setIsMuted] = useState(() => restoredRef.current.isMuted)
-  const [repeatMode, setRepeatMode] = useState<RepeatMode>(() => restoredRef.current.repeatMode)
-  const [isShuffled, setIsShuffled] = useState(() => restoredRef.current.isShuffled)
+  const [repeatMode, setRepeatModeState] = useState<RepeatMode>(() => restoredRef.current.repeatMode)
   const [queue, setQueue] = useState<Track[]>(() => restoredRef.current.queue)
   const [loadingAudio, setLoadingAudio] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+
+  // 派生：isShuffled 从 repeatMode 推导
+  const isShuffled = repeatMode === 'shuffle'
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const shuffledQueueRef = useRef<Track[]>([])
@@ -169,6 +166,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setToast(msg)
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     toastTimerRef.current = setTimeout(() => setToast(null), 2000)
+  }, [])
+
+  // setRepeatMode 包装
+  const setRepeatMode = useCallback((m: RepeatMode) => {
+    setRepeatModeState(m)
+  }, [])
+
+  // 兼容旧接口：setIsShuffled
+  const setIsShuffled = useCallback((s: boolean) => {
+    setRepeatModeState(prev => {
+      if (s) return 'shuffle'
+      // 关闭 shuffle 时回到 none（如果当前是 shuffle）
+      return prev === 'shuffle' ? 'none' : prev
+    })
   }, [])
 
   // 初始化 audio 元素
@@ -200,7 +211,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // volume 同步到 audio
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.volume = volume / 100
@@ -236,7 +246,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           audioRef.current.play().catch(() => {})
         }
         return
-      case 'all': {
+      case 'all':
+      case 'shuffle': {
+        // shuffle 和 all 都循环播放
         const nextIdx = currentIndexRef.current + 1 >= displayQueue.length
           ? 0 : currentIndexRef.current + 1
         currentIndexRef.current = nextIdx
@@ -261,6 +273,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [isShuffled, queue, repeatMode, settings.autoPlay])
 
+  // Bind handleTrackEnd to audio ended event
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    audio.addEventListener('ended', handleTrackEnd)
+    return () => audio.removeEventListener('ended', handleTrackEnd)
+  }, [handleTrackEnd])
+
   // 当 currentTrack 变化时加载并播放音频
   useEffect(() => {
     if (!currentTrack || !audioRef.current) return
@@ -268,54 +288,42 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     let cancelled = false
     const audio = audioRef.current
 
-    async function loadAndPlay() {
-      setLoadingAudio(true)
-      try {
-        const fallback = currentTrack!.aid && currentTrack!.cid
-          ? { aid: currentTrack!.aid, cid: currentTrack!.cid }
-          : undefined
-        const source = await extractAudio(currentTrack!.bvid || currentTrack!.id, fallback, qualityPref)
-        if (cancelled) return
-        const targetProgress = progress > 0 ? progress : 0
-        audio.src = source.audioUrl
-        audio.currentTime = targetProgress
-        if (shouldAutoplayRef.current) {
-          await audio.play()
-          setIsPlaying(true)
-        } else {
-          audio.pause()
-          setIsPlaying(false)
-        }
-        setDuration(source.duration || audio.duration || 0)
+    setLoadingAudio(true)
 
-        // 更新封面（提取到的可能更高清）
-        if (source.coverUrl) {
-          setCurrentTrack(prev => prev ? { ...prev, coverUrl: source.coverUrl } : null)
+    const loadAndPlay = async () => {
+      try {
+        const { extractAudioFromVideo, getCachedAudioSource, cacheAudioSource } = await import('@/services/bilibiliApi')
+
+        let source = getCachedAudioSource(currentTrack.bvid || currentTrack.id)
+        if (!source) {
+          source = await extractAudioFromVideo(
+            currentTrack.bvid || currentTrack.id,
+            { aid: currentTrack.aid, cid: currentTrack.cid },
+            qualityPreference,
+          )
+          cacheAudioSource(currentTrack.bvid || currentTrack.id, source)
         }
-        // 记录最近播放
-        addRecentTrack({ ...currentTrack!, coverUrl: source.coverUrl || currentTrack!.coverUrl })
-      } catch {
+
+        if (cancelled) return
+
+        audio.src = source.audioUrl
+        audio.load()
+
+        if (shouldAutoplayRef.current) {
+          await audio.play().catch((e) => {
+            console.warn('[player] autoplay failed:', e)
+          })
+          if (!cancelled) setIsPlaying(true)
+        }
+      } catch (e) {
         if (!cancelled) {
-          // 音频 URL 可能已过期，清除缓存后重试一次
-          clearAudioUrlCache()
-          try {
-            const fallback = currentTrack!.aid && currentTrack!.cid
-              ? { aid: currentTrack!.aid, cid: currentTrack!.cid }
-              : undefined
-            const source = await extractAudio(currentTrack!.bvid || currentTrack!.id, fallback, qualityPref)
-            if (cancelled) return
-            audio.src = source.audioUrl
-            if (shouldAutoplayRef.current) {
-              await audio.play()
-              setIsPlaying(true)
-            }
-            setDuration(source.duration || audio.duration || 0)
-            if (source.coverUrl) {
-              setCurrentTrack(prev => prev ? { ...prev, coverUrl: source.coverUrl } : null)
-            }
-            addRecentTrack({ ...currentTrack!, coverUrl: source.coverUrl || currentTrack!.coverUrl })
-          } catch {
-            if (!cancelled) setIsPlaying(false)
+          setLoadingAudio(false)
+          setIsPlaying(false)
+
+          // 403 重试：清除缓存后重新加载
+          if (e instanceof Error && (e.message.includes('403') || e.message.includes('Forbidden'))) {
+            const { clearAudioUrlCache } = await import('@/services/bilibiliApi')
+            clearAudioUrlCache()
           }
         }
       } finally {
@@ -324,16 +332,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
 
     loadAndPlay()
-    return () => { cancelled = true }
-  }, [currentTrack?.id, currentTrack?.bvid])
 
-  // ended 事件
-  useEffect(() => {
-    if (!audioRef.current) return
-    const handler = () => handleTrackEnd()
-    audioRef.current.addEventListener('ended', handler)
-    return () => audioRef.current?.removeEventListener('ended', handler)
-  }, [handleTrackEnd])
+    return () => {
+      cancelled = true
+    }
+  }, [currentTrack?.bvid, currentTrack?.id, qualityPreference])
 
   const play = useCallback((track: Track) => {
     shouldAutoplayRef.current = true
@@ -426,7 +429,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     })
   }, [currentTrack])
 
-  // 队列变更后把 currentIndexRef 重新对齐到当前曲目（避免 next/prev 错位）
   const resyncIndex = useCallback((nextQueue: Track[]) => {
     const curId = currentTrack?.id
     if (curId) currentIndexRef.current = nextQueue.findIndex(t => t.id === curId)
@@ -449,7 +451,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     })
   }, [resyncIndex])
 
-  // 调整顺序：把 fromIndex 的曲目移动到 toIndex
   const moveInQueue = useCallback((fromIndex: number, toIndex: number) => {
     setQueue(prev => {
       if (
@@ -465,7 +466,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     })
   }, [resyncIndex])
 
-  // 立即播放：把曲目置于队列首位并播放（点击歌曲的默认行为）
   const playNow = useCallback((track: Track) => {
     shouldAutoplayRef.current = true
     setQueue(prev => [track, ...prev.filter(t => t.id !== track.id)])
@@ -475,7 +475,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setIsPlaying(true)
   }, [])
 
-  // 下一首播放：把曲目插入到当前曲目之后（不在队列则新增；无播放则等同立即播放）
   const playNext = useCallback((track: Track) => {
     if (!currentTrack) { playNow(track); return }
     setQueue(prev => {
@@ -547,7 +546,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     currentIndexRef.current = index >= 0 ? index : 0
   }, [currentTrack?.id, isShuffled, queue])
 
-  // 主状态持久化：排除 progress，避免每秒 4 次 timeupdate 触发序列化
+  // 主状态持久化
   useEffect(() => {
     try {
       const state: PersistedPlayerState = {
@@ -568,7 +567,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [currentTrack, duration, isMuted, isPlaying, isShuffled, queue, repeatMode, volume])
 
-  // 进度持久化：低频定时器（5 秒）更新 localStorage，避免高频写入
+  // 进度持久化
   useEffect(() => {
     if (!currentTrack) return
     const timer = setInterval(() => {
@@ -597,7 +596,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       theme: document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark',
     })
     pushTrayState()
-    // 主题切换时重新推送，使托盘面板跟随浅色/深色
     const observer = new MutationObserver(pushTrayState)
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
     return () => observer.disconnect()
@@ -618,47 +616,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       togglePlay()
     }
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
   }, [togglePlay])
-
-  useEffect(() => {
-    if (!('mediaSession' in navigator)) return
-
-    setMediaSessionAction('play', () => {
-      if (!isPlaying) togglePlay()
-    })
-    setMediaSessionAction('pause', () => {
-      if (isPlaying) togglePlay()
-    })
-    setMediaSessionAction('stop', pause)
-    setMediaSessionAction('nexttrack', next)
-    setMediaSessionAction('previoustrack', prev)
-    setMediaSessionAction('seekbackward', (details) => {
-      const step = details.seekOffset || 10
-      handleSetProgress(Math.max(0, progressRef.current - step))
-    })
-    setMediaSessionAction('seekforward', (details) => {
-      const step = details.seekOffset || 10
-      const nextProgress = durationRef.current > 0
-        ? Math.min(durationRef.current, progressRef.current + step)
-        : progressRef.current + step
-      handleSetProgress(nextProgress)
-    })
-    setMediaSessionAction('seekto', (details) => {
-      if (typeof details.seekTime === 'number') handleSetProgress(Math.max(0, details.seekTime))
-    })
-
-    return () => clearMediaSessionActions([
-      'play',
-      'pause',
-      'stop',
-      'nexttrack',
-      'previoustrack',
-      'seekbackward',
-      'seekforward',
-      'seekto',
-    ])
-  }, [handleSetProgress, isPlaying, next, pause, prev, togglePlay])
 
   useEffect(() => {
     if (!('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return
@@ -674,8 +636,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       : undefined
 
     navigator.mediaSession.metadata = new MediaMetadata({
-      title: currentTrack.title || '未命名歌曲',
-      artist: currentTrack.artist || 'BiliMusic',
+      title: currentTrack?.title || '未命名歌曲',
+      artist: currentTrack?.artist || 'BiliMusic',
       album: 'BiliMusic',
       artwork,
     })
@@ -699,8 +661,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [currentTrack, duration, progress])
 
-  // 稳定的播放器值：进度（高频）不在其中，故进度跳动不会改变此引用，
-  // usePlayer() 的消费者（列表行等）不会因每秒 4 次的进度更新而重渲染。
   const value = useMemo<PlayerContext>(() => ({
     currentTrack,
     isPlaying,
@@ -737,7 +697,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     playNow, playNext, clearQueue, toggleLike, playAll, playFromQueue,
   ])
 
-  // 进度高频更新（timeupdate ~4Hz）独立成 context，仅 PlayerBar/NowPlaying 订阅
   const progressValue = useMemo<PlayerProgress>(() => ({
     progress,
     duration,

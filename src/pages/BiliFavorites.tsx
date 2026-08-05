@@ -202,7 +202,7 @@ export default function BiliFavorites() {
                     WebkitBackdropFilter: 'blur(20px)',
                     border: '1px solid var(--glass-border)',
                     boxShadow: 'var(--shadow-lg)',
-                    zIndex: 100,
+                    zIndex: 9999,
                   }}>
                     {folders.map(f => (
                       <button
