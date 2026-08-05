@@ -35,6 +35,18 @@ export type RepeatMode = 'none' | 'all' | 'one' | 'shuffle'
 export type SidebarState = 'expanded' | 'collapsed' | 'auto'
 export type DownloadFormat = 'audio' | 'video'
 
+export interface DownloadRecord {
+  id: string
+  title: string
+  artist: string
+  bvid: string
+  format: DownloadFormat
+  quality: string
+  filename: string
+  downloadDir: string
+  downloadedAt: string
+}
+
 export interface AppSettings {
   sidebarState: SidebarState
   playQuality: '标准' | '高品质' | '无损'

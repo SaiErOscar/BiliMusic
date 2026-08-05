@@ -2910,6 +2910,7 @@ body {
   color: #fff;
   font: 800 13px/1 var(--font-body);
   cursor: pointer;
+  white-space: nowrap;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);

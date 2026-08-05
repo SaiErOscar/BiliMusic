@@ -5,6 +5,8 @@ import { usePlayer } from '@/contexts/PlayerContext'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { downloadTrack } from '@/services/api'
 import { cleanTitle, getLyricForTrack, formatLrc } from '@/services/lyrics'
+import { saveDownloadRecord } from '@/utils/storage'
+
 import type { DownloadFormat } from '@/types'
 
 type NameMode = 'video' | 'song' | 'custom'
@@ -115,6 +117,17 @@ export default function DownloadButton({
         settings.downloadDir,
         { artist, title: getFilename(), lyricContent },
       )
+      saveDownloadRecord({
+        id: crypto.randomUUID ? crypto.randomUUID() : `dl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+        title: getFilename(),
+        artist: artist || actualTrack?.artist || '',
+        bvid: actualBvid,
+        format,
+        quality: qualityPref,
+        filename: getFilename(),
+        downloadDir: settings.downloadDir,
+        downloadedAt: new Date().toISOString(),
+      })
       setDone(true)
       setTimeout(() => setDone(false), 2500)
     } catch (e) {

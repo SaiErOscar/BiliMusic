@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { downloadTrack, selectDownloadFolder } from '@/services/api'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { cleanTitle, getLyricForTrack, formatLrc } from '@/services/lyrics'
+import { saveDownloadRecord } from '@/utils/storage'
 import type { Track, DownloadFormat } from '@/types'
 
 type NameMode = 'video' | 'song' | 'custom'
@@ -104,6 +105,18 @@ export default function BatchDownloadDialog({ tracks, onClose }: BatchDownloadDi
           dir,
           { artist, title: filename, lyricContent },
         )
+
+        saveDownloadRecord({
+          id: crypto.randomUUID ? crypto.randomUUID() : `dl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+          title: filename,
+          artist: artist || track.artist || '',
+          bvid: track.bvid || track.id,
+          format,
+          quality: qualityPref,
+          filename,
+          downloadDir: dir || '',
+          downloadedAt: new Date().toISOString(),
+        })
 
         setCompletedCount(c => c + 1)
         setProgress({

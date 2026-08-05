@@ -1,4 +1,4 @@
-import type { AppSettings, Playlist, Tombstone, Track } from '@/types'
+import type { AppSettings, DownloadRecord, Playlist, Tombstone, Track } from '@/types'
 import { readStoredItemSync, writeStoredItem } from '@/utils/persistentStorage'
 import { safeSetItem } from '@/utils/safeStorage'
 
@@ -11,6 +11,9 @@ const SETTINGS_KEY = 'bilimusic_settings'
 export const PLAYLISTS_CHANGED_EVENT = 'bilimusic:playlists-changed'
 export const FAVORITES_CHANGED_EVENT = 'bilimusic:favorites-changed'
 export const SETTINGS_CHANGED_EVENT = 'bilimusic:settings-changed'
+export const DOWNLOADS_CHANGED_EVENT = 'bilimusic:downloads-changed'
+
+const DOWNLOADS_KEY = 'bilimusic_downloads'
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   sidebarState: 'auto',
@@ -36,6 +39,22 @@ export function loadRecentTracks(): Track[] {
 export function saveRecentTracks(tracks: Track[]) {
   try {
     safeSetItem(RECENT_KEY, JSON.stringify(tracks.slice(0, 50)))
+  } catch { /* ignore */ }
+}
+
+export function loadDownloadRecords(): DownloadRecord[] {
+  try {
+    const raw = localStorage.getItem(DOWNLOADS_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch { return [] }
+}
+
+export function saveDownloadRecord(record: DownloadRecord) {
+  try {
+    const records = loadDownloadRecords()
+    records.unshift(record)
+    safeSetItem(DOWNLOADS_KEY, JSON.stringify(records.slice(0, 200)))
+    window.dispatchEvent(new CustomEvent(DOWNLOADS_CHANGED_EVENT))
   } catch { /* ignore */ }
 }
 
