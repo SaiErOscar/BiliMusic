@@ -8,7 +8,7 @@
  */
 
 import { getFavoriteFolders, getAllFavoriteFolderContent, dealFavorite, type FavoriteFolder, type FavoriteItem } from '@/services/bilibiliApi'
-import { loadFavoriteTracks, saveFavoriteTracks } from '@/utils/storage'
+import { loadFavoriteTracks, saveFavoriteTracks, loadBiliFolderCache, saveBiliFolderCache } from '@/utils/storage'
 import type { Track } from '@/types'
 import { toHttpsUrl } from '@/services/bilibiliApi'
 
@@ -69,54 +69,39 @@ export async function importBiliFavorites(folderId: number, replaceExisting = fa
 }
 
 /**
- * 双向同步：将本地收藏推送到 B站收藏夹，同时拉取 B站新增收藏
+ * 双向同步：将本地已收藏的收藏夹数据推送到 B站收藏夹，同时拉取 B站全部内容保存到本地缓存。
+ * 注意：不写入「我喜欢」（favoriteTracks），而是按收藏夹 ID 保存到本地缓存，供收藏夹页离线回退显示。
  */
 export async function syncBiliFavorites(folderId: number): Promise<BiliSyncResult> {
-  // 1. 拉取 B站收藏夹内容
+  // 1. 拉取 B站收藏夹全部内容
   const { items } = await getAllFavoriteFolderContent(folderId)
   const biliIds = new Set(items.map(i => i.bvid))
 
-  // 2. 获取本地收藏
-  const localFavs = loadFavoriteTracks()
-  const localIds = new Set(localFavs.map(t => t.id))
+  // 2. 读取该收藏夹的本地缓存（作为本地侧数据）
+  const localTracks = loadBiliFolderCache(folderId)
 
-  // 3. 找出本地有但 B站没有的 → 推送到 B站
-  const toPush = localFavs.filter(t => !biliIds.has(t.id) && t.aid)
+  // 3. 找出本地有但 B站没有的 → 推送到 B站收藏夹
+  const toPush = localTracks.filter(t => !biliIds.has(t.id) && t.aid)
   let pushed = 0
-  if (toPush.length > 0) {
+  for (const t of toPush) {
     try {
-      const aids = toPush.map(t => Number(t.aid)).filter(Boolean)
-      if (aids.length > 0) {
-        await dealFavorite(aids[0], [folderId])
-        pushed = 1 // dealFavorite 一次只能处理一个 rid
-        // 逐个推送
-        for (let i = 1; i < aids.length; i++) {
-          try {
-            await dealFavorite(aids[i], [folderId])
-            pushed++
-          } catch {
-            // 继续推送其他
-          }
-        }
-      }
+      await dealFavorite(t.aid ? Number(t.aid) : (t.bvid || t.id), [folderId])
+      pushed++
     } catch {
-      // 推送失败不阻塞拉取
+      // 单首推送失败不阻塞其余
     }
   }
 
-  // 4. 找出 B站有但本地没有的 → 导入本地
-  const toImport = items.filter(i => !localIds.has(i.bvid))
-  const newTracks = toImport.map(favoriteItemToTrack)
-  if (newTracks.length > 0) {
-    saveFavoriteTracks([...newTracks, ...localFavs])
-  }
+  // 4. 拉取 B站全部内容 → 保存到本地缓存（覆盖，以 B站为准）
+  const biliTracks = items.map(favoriteItemToTrack)
+  saveBiliFolderCache(folderId, biliTracks)
 
-  const imported = newTracks.length
+  const imported = biliTracks.length
   return {
     imported,
     skipped: 0,
     total: items.length,
-    message: `同步完成：导入 ${imported} 首，推送 ${pushed} 首到B站`,
+    message: `同步完成：更新本地 ${imported} 首，推送 ${pushed} 首到B站`,
   }
 }
 

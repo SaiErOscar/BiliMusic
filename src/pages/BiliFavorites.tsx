@@ -16,7 +16,7 @@ import type { Track } from '@/types'
 import type { FavoriteFolder, FavoriteItem } from '@/services/bilibiliApi'
 import BatchDownloadDialog from '@/components/BatchDownloadDialog'
 import { showBatchDialog } from '@/services/batchDownloadStore'
-import { createPlaylist, addTrackToPlaylist, PLAYLISTS_CHANGED_EVENT } from '@/utils/storage'
+import { createPlaylist, addTrackToPlaylist, PLAYLISTS_CHANGED_EVENT, loadBiliFolderCache, saveBiliFolderCache } from '@/utils/storage'
 import { listBiliFavoriteFolders } from '@/services/biliFavorites'
 import {
   getFavoriteFolderContent,
@@ -87,7 +87,7 @@ export default function BiliFavorites() {
     loadFolders()
   }, [loadFolders])
 
-  // Load folder content
+  // Load folder content（B站接口失败时回退显示本地缓存，不报错）
   const loadFolderContent = useCallback(async (folderId: number) => {
     setLoadingContent(true)
     setLoadError('')
@@ -111,8 +111,16 @@ export default function BiliFavorites() {
         return bt - at
       })
       setTracks(all)
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : '加载收藏夹内容失败')
+      // 加载成功 → 保存到本地缓存，供离线/接口失败时回退
+      saveBiliFolderCache(folderId, all)
+    } catch {
+      // 接口失败：回退显示本地缓存数据，不报错
+      const cached = loadBiliFolderCache(folderId)
+      if (cached.length > 0) {
+        setTracks(cached)
+      } else {
+        setLoadError('加载收藏夹内容失败（无本地缓存）')
+      }
     } finally {
       setLoadingContent(false)
     }

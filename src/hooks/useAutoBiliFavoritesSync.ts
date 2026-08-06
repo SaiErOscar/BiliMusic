@@ -1,13 +1,13 @@
 import { useEffect } from 'react'
 import { getUserInfo } from '@/services/api'
 import { getFavoriteFolders } from '@/services/bilibiliApi'
-import { importBiliFavorites, syncBiliFavorites } from '@/services/biliFavorites'
+import { syncBiliFavorites } from '@/services/biliFavorites'
 
-const PERIODIC = 30 * 1000 // 每 30 秒
+const PERIODIC = 5 * 60 * 1000 // 每 5 分钟
 const STARTUP_DELAY = 3000 // 启动后延迟，避开启动高峰
 
 /**
- * B站收藏夹自动同步：登录后启动时执行一次「导入本地 + 双向同步」，随后每 30 秒自动执行。
+ * B站收藏夹自动同步：登录后启动时执行一次「导入本地 + 双向同步」，随后每 5 分钟自动执行。
  * 静默执行，不打扰 UI；未登录或网络失败时自动跳过。
  */
 export function useAutoBiliFavoritesSync(): void {
@@ -24,7 +24,7 @@ export function useAutoBiliFavoritesSync(): void {
         const { list } = await getFavoriteFolders(info.mid)
         for (const folder of list) {
           try {
-            await importBiliFavorites(folder.id)
+            // 双向同步：拉取 B站收藏夹内容保存到本地缓存（不写入「我喜欢」）
             await syncBiliFavorites(folder.id)
           } catch {
             // 单个收藏夹失败不影响其他

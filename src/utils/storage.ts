@@ -82,6 +82,31 @@ export function saveFavoriteTracks(tracks: Track[]) {
   } catch { /* ignore */ }
 }
 
+// ===== B站收藏夹本地缓存（按收藏夹 ID 保存，供离线回退显示）=====
+const BILI_FOLDER_CACHE_KEY = 'bilimusic_bili_folder_cache'
+
+/** 读取指定收藏夹的本地缓存（无则返回空数组） */
+export function loadBiliFolderCache(folderId: number | string): Track[] {
+  try {
+    const raw = localStorage.getItem(BILI_FOLDER_CACHE_KEY)
+    if (!raw) return []
+    const map = JSON.parse(raw) as Record<string, Track[]>
+    return map[String(folderId)] || []
+  } catch {
+    return []
+  }
+}
+
+/** 保存指定收藏夹的本地缓存 */
+export function saveBiliFolderCache(folderId: number | string, tracks: Track[]): void {
+  try {
+    const raw = localStorage.getItem(BILI_FOLDER_CACHE_KEY)
+    const map = raw ? (JSON.parse(raw) as Record<string, Track[]>) : {}
+    map[String(folderId)] = tracks
+    safeSetItem(BILI_FOLDER_CACHE_KEY, JSON.stringify(map))
+  } catch { /* ignore */ }
+}
+
 export function toggleFavoriteTrack(track: Track): Track[] {
   const favs = loadFavoriteTracks()
   const idx = favs.findIndex(t => t.id === track.id)
