@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Heart, X, Loader2, Check } from 'lucide-react'
 import { listBiliFavoriteFolders } from '@/services/biliFavorites'
-import { dealFavorite } from '@/services/bilibiliApi'
+import { dealFavorite, getVideoDetail } from '@/services/bilibiliApi'
 import type { FavoriteFolder } from '@/services/bilibiliApi'
 
 interface BiliFavoriteDialogProps {
@@ -21,6 +21,7 @@ export default function BiliFavoriteDialog({
   open,
   onClose,
   aid,
+  bvid,
   title,
 }: BiliFavoriteDialogProps) {
   const [folders, setFolders] = useState<FavoriteFolder[]>([])
@@ -29,6 +30,28 @@ export default function BiliFavoriteDialog({
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [result, setResult] = useState<'idle' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
+  // 有效的 aid：优先用传入 aid，缺失时基于 bvid 解析（某些曲目 aid 为 0/空）
+  const [resolvedAid, setResolvedAid] = useState<number>(0)
+
+  // 解析 aid：若传入 aid 无效则通过 bvid 获取
+  const resolveAid = useCallback(async () => {
+    const direct = typeof aid === 'number' ? aid : Number(aid)
+    if (Number.isFinite(direct) && direct > 0) {
+      setResolvedAid(direct)
+      return
+    }
+    if (!bvid) {
+      setResolvedAid(0)
+      return
+    }
+    try {
+      const detail = await getVideoDetail(bvid)
+      const a = Number(detail?.aid)
+      setResolvedAid(Number.isFinite(a) && a > 0 ? a : 0)
+    } catch {
+      setResolvedAid(0)
+    }
+  }, [aid, bvid])
 
   const loadFolders = useCallback(async () => {
     setLoading(true)
@@ -48,8 +71,9 @@ export default function BiliFavoriteDialog({
       setMessage('')
       setSelected(new Set())
       loadFolders()
+      resolveAid()
     }
-  }, [open, loadFolders])
+  }, [open, loadFolders, resolveAid])
 
   const toggleFolder = (id: number) => {
     setSelected(prev => {
@@ -61,11 +85,11 @@ export default function BiliFavoriteDialog({
   }
 
   const handleSubmit = async () => {
-    if (!aid || selected.size === 0) return
+    if (!resolvedAid || selected.size === 0) return
     setSubmitting(true)
     setResult('idle')
     try {
-      const aidNum = Number(aid)
+      const aidNum = resolvedAid
       const folderIds = Array.from(selected)
       // B站 dealFavorite 一次只能处理一个 rid，但可以同时添加到多个收藏夹
       await dealFavorite(aidNum, folderIds)
@@ -202,7 +226,7 @@ export default function BiliFavoriteDialog({
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting || selected.size === 0 || !aid}
+                disabled={submitting || selected.size === 0 || !resolvedAid}
                 style={{
                   opacity: (submitting || selected.size === 0 || !aid) ? 0.5 : 1,
                   display: 'flex',

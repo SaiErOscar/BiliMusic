@@ -1,4 +1,4 @@
-import { ipcMain, net, app, session, shell } from 'electron'
+import { ipcMain, net, app, session, shell, BrowserWindow } from 'electron'
 import path from 'path'
 import fs from 'fs/promises'
 import fsSync from 'fs'
@@ -248,6 +248,18 @@ async function downloadStreamToFile(
 }
 
 // ===== IPC Handlers =====
+
+// ===== 官方登录页窗口（支持账号密码 / 手机短信 / 扫码，人机验证由官方页处理） =====
+let loginWindow: BrowserWindow | null = null
+let loginResolveFn: ((ok: boolean) => void) | null = null
+
+function closeLoginWindow() {
+  if (loginWindow && !loginWindow.isDestroyed()) {
+    loginWindow.destroy()
+  }
+  loginWindow = null
+  loginResolveFn = null
+}
 
 export function registerBiliApiHandlers() {
   // 下载音频文件到本地
@@ -584,6 +596,63 @@ export function registerBiliApiHandlers() {
       throw new Error(`收藏失败（${data.code}）：${data.message || '未知错误'}`)
     }
     return { code: data.code, message: data.message }
+  })
+
+  // 打开 B站官方登录页窗口，登录成功后自动捕获 Cookie（官方页原生处理极验人机验证）
+  ipcMain.handle('bili:openLoginWindow', async () => {
+    // 已有登录窗口则聚焦并等待
+    if (loginWindow && !loginWindow.isDestroyed()) {
+      loginWindow.focus()
+      return new Promise((resolve) => { loginResolveFn = resolve })
+    }
+    return new Promise((resolve) => {
+      loginResolveFn = resolve
+      const win = new BrowserWindow({
+        width: 420,
+        height: 648,
+        minWidth: 380,
+        minHeight: 560,
+        autoHideMenuBar: true,
+        title: 'B站登录',
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          // 不设 partition，使用默认 session，登录 Cookie 写入 defaultSession（与主窗口共享）
+        },
+      })
+      loginWindow = win
+
+      // 监听 Cookie，检测登录成功（SESSDATA 出现即为已登录）
+      let loggedIn = false
+      const onCookieChanged = async (_e: never, cookie: Electron.Cookie, _cause: string, removed: boolean) => {
+        if (removed || loggedIn) return
+        if (cookie.name === 'SESSDATA' && cookie.value) {
+          loggedIn = true
+          session.defaultSession.cookies.removeListener('changed', onCookieChanged)
+          const r = loginResolveFn
+          loginResolveFn = null
+          if (r) r(true)
+          closeLoginWindow()
+        }
+      }
+      session.defaultSession.cookies.on('changed', onCookieChanged)
+
+      win.webContents.setUserAgent(BILI_UA)
+      win.loadURL(`${BILI_PASSPORT}/login`, { userAgent: BILI_UA })
+      win.on('closed', () => {
+        session.defaultSession.cookies.removeListener('changed', onCookieChanged)
+        closeLoginWindow()
+      })
+      // 5 分钟未登录则判定失败
+      setTimeout(() => {
+        if (!loggedIn) {
+          const r = loginResolveFn
+          loginResolveFn = null
+          closeLoginWindow()
+          if (r) r(false)
+        }
+      }, 5 * 60 * 1000)
+    })
   })
 
   ipcMain.handle('bili:logout', async () => {

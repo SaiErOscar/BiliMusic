@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { X, Loader2, Smartphone, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react'
+import { X, Loader2, Smartphone, CheckCircle2, AlertCircle, RefreshCw, KeyRound } from 'lucide-react'
 import QRCode from 'qrcode'
 import { generateQrCode, pollQrCode } from '@/services/api'
 
@@ -15,8 +15,29 @@ export default function LoginDialog({ onClose, onSuccess }: LoginDialogProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string>('')
   const [countdown, setCountdown] = useState(180)
   const [errorMsg, setErrorMsg] = useState('')
+  const [webLogging, setWebLogging] = useState(false)
+  const [webError, setWebError] = useState('')
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // 打开 B站官方登录页窗口（支持账号密码 / 手机短信 / 扫码，人机验证由官方页处理）
+  const handleWebLogin = useCallback(async () => {
+    setWebLogging(true)
+    setWebError('')
+    try {
+      const res = await window.electronAPI?.biliApi?.openLoginWindow()
+      if (res?.success) {
+        setStatus('success')
+        setTimeout(() => onSuccess(), 800)
+      } else {
+        setWebError('登录未完成或已取消')
+      }
+    } catch (e) {
+      setWebError(e instanceof Error ? e.message : '打开登录窗口失败')
+    } finally {
+      setWebLogging(false)
+    }
+  }, [onSuccess])
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) {
@@ -257,6 +278,26 @@ export default function LoginDialog({ onClose, onSuccess }: LoginDialogProps) {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-muted)' }}>
           <span className="text-caption">打开 BiliBili App → 我的 → 扫一扫</span>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, width: '100%', marginTop: 4 }}>
+          <button
+            onClick={handleWebLogin}
+            disabled={webLogging}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '8px 14px', borderRadius: 10,
+              background: 'var(--color-surface-hover)', color: 'var(--color-foreground)',
+              border: '1px solid var(--color-border)', cursor: webLogging ? 'default' : 'pointer',
+              fontSize: 13, opacity: webLogging ? 0.6 : 1,
+            }}
+          >
+            <KeyRound size={14} />
+            {webLogging ? '等待登录……' : '账号密码 / 手机验证码登录'}
+          </button>
+          {webError && (
+            <span className='text-caption' style={{ color: '#e5484d' }}>{webError}</span>
+          )}
         </div>
       </div>
 

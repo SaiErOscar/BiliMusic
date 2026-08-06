@@ -36,6 +36,7 @@ interface BiliApi {
   }>
   logout: () => Promise<{ success: boolean }>
   dealFavorite: (rid: number, addMediaIds: number[], delMediaIds?: number[]) => Promise<{ code: number; message: string }>
+  openLoginWindow: () => Promise<{ success: boolean }>
 }
 
 export interface OiapiSong {

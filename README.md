@@ -7,7 +7,7 @@
   <p>
     <a href="./README.en.md">English</a>
     ·
-    <a href="./docs/CHANGELOG.md">更新日志 v1.0.1 → v1.2.14</a>
+    <a href="./docs/CHANGELOG.md">更新日志 v1.0.1 → v1.2.15</a>
     ·
     <a href="#-快速开始">快速开始</a>
     ·

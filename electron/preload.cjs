@@ -45,6 +45,10 @@ const biliApi = {
   dealFavorite: (rid, addMediaIds, delMediaIds) =>
     ipcRenderer.invoke('bili:dealFavorite', rid, addMediaIds, delMediaIds),
 
+  // 打开 B站官方登录页窗口（账号密码 / 短信 / 扫码，人机验证由官方页处理）
+  openLoginWindow: () =>
+    ipcRenderer.invoke('bili:openLoginWindow'),
+
   logout: () =>
     ipcRenderer.invoke('bili:logout'),
 }
