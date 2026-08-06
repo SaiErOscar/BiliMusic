@@ -31,11 +31,11 @@ function favoriteItemToTrack(item: FavoriteItem): Track {
     id: item.bvid,
     title: item.title?.replace(/<[^>]+>/g, '') || item.bvid,
     artist: item.upper?.name || '未知UP主',
-    coverUrl: toHttpsUrl(item.pic),
+    coverUrl: toHttpsUrl(item.cover || item.pic),
     duration: item.duration || 0,
     videoUrl: `https://www.bilibili.com/video/${item.bvid}`,
     bvid: item.bvid,
-    aid: item.aid,
+    aid: item.aid || item.id,
     cid: item.cid,
     playCount: item.cnt_info?.play || 0,
     isLiked: false,
@@ -115,9 +115,12 @@ export default function BiliFavorites() {
   }
 
   const handleRemoveTrack = async (track: Track) => {
-    if (!selectedFolder || !track.aid) return
+    if (!selectedFolder) return
+    // deal 接口 rid 支持 aid 或 bvid：优先 aid，缺失则用 bvid 兜底
+    const rid: number | string = track.aid ? Number(track.aid) : (track.bvid || track.id)
+    if (!rid) return
     try {
-      await dealFavorite(Number(track.aid), [], [selectedFolder])
+      await dealFavorite(rid, [], [selectedFolder])
       setSyncMessage(`已从收藏夹移除「${track.title}」`)
       await loadFolderContent(selectedFolder)
       // 触发收藏变更自动同步

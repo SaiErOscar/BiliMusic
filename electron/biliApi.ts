@@ -567,8 +567,9 @@ export function registerBiliApiHandlers() {
     }
   })
 
-  // 收藏到 B站收藏夹（主进程 net.fetch，自动带 Cookie 且无 CORS 限制）
-  ipcMain.handle('bili:dealFavorite', async (_e, rid: number, addMediaIds: number[], delMediaIds: number[] = []) => {
+  // 收藏/取消收藏 B站收藏夹（主进程 net.fetch，自动带 Cookie 且无 CORS 限制）
+  // rid 支持 aid（数字）或 bvid（字符串），B站 deal 接口两者均可
+  ipcMain.handle('bili:dealFavorite', async (_e, rid: number | string, addMediaIds: number[], delMediaIds: number[] = []) => {
     const cookies = await session.defaultSession.cookies.get({ domain: '.bilibili.com' })
     const biliJct = cookies.find((c) => c.name === 'bili_jct')?.value || ''
     if (!biliJct) {
@@ -581,6 +582,10 @@ export function registerBiliApiHandlers() {
       del_media_ids: delMediaIds.join(','),
       csrf: biliJct,
       platform: 'web',
+      // 以下为 B站 web 端风控/来源字段，取消收藏（del）缺失时会返回风控错误（-412 等）
+      eab_x: '2',
+      ga: '1',
+      gaia_source: 'web_normal',
     }).toString()
     const resp = await net.fetch(`${BILI_API}/x/v3/fav/resource/deal`, {
       method: 'POST',

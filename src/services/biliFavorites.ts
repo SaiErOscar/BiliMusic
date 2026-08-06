@@ -7,7 +7,7 @@
  * 3. 双向同步：本地收藏 ↔ B站收藏夹
  */
 
-import { getFavoriteFolders, getAllFavoriteFolderContent, getFavoriteFolderContent, dealFavorite, type FavoriteFolder, type FavoriteItem } from '@/services/bilibiliApi'
+import { getFavoriteFolders, getAllFavoriteFolderContent, dealFavorite, type FavoriteFolder, type FavoriteItem } from '@/services/bilibiliApi'
 import { loadFavoriteTracks, saveFavoriteTracks } from '@/utils/storage'
 import type { Track } from '@/types'
 import { toHttpsUrl } from '@/services/bilibiliApi'
@@ -17,11 +17,11 @@ function favoriteItemToTrack(item: FavoriteItem): Track {
     id: item.bvid,
     title: item.title?.replace(/<[^>]+>/g, '') || item.bvid,
     artist: item.upper?.name || '未知UP主',
-    coverUrl: toHttpsUrl(item.pic),
+    coverUrl: toHttpsUrl(item.cover || item.pic),
     duration: item.duration || 0,
     videoUrl: `https://www.bilibili.com/video/${item.bvid}`,
     bvid: item.bvid,
-    aid: item.aid,
+    aid: item.aid || item.id,
     cid: item.cid,
     playCount: item.cnt_info?.play || 0,
     isLiked: true,
@@ -143,9 +143,9 @@ export async function getFoldersContainingBvid(bvid: string): Promise<number[]> 
     const result: number[] = []
     for (const folder of list) {
       try {
-        const content = await getFavoriteFolderContent(folder.id, 1, 50)
-        const medias = content?.medias || []
-        if (medias.some((m) => m.bvid === bvid)) result.push(folder.id)
+        // 遍历收藏夹全部内容（自动翻页），确保超过单页上限时也能匹配
+        const { items } = await getAllFavoriteFolderContent(folder.id)
+        if (items.some((m) => m.bvid === bvid)) result.push(folder.id)
       } catch {
         // 单个收藏夹失败不影响其他
       }

@@ -30,7 +30,8 @@ export default function Downloads() {
   }
 
   const openLink = (bvid: string) => {
-    window.open(`https://www.bilibili.com/video/${bvid}`, '_blank')
+    // 用系统默认浏览器在外部打开，而非 Electron 内部新窗口
+    window.electronAPI?.openExternal?.(`https://www.bilibili.com/video/${bvid}`)
   }
 
   return (

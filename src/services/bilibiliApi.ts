@@ -632,10 +632,17 @@ export async function getFavoriteFolders(mid: number): Promise<{ count: number; 
 // ===== 收藏夹内容 =====
 
 export interface FavoriteItem {
+  // 收藏夹内容接口 /x/v3/fav/resource/list 返回的字段：
+  // - id 为内容 id（视频稿件即 avid，音频为 auid）
+  // - cover 为封面 url（不是 pic）
+  // - bvid / bv_id 均为视频 bvid
+  // - 无独立的 aid / cid / pic 字段
+  id: number
   bvid: string
   aid: number
   title: string
   pic: string
+  cover?: string
   duration: number
   cid: number
   upper: { mid: number; name: string; face: string }
@@ -708,7 +715,7 @@ export async function getAllFavoriteFolderContent(folderId: number): Promise<{ t
  * @param csrf bili_jct CSRF token
  */
 export async function dealFavorite(
-  rid: number,
+  rid: number | string,
   addMediaIds: number[],
   delMediaIds: number[] = [],
 ): Promise<{ code: number; message: string }> {

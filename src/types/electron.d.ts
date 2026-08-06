@@ -35,7 +35,7 @@ interface BiliApi {
     dedeUserId: string
   }>
   logout: () => Promise<{ success: boolean }>
-  dealFavorite: (rid: number, addMediaIds: number[], delMediaIds?: number[]) => Promise<{ code: number; message: string }>
+  dealFavorite: (rid: number | string, addMediaIds: number[], delMediaIds?: number[]) => Promise<{ code: number; message: string }>
   openLoginWindow: () => Promise<{ success: boolean }>
 }
 

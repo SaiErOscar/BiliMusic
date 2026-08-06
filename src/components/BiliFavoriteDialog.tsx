@@ -99,18 +99,26 @@ export default function BiliFavoriteDialog({
   const addIds = [...selected].filter((id) => !initialSelected.has(id))
   const delIds = [...initialSelected].filter((id) => !selected.has(id))
   const hasChange = addIds.length > 0 || delIds.length > 0
+  // deal 接口 rid 支持 aid（数字）或 bvid（字符串）：aid 有效时优先用 aid，否则退回 bvid，避免 aid 为 0 时收藏/取消收藏失败
+  const dealRid = (() => {
+    if (typeof aid === 'number' && aid > 0) return aid
+    if (typeof aid === 'string' && aid.trim() && Number(aid) > 0) return Number(aid)
+    if (resolvedAid > 0) return resolvedAid
+    return bvid
+  })()
+  const dealReady = Boolean(dealRid)
 
   const handleSubmit = async () => {
-    if (!resolvedAid) return
+    if (!dealReady) return
     const addIds = [...selected].filter((id) => !initialSelected.has(id))
     const delIds = [...initialSelected].filter((id) => !selected.has(id))
     if (addIds.length === 0 && delIds.length === 0) return
     setSubmitting(true)
     setResult('idle')
     try {
-      const aidNum = resolvedAid
-      if (addIds.length > 0) await dealFavorite(aidNum, addIds)
-      if (delIds.length > 0) await dealFavorite(aidNum, [], delIds)
+      const rid = dealRid
+      if (addIds.length > 0) await dealFavorite(rid, addIds)
+      if (delIds.length > 0) await dealFavorite(rid, [], delIds)
       // 触发收藏变更自动双向同步
       window.dispatchEvent(new CustomEvent('bilimusic:bili-favorites-changed'))
       setResult('success')
@@ -251,9 +259,9 @@ export default function BiliFavoriteDialog({
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting || !resolvedAid || !hasChange}
+                disabled={submitting || !dealReady || !hasChange}
                 style={{
-                  opacity: (submitting || !resolvedAid || !hasChange) ? 0.5 : 1,
+                  opacity: (submitting || !dealReady || !hasChange) ? 0.5 : 1,
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
