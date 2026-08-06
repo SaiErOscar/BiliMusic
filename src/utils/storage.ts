@@ -218,7 +218,9 @@ export function addTrackToPlaylist(playlistId: string, track: Track): Playlist |
     updatedPlaylist = {
       ...playlist,
       coverUrl: playlist.coverUrl || track.coverUrl,
-      tracks: exists ? playlist.tracks : [...playlist.tracks, track],
+      tracks: exists
+        ? playlist.tracks
+        : [...playlist.tracks, { ...track, addedAt: track.addedAt || new Date().toISOString() }],
       updatedAt: new Date().toISOString(),
     }
     return updatedPlaylist
@@ -315,6 +317,51 @@ export function importPlaylistsFromText(text: string): { imported: number; skipp
   }
 
   return { imported: imported.length, skipped }
+}
+
+export function reorderPlaylistTracks(playlistId: string, orderedTrackIds: string[]): Playlist | null {
+  const playlists = loadPlaylists()
+  let updatedPlaylist: Playlist | null = null
+  const updated = playlists.map((playlist) => {
+    if (playlist.id !== playlistId) return playlist
+    const byId = new Map(playlist.tracks.map(t => [t.id, t]))
+    const ordered: Track[] = []
+    for (const id of orderedTrackIds) {
+      const t = byId.get(id)
+      if (t) ordered.push(t)
+    }
+    // 保留不在有序列表中的轨道（防御性追加）
+    for (const t of playlist.tracks) {
+      if (!orderedTrackIds.includes(t.id)) ordered.push(t)
+    }
+    updatedPlaylist = { ...playlist, tracks: ordered, updatedAt: new Date().toISOString() }
+    return updatedPlaylist
+  })
+  if (updatedPlaylist) savePlaylists(updated)
+  return updatedPlaylist
+}
+
+export function sortPlaylistTracks(playlistId: string, order: 'name' | 'addedAt'): Playlist | null {
+  const playlists = loadPlaylists()
+  let updatedPlaylist: Playlist | null = null
+  const updated = playlists.map((playlist) => {
+    if (playlist.id !== playlistId) return playlist
+    const sorted = [...playlist.tracks]
+    if (order === 'name') {
+      sorted.sort((a, b) => (a.title || '').localeCompare(b.title || ''))
+    } else {
+      // 按加入歌单时间排序（旧的在前），缺失时间排最后
+      sorted.sort((a, b) => {
+        const at = a.addedAt ? new Date(a.addedAt).getTime() : 0
+        const bt = b.addedAt ? new Date(b.addedAt).getTime() : 0
+        return at - bt
+      })
+    }
+    updatedPlaylist = { ...playlist, tracks: sorted, updatedAt: new Date().toISOString() }
+    return updatedPlaylist
+  })
+  if (updatedPlaylist) savePlaylists(updated)
+  return updatedPlaylist
 }
 
 export function removeTracksFromPlaylist(playlistId: string, trackIds: string[]): Playlist | null {

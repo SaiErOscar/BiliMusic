@@ -12,6 +12,7 @@ export interface Track {
   playCount: number
   isLiked: boolean
   likedAt?: string // 收藏时间，供云同步按 like/unlike 时间合并
+  addedAt?: string // 加入歌单时间，供歌单内按加入时间排序
 }
 
 export interface Playlist {

@@ -7,7 +7,7 @@
   <p>
     <a href="./README.md">中文</a>
     ·
-    <a href="./docs/CHANGELOG.md">Changelog v1.0.1 → v1.2.19</a>
+    <a href="./docs/CHANGELOG.md">Changelog v1.0.1 → v1.2.20</a>
     ·
     <a href="#-getting-started">Getting Started</a>
     ·
@@ -18,7 +18,7 @@
     <img alt="Electron" src="https://img.shields.io/badge/Electron-36-47848F?style=for-the-badge&logo=electron&logoColor=fff" />
     <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?style=for-the-badge&logo=vite&logoColor=fff" />
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=fff" />
-    <img alt="Version" src="https://img.shields.io/badge/version-1.2.19-30d158?style=for-the-badge" />
+    <img alt="Version" src="https://img.shields.io/badge/version-1.2.20-30d158?style=for-the-badge" />
   </p>
 </div>
 
@@ -128,6 +128,7 @@ Video titles are cleaned before lyric search. Search results become music-like t
 - Edit playlist name and description (Edit button / double-click rename in sidebar)
 - Drag playlists in the sidebar to reorder, synced to the All Playlists page
 - Sort the All Playlists page by modified time / file name (one-shot)
+- Drag tracks to reorder inside a playlist, and one-click sort by file name / added time
 - Export Bilibili favorites folder as a local playlist
 
 ### Bilibili Favorites
@@ -139,6 +140,7 @@ Video titles are cleaned before lyric search. Search results become music-like t
 - Export favorites as a local playlist
 - Favorite tracks to a Bilibili folder (aid auto-resolved via bvid when missing; folders already containing the track are pre-checked, uncheck to un-favorite)
 - Remove a track from a folder with the 「×」 button on each row
+- Folder contents auto-sorted by favorite time (most recent first)
 
 ### Settings
 

@@ -4175,3 +4175,25 @@ body {
 .spin {
   animation: spin 0.6s linear infinite;
 }
+
+/* 歌单内歌曲拖拽排序手柄 */
+.playlist-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 100%;
+  background: transparent;
+  border: none;
+  color: var(--color-muted);
+  cursor: grab;
+  opacity: 0.6;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+.playlist-drag-handle:hover {
+  opacity: 1;
+  color: var(--color-primary);
+}
+.playlist-drag-handle:active {
+  cursor: grabbing;
+}

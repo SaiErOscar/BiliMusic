@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowDownAZ, CheckSquare, ListMusic, Music, Pencil, Play, Square, Trash2, X, FolderHeart, Download } from 'lucide-react'
+import { ArrowDownAZ, CheckSquare, ListMusic, Music, Pencil, Play, Square, Trash2, X, FolderHeart, Download, GripVertical, Clock } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import AddToPlaylistButton from '@/components/AddToPlaylistButton'
 import BatchDownloadDialog from '@/components/BatchDownloadDialog'
@@ -23,6 +23,8 @@ import {
   sortPlaylists,
   PLAYLISTS_CHANGED_EVENT,
   removeTracksFromPlaylist,
+  reorderPlaylistTracks,
+  sortPlaylistTracks,
 } from '@/utils/storage'
 import type { Playlist } from '@/types'
 
@@ -134,6 +136,8 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const [batchDownloading, setBatchDownloading] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [sortOpen, setSortOpen] = useState(false)
   const player = usePlayer()
   const navigate = useNavigate()
 
@@ -220,6 +224,35 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
     })
   }
 
+  // —— 拖动排序 ——
+  const handleDragStart = (index: number) => {
+    if (editing) return
+    setDragIndex(index)
+  }
+  const handleDragOver = (index: number) => {
+    if (dragIndex === null || dragIndex === index) return
+  }
+  const handleDrop = (targetIndex: number) => {
+    if (dragIndex === null || dragIndex === targetIndex) {
+      setDragIndex(null)
+      return
+    }
+    const from = dragIndex
+    const reordered = [...tracks]
+    const [moved] = reordered.splice(from, 1)
+    reordered.splice(targetIndex, 0, moved)
+    setDragIndex(null)
+    const updated = reorderPlaylistTracks(playlist.id, reordered.map(t => t.id))
+    if (updated) setPlaylist(updated)
+  }
+
+  // —— 一键排序 ——
+  const handleSort = (order: 'name' | 'addedAt') => {
+    setSortOpen(false)
+    const updated = sortPlaylistTracks(playlist.id, order)
+    if (updated) setPlaylist(updated)
+  }
+
   return (
     <MusicPageShell>
       <MusicHero
@@ -240,6 +273,32 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
                   <Download size={16} />
                   下载全部
                 </button>
+                <div style={{ position: 'relative' }}>
+                  <button className="am-action am-action--subtle" onClick={() => setSortOpen(o => !o)}>
+                    <ArrowDownAZ size={16} />
+                    排序
+                  </button>
+                  {sortOpen && (
+                    <>
+                      <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setSortOpen(false)} />
+                      <div style={{
+                        position: 'absolute', top: '100%', right: 0, marginTop: 6, minWidth: 170,
+                        padding: 6, borderRadius: 12, background: 'var(--glass-bg-heavy)',
+                        backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+                        border: '1px solid var(--glass-border)', boxShadow: 'var(--shadow-lg)', zIndex: 9999,
+                      }}>
+                        <button type="button" style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px', border: 'none', borderRadius: 8, background: 'transparent', color: 'var(--color-foreground)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }} onClick={() => handleSort('name')}>
+                          <ArrowDownAZ size={15} />
+                          按文件名排序 (A-Z)
+                        </button>
+                        <button type="button" style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px', border: 'none', borderRadius: 8, background: 'transparent', color: 'var(--color-foreground)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }} onClick={() => handleSort('addedAt')}>
+                          <Clock size={15} />
+                          按加入时间排序
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </>
             )}
             <button className="am-action am-action--subtle" onClick={() => setEditOpen(true)}>
@@ -280,34 +339,53 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
           </div>
           <TrackList>
             {tracks.map((track, index) => (
-              <TrackListRow
+              <div
                 key={track.id + String(index)}
-                track={track}
-                index={index + 1}
-                isCurrent={player.currentTrack?.id === track.id}
-                isPlaying={player.isPlaying}
-                onPlay={() => editing ? toggleSelected(track.id) : player.playNow(track)}
-                leading={editing ? (
-                  <button
-                    type="button"
-                    className={`playlist-select-button ${selectedIds.has(track.id) ? 'is-selected' : ''}`}
-                    onClick={(e) => { e.stopPropagation(); toggleSelected(track.id) }}
-                    title={selectedIds.has(track.id) ? '取消选择' : '选择'}
-                  >
-                    {selectedIds.has(track.id) ? <CheckSquare size={17} /> : <Square size={17} />}
-                  </button>
-                ) : undefined}
-                extra={(
-                  <div className="am-extra-actions">
-                    <AddToPlaylistButton track={track} size={15} />
-                    {!editing && (
-                      <button className="am-icon-danger" onClick={(e) => { e.stopPropagation(); removeOne(track.id) }} title="移出歌单">
-                        <X size={16} />
-                      </button>
-                    )}
-                  </div>
-                )}
-              />
+                draggable={!editing}
+                onDragStart={(e) => { handleDragStart(index); e.dataTransfer.effectAllowed = 'move' }}
+                onDragOver={(e) => { e.preventDefault(); handleDragOver(index) }}
+                onDrop={(e) => { e.preventDefault(); handleDrop(index) }}
+                onDragEnd={() => { setDragIndex(null) }}
+                style={{ opacity: dragIndex === index ? 0.4 : 1 }}
+              >
+                <TrackListRow
+                  track={track}
+                  index={index + 1}
+                  isCurrent={player.currentTrack?.id === track.id}
+                  isPlaying={player.isPlaying}
+                  onPlay={() => editing ? toggleSelected(track.id) : player.playNow(track)}
+                  leading={editing ? (
+                    <button
+                      type="button"
+                      className={`playlist-select-button ${selectedIds.has(track.id) ? 'is-selected' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); toggleSelected(track.id) }}
+                      title={selectedIds.has(track.id) ? '取消选择' : '选择'}
+                    >
+                      {selectedIds.has(track.id) ? <CheckSquare size={17} /> : <Square size={17} />}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="playlist-drag-handle"
+                      title="拖动排序"
+                      onDragStart={(e) => { e.stopPropagation(); handleDragStart(index) }}
+                      style={{ background: 'transparent', border: 'none', color: 'var(--color-muted)', cursor: 'grab', display: 'flex', alignItems: 'center', padding: 4 }}
+                    >
+                      <GripVertical size={16} />
+                    </button>
+                  )}
+                  extra={(
+                    <div className="am-extra-actions">
+                      <AddToPlaylistButton track={track} size={15} />
+                      {!editing && (
+                        <button className="am-icon-danger" onClick={(e) => { e.stopPropagation(); removeOne(track.id) }} title="移出歌单">
+                          <X size={16} />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                />
+              </div>
             ))}
           </TrackList>
         </MusicSection>

@@ -11,6 +11,29 @@ const BILI_PASSPORT = 'https://passport.bilibili.com'
 const BILI_REFERER = 'https://www.bilibili.com'
 const BILI_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
+// 解析 B站接口响应：校验 HTTP 状态与 content-type，非 JSON（如风控返回 HTML）时抛友好错误，
+// 避免原始 SyntaxError（Unexpected token '<'）暴露到 UI。返回解析后的 data（body.code===0 时的 data 字段）
+function parseBiliResponse(resp: Response): unknown {
+  // 先同步读取文本（net.fetch 的 body 只能读一次）
+  return resp.text().then((text) => {
+    const ct = resp.headers.get('content-type') || ''
+    if (resp.status !== 200 || (ct && !ct.includes('application/json') && !ct.includes('text/json'))) {
+      throw new Error(`B站接口返回异常（HTTP ${resp.status}），可能触发风控或登录失效，请重新登录后重试`)
+    }
+    let data: unknown
+    try {
+      data = JSON.parse(text)
+    } catch {
+      throw new Error(`B站接口返回非 JSON 数据，可能触发风控或登录失效，请重新登录后重试`)
+    }
+    const body = data as { code?: number; message?: string; data?: unknown }
+    if (body.code !== 0) {
+      throw new Error(`B站接口错误（${body.code}）：${body.message || '未知错误'}`)
+    }
+    return body.data
+  })
+}
+
 // ===== ffmpeg 路径解析 =====
 // ffmpeg-static 提供跨平台静态 ffmpeg 二进制
 // ESM 中无 require，通过 createRequire 桥接
@@ -596,11 +619,9 @@ export function registerBiliApiHandlers() {
       },
       body,
     })
-    const data = await resp.json()
-    if (data.code !== 0) {
-      throw new Error(`收藏失败（${data.code}）：${data.message || '未知错误'}`)
-    }
-    return { code: data.code, message: data.message }
+    // 统一校验返回类型：风控/登录失效时 B站返回 HTML，避免原始 SyntaxError 暴露到 UI
+    await parseBiliResponse(resp)
+    return { code: 0, message: 'ok' }
   })
 
   // 通用 B站 JSON GET（主进程 net.fetch，自动带 Cookie + Referer + UA）
@@ -616,23 +637,7 @@ export function registerBiliApiHandlers() {
         'User-Agent': BILI_UA,
       },
     })
-    const text = await resp.text()
-    // 风控/登录页等返回 HTML，而非 JSON，需先判断再解析，避免 raw SyntaxError 暴露给 UI
-    const ct = resp.headers.get('content-type') || ''
-    if (resp.status !== 200 || (ct && !ct.includes('application/json') && !ct.includes('text/json'))) {
-      throw new Error(`B站接口返回异常（HTTP ${resp.status}），可能触发风控或登录失效，请重新登录后重试`)
-    }
-    let data: unknown
-    try {
-      data = JSON.parse(text)
-    } catch {
-      throw new Error(`B站接口返回非 JSON 数据，可能触发风控或登录失效，请重新登录后重试`)
-    }
-    const body = data as { code?: number; message?: string; data?: unknown }
-    if (body.code !== 0) {
-      throw new Error(`B站接口错误（${body.code}）：${body.message || '未知错误'}`)
-    }
-    return body.data
+    return await parseBiliResponse(resp)
   })
 
   // 打开 B站官方登录页窗口，登录成功后自动捕获 Cookie（官方页原生处理极验人机验证）

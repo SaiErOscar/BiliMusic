@@ -39,6 +39,7 @@ function favoriteItemToTrack(item: FavoriteItem): Track {
     cid: item.cid,
     playCount: item.cnt_info?.play || 0,
     isLiked: false,
+    likedAt: item.fav_time ? new Date(item.fav_time * 1000).toISOString() : undefined,
   }
 }
 
@@ -103,6 +104,12 @@ export default function BiliFavorites() {
         page++
         if (page > 50) break
       }
+      // 按收藏时间降序：最近收藏在前（fav_time/likedAt 缺失的排最后）
+      all.sort((a, b) => {
+        const at = a.likedAt ? new Date(a.likedAt).getTime() : 0
+        const bt = b.likedAt ? new Date(b.likedAt).getTime() : 0
+        return bt - at
+      })
       setTracks(all)
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : '加载收藏夹内容失败')
