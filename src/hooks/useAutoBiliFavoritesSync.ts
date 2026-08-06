@@ -43,9 +43,14 @@ export function useAutoBiliFavoritesSync(): void {
     }
     const bootTimer = setTimeout(boot, STARTUP_DELAY)
 
+    // 收藏夹内容变更（收藏/移除/导入等）时立即触发一次同步，实现「更改即双向同步」
+    const onChange = () => void runOnce()
+    window.addEventListener('bilimusic:bili-favorites-changed', onChange)
+
     return () => {
       clearTimeout(bootTimer)
       if (timer) clearInterval(timer)
+      window.removeEventListener('bilimusic:bili-favorites-changed', onChange)
     }
   }, [])
 }

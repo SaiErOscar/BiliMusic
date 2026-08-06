@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Heart, X, Loader2, Check } from 'lucide-react'
-import { listBiliFavoriteFolders } from '@/services/biliFavorites'
+import { listBiliFavoriteFolders, getFoldersContainingBvid } from '@/services/biliFavorites'
 import { dealFavorite, getVideoDetail } from '@/services/bilibiliApi'
 import type { FavoriteFolder } from '@/services/bilibiliApi'
 
@@ -28,6 +28,7 @@ export default function BiliFavoriteDialog({
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [initialSelected, setInitialSelected] = useState<Set<number>>(new Set())
   const [result, setResult] = useState<'idle' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
   // 有效的 aid：优先用传入 aid，缺失时基于 bvid 解析（某些曲目 aid 为 0/空）
@@ -70,10 +71,21 @@ export default function BiliFavoriteDialog({
       setResult('idle')
       setMessage('')
       setSelected(new Set())
+      setInitialSelected(new Set())
       loadFolders()
       resolveAid()
+      // 异步判断该曲目已收藏在哪些收藏夹，作为默认勾选
+      ;(async () => {
+        try {
+          const containing = await getFoldersContainingBvid(bvid)
+          setSelected(new Set(containing))
+          setInitialSelected(new Set(containing))
+        } catch {
+          // 判断失败则保持全不勾选，用户可手动选择
+        }
+      })()
     }
-  }, [open, loadFolders, resolveAid])
+  }, [open, loadFolders, resolveAid, bvid])
 
   const toggleFolder = (id: number) => {
     setSelected(prev => {
@@ -84,21 +96,33 @@ export default function BiliFavoriteDialog({
     })
   }
 
+  const addIds = [...selected].filter((id) => !initialSelected.has(id))
+  const delIds = [...initialSelected].filter((id) => !selected.has(id))
+  const hasChange = addIds.length > 0 || delIds.length > 0
+
   const handleSubmit = async () => {
-    if (!resolvedAid || selected.size === 0) return
+    if (!resolvedAid) return
+    const addIds = [...selected].filter((id) => !initialSelected.has(id))
+    const delIds = [...initialSelected].filter((id) => !selected.has(id))
+    if (addIds.length === 0 && delIds.length === 0) return
     setSubmitting(true)
     setResult('idle')
     try {
       const aidNum = resolvedAid
-      const folderIds = Array.from(selected)
-      // B站 dealFavorite 一次只能处理一个 rid，但可以同时添加到多个收藏夹
-      await dealFavorite(aidNum, folderIds)
+      if (addIds.length > 0) await dealFavorite(aidNum, addIds)
+      if (delIds.length > 0) await dealFavorite(aidNum, [], delIds)
+      // 触发收藏变更自动双向同步
+      window.dispatchEvent(new CustomEvent('bilimusic:bili-favorites-changed'))
       setResult('success')
-      setMessage(`已收藏到 ${folderIds.length} 个收藏夹`)
+      setMessage(
+        delIds.length > 0
+          ? `已更新收藏（新增 ${addIds.length}、取消 ${delIds.length}）`
+          : `已收藏到 ${addIds.length} 个收藏夹`,
+      )
       setTimeout(() => onClose(), 1500)
     } catch (e) {
       setResult('error')
-      setMessage(e instanceof Error ? e.message : '收藏失败')
+      setMessage(e instanceof Error ? e.message : '收藏更新失败')
     } finally {
       setSubmitting(false)
     }
@@ -227,16 +251,16 @@ export default function BiliFavoriteDialog({
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting || selected.size === 0 || !resolvedAid}
+                disabled={submitting || !resolvedAid || !hasChange}
                 style={{
-                  opacity: (submitting || selected.size === 0 || !aid) ? 0.5 : 1,
+                  opacity: (submitting || !resolvedAid || !hasChange) ? 0.5 : 1,
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
                 }}
               >
                 {submitting ? <Loader2 size={14} className="spin" /> : <Heart size={14} />}
-                收藏{selected.size > 0 ? ` (${selected.size})` : ''}
+                确定
               </button>
             </div>
           </motion.div>

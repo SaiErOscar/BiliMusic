@@ -15,12 +15,13 @@ import {
   Plus,
   X,
   LogOut,
+  GripVertical,
   type LucideIcon,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAppSettings } from '@/hooks/useAppSettings'
-import { createPlaylist, loadPlaylists, updatePlaylist, PLAYLISTS_CHANGED_EVENT } from '@/utils/storage'
+import { createPlaylist, loadPlaylists, updatePlaylist, savePlaylists, PLAYLISTS_CHANGED_EVENT } from '@/utils/storage'
 import type { Playlist } from '@/types'
 
 interface NavItem {
@@ -93,6 +94,19 @@ export default function Sidebar() {
     window.addEventListener('resize', syncWidth)
     return () => window.removeEventListener('resize', syncWidth)
   }, [])
+
+  const dragIndexRef = useRef<number | null>(null)
+
+  const handleDrop = (dropIndex: number) => {
+    const from = dragIndexRef.current
+    dragIndexRef.current = null
+    if (from === null || from === dropIndex) return
+    const arr = [...playlists]
+    const [moved] = arr.splice(from, 1)
+    arr.splice(dropIndex, 0, moved)
+    setPlaylists(arr)
+    savePlaylists(arr)
+  }
 
   const handleRename = (playlistId: string, newName: string) => {
     const trimmed = newName.trim()
@@ -208,7 +222,7 @@ export default function Sidebar() {
               {group.items.map((item) => (
                 <SidebarLink key={item.path} item={item} collapsed={collapsed} />
               ))}
-              {group.title === '播放列表' && playlists.map((playlist) => (
+              {group.title === '播放列表' && playlists.map((playlist, index) => (
                 editingId === playlist.id ? (
                   <input
                     key={playlist.id}
@@ -234,17 +248,39 @@ export default function Sidebar() {
                     }}
                   />
                 ) : (
-                  <SidebarLink
+                  <div
                     key={playlist.id}
-                    item={{ icon: ListMusic, label: playlist.name, path: `/playlists/${playlist.id}` }}
-                    collapsed={collapsed}
-                    onDoubleClick={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setEditingId(playlist.id)
-                      setDraftName(playlist.name)
+                    draggable
+                    onDragStart={(e) => {
+                      dragIndexRef.current = index
+                      e.dataTransfer.effectAllowed = 'move'
                     }}
-                  />
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      handleDrop(index)
+                    }}
+                    style={{ display: 'flex', alignItems: 'center', width: '100%' }}
+                  >
+                    {!collapsed && (
+                      <GripVertical
+                        size={14}
+                        style={{ flexShrink: 0, color: 'var(--sidebar-muted-text)', cursor: 'grab', marginLeft: 4, opacity: 0.7 }}
+                      />
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <SidebarLink
+                        item={{ icon: ListMusic, label: playlist.name, path: `/playlists/${playlist.id}` }}
+                        collapsed={collapsed}
+                        onDoubleClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setEditingId(playlist.id)
+                          setDraftName(playlist.name)
+                        }}
+                      />
+                    </div>
+                  </div>
                 )
               ))}
             </div>

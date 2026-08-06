@@ -7,7 +7,7 @@
  * 3. 双向同步：本地收藏 ↔ B站收藏夹
  */
 
-import { getFavoriteFolders, getAllFavoriteFolderContent, dealFavorite, type FavoriteFolder, type FavoriteItem } from '@/services/bilibiliApi'
+import { getFavoriteFolders, getAllFavoriteFolderContent, getFavoriteFolderContent, dealFavorite, type FavoriteFolder, type FavoriteItem } from '@/services/bilibiliApi'
 import { loadFavoriteTracks, saveFavoriteTracks } from '@/utils/storage'
 import type { Track } from '@/types'
 import { toHttpsUrl } from '@/services/bilibiliApi'
@@ -131,4 +131,27 @@ export async function listBiliFavoriteFolders(): Promise<{ count: number; list: 
     throw new Error('请先登录 Bilibili 账号')
   }
   return getFavoriteFolders(nav.mid)
+}
+
+/**
+ * 判断指定 bvid 的曲目位于哪些收藏夹（默认勾选用）。
+ * 遍历所有收藏夹，每个拉取最新一页（前 50 个）内容进行匹配。
+ */
+export async function getFoldersContainingBvid(bvid: string): Promise<number[]> {
+  try {
+    const { list } = await listBiliFavoriteFolders()
+    const result: number[] = []
+    for (const folder of list) {
+      try {
+        const content = await getFavoriteFolderContent(folder.id, 1, 50)
+        const medias = content?.medias || []
+        if (medias.some((m) => m.bvid === bvid)) result.push(folder.id)
+      } catch {
+        // 单个收藏夹失败不影响其他
+      }
+    }
+    return result
+  } catch {
+    return []
+  }
 }

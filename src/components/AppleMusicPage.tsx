@@ -72,12 +72,13 @@ export function ActionButton({
   )
 }
 
-export function MusicSection({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
+export function MusicSection({ title, icon, children, action }: { title: string; icon?: React.ReactNode; children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <section className="am-section">
       <div className="am-section__head">
         {icon && <span>{icon}</span>}
         <h2>{title}</h2>
+        {action && <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>{action}</div>}
       </div>
       {children}
     </section>

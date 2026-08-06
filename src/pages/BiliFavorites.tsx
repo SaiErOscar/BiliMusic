@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Play, Loader2, FolderHeart, Check, ChevronDown, Download, ListPlus } from 'lucide-react'
+import { Play, Loader2, FolderHeart, Check, ChevronDown, Download, ListPlus, X } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -11,6 +11,7 @@ import {
   TrackList,
   TrackListRow,
 } from '@/components/AppleMusicPage'
+import TrackActions from '@/components/TrackActions'
 import type { Track } from '@/types'
 import type { FavoriteFolder, FavoriteItem } from '@/services/bilibiliApi'
 import BatchDownloadDialog from '@/components/BatchDownloadDialog'
@@ -20,6 +21,7 @@ import { listBiliFavoriteFolders } from '@/services/biliFavorites'
 import {
   getFavoriteFolderContent,
   toHttpsUrl,
+  dealFavorite,
 } from '@/services/bilibiliApi'
 
 const SYNCED_FOLDER_KEY = 'bilimusic_synced_folder'
@@ -110,6 +112,19 @@ export default function BiliFavorites() {
     localStorage.setItem(SYNCED_FOLDER_KEY, String(folderId))
     setFolderDropdownOpen(false)
     loadFolderContent(folderId)
+  }
+
+  const handleRemoveTrack = async (track: Track) => {
+    if (!selectedFolder || !track.aid) return
+    try {
+      await dealFavorite(Number(track.aid), [], [selectedFolder])
+      setSyncMessage(`已从收藏夹移除「${track.title}」`)
+      await loadFolderContent(selectedFolder)
+      // 触发收藏变更自动同步
+      window.dispatchEvent(new CustomEvent('bilimusic:bili-favorites-changed'))
+    } catch (e) {
+      setSyncMessage(e instanceof Error ? e.message : '移除失败')
+    }
   }
 
   const handleExportToPlaylist = () => {
@@ -308,6 +323,23 @@ export default function BiliFavorites() {
                 isCurrent={player.currentTrack?.id === track.id}
                 isPlaying={player.isPlaying}
                 onPlay={() => player.playNow(track)}
+                extra={(
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <TrackActions track={track} size={15} />
+                    <button
+                      title="从收藏夹移除"
+                      onClick={(e) => { e.stopPropagation(); void handleRemoveTrack(track) }}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        width: 28, height: 28, borderRadius: 8, border: 'none',
+                        background: 'transparent', color: 'var(--color-muted)', cursor: 'pointer',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                )}
               />
             ))}
           </TrackList>

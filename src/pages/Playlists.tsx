@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { CheckSquare, ListMusic, Music, Pencil, Play, Square, Trash2, X, FolderHeart, Download } from 'lucide-react'
+import { ArrowDownAZ, CheckSquare, ListMusic, Music, Pencil, Play, Square, Trash2, X, FolderHeart, Download } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import AddToPlaylistButton from '@/components/AddToPlaylistButton'
 import BatchDownloadDialog from '@/components/BatchDownloadDialog'
@@ -20,6 +20,7 @@ import {
   getPlaylist,
   updatePlaylist,
   loadPlaylists,
+  sortPlaylists,
   PLAYLISTS_CHANGED_EVENT,
   removeTracksFromPlaylist,
 } from '@/utils/storage'
@@ -33,6 +34,7 @@ export default function Playlists() {
 function PlaylistOverview() {
   const navigate = useNavigate()
   const [playlists, setPlaylists] = useState<Playlist[]>(() => loadPlaylists())
+  const [sortOpen, setSortOpen] = useState(false)
 
   useEffect(() => {
     const sync = () => setPlaylists(loadPlaylists())
@@ -65,7 +67,40 @@ function PlaylistOverview() {
       {playlists.length === 0 ? (
         <EmptyLibrary icon={<ListMusic size={40} />} title="还没有歌单" subtitle="新建歌单后，会立即显示在这里和侧边栏中。" />
       ) : (
-        <MusicSection title="我的歌单" icon={<ListMusic size={22} />}>
+        <MusicSection
+          title="我的歌单"
+          icon={<ListMusic size={22} />}
+          action={(
+            <div style={{ position: 'relative' }}>
+              <button className="am-action am-action--subtle" onClick={() => setSortOpen(o => !o)}>
+                <ArrowDownAZ size={14} />
+                排序
+              </button>
+              {sortOpen && (
+                <>
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setSortOpen(false)} />
+                  <div style={{
+                    position: 'absolute', right: 0, top: '100%', marginTop: 6, minWidth: 200, padding: 6,
+                    borderRadius: 12, background: 'var(--glass-bg-heavy)', backdropFilter: 'blur(20px)',
+                    WebkitBackdropFilter: 'blur(20px)', border: '1px solid var(--glass-border)',
+                    boxShadow: 'var(--shadow-lg)', zIndex: 9999,
+                  }}>
+                    <button
+                      type="button"
+                      onClick={() => { sortPlaylists('updatedAt'); setSortOpen(false) }}
+                      style={{ display: 'block', width: '100%', padding: '8px 12px', border: 'none', borderRadius: 8, background: 'transparent', color: 'var(--color-foreground)', fontSize: 13, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}
+                    >按修改时间（新的在前）</button>
+                    <button
+                      type="button"
+                      onClick={() => { sortPlaylists('name'); setSortOpen(false) }}
+                      style={{ display: 'block', width: '100%', padding: '8px 12px', border: 'none', borderRadius: 8, background: 'transparent', color: 'var(--color-foreground)', fontSize: 13, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}
+                    >按文件名（A-Z）</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        >
           <div className="playlist-grid">
             {playlists.map((playlist) => (
               <PlaylistCard key={playlist.id} playlist={playlist} />

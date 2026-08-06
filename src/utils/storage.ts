@@ -170,6 +170,16 @@ export function savePlaylists(playlists: Playlist[]) {
   }
 }
 
+export function sortPlaylists(order: 'updatedAt' | 'name'): void {
+  const list = loadPlaylists()
+  if (order === 'name') {
+    list.sort((a, b) => a.name.localeCompare(b.name))
+  } else {
+    list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+  }
+  savePlaylists(list)
+}
+
 export function createPlaylist(input: { name: string; description?: string; coverUrl?: string }): Playlist {
   const now = new Date().toISOString()
   const playlist: Playlist = {

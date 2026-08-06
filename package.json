@@ -1,7 +1,7 @@
 {
   "name": "bilimusic",
   "private": true,
-  "version": "1.2.16",
+  "version": "1.2.17",
   "description": "BiliMusic - 基于 Bilibili 的桌面音乐播放器",
   "author": "Hanversion",
   "type": "module",

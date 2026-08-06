@@ -7,7 +7,7 @@
   <p>
     <a href="./README.md">中文</a>
     ·
-    <a href="./docs/CHANGELOG.md">Changelog v1.0.1 → v1.2.16</a>
+    <a href="./docs/CHANGELOG.md">Changelog v1.0.1 → v1.2.17</a>
     ·
     <a href="#-getting-started">Getting Started</a>
     ·
@@ -18,7 +18,7 @@
     <img alt="Electron" src="https://img.shields.io/badge/Electron-36-47848F?style=for-the-badge&logo=electron&logoColor=fff" />
     <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?style=for-the-badge&logo=vite&logoColor=fff" />
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=fff" />
-    <img alt="Version" src="https://img.shields.io/badge/version-1.2.16-30d158?style=for-the-badge" />
+    <img alt="Version" src="https://img.shields.io/badge/version-1.2.17-30d158?style=for-the-badge" />
   </p>
 </div>
 
@@ -126,17 +126,19 @@ Video titles are cleaned before lyric search. Search results become music-like t
 - Playlist detail: play all, delete, remove single, batch remove
 - Import/export playlists as JSON
 - Edit playlist name and description (Edit button / double-click rename in sidebar)
+- Drag playlists in the sidebar to reorder, synced to the All Playlists page
+- Sort the All Playlists page by modified time / file name (one-shot)
 - Export Bilibili favorites folder as a local playlist
 
 ### Bilibili Favorites
 
 - Fetch favorites folder list after login
 - Import favorites to local library
-- Bidirectional sync: local favorites ↔ Bilibili folders
+- Bidirectional sync: local favorites ↔ Bilibili folders (auto on startup + every 2 min, and immediately on any change)
 - Batch download favorites content
 - Export favorites as a local playlist
-- Favorite tracks to a Bilibili folder (aid auto-resolved via bvid when missing)
-- Auto sync: runs "import local + bidirectional sync" on startup and every 2 minutes after login
+- Favorite tracks to a Bilibili folder (aid auto-resolved via bvid when missing; folders already containing the track are pre-checked, uncheck to un-favorite)
+- Remove a track from a folder with the 「×」 button on each row
 
 ### Settings
 
