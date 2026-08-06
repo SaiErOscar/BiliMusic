@@ -58,6 +58,13 @@ export function saveDownloadRecord(record: DownloadRecord) {
   } catch { /* ignore */ }
 }
 
+export function clearDownloadRecords() {
+  try {
+    localStorage.removeItem(DOWNLOADS_KEY)
+    window.dispatchEvent(new CustomEvent(DOWNLOADS_CHANGED_EVENT))
+  } catch { /* ignore */ }
+}
+
 export function addRecentTrack(track: Track) {
   const recent = loadRecentTracks().filter(t => t.id !== track.id)
   recent.unshift({ ...track, isLiked: track.isLiked })

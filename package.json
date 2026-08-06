@@ -1,7 +1,7 @@
 {
   "name": "bilimusic",
   "private": true,
-  "version": "1.2.20-beta",
+  "version": "1.2.20-dev",
   "description": "BiliMusic - 基于 Bilibili 的桌面音乐播放器",
   "author": "Hanversion",
   "type": "module",
@@ -14,13 +14,11 @@
     "electron:dev": "vite",
     "electron:start": "npm run build && electron .",
     "electron:build": "npm run build && electron-builder",
-    "harmony:prepare": "npm run build && node scripts/prepare-harmony.mjs",
-    "harmony:build": "npm run harmony:prepare && node scripts/build-harmony.mjs",
-    "build:ota": "npm run build && node scripts/build-ota.mjs",
     "lint": "eslint src/ electron/ --ext .ts,.tsx,.cjs",
     "lint:fix": "eslint src/ electron/ --ext .ts,.tsx,.cjs --fix",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:ota": "npm run build && node scripts/build-ota.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.3.9",

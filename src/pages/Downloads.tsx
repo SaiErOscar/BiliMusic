@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Download, FolderOpen, HardDrive, Music, ExternalLink, FileAudio, FileVideo, Clock } from 'lucide-react'
+import { Download, FolderOpen, HardDrive, Music, ExternalLink, FileAudio, FileVideo, Clock, Trash2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import {
   ActionButton,
@@ -9,7 +9,7 @@ import {
   MusicSection,
 } from '@/components/AppleMusicPage'
 import { useAppSettings } from '@/hooks/useAppSettings'
-import { loadDownloadRecords, DOWNLOADS_CHANGED_EVENT } from '@/utils/storage'
+import { loadDownloadRecords, clearDownloadRecords, DOWNLOADS_CHANGED_EVENT } from '@/utils/storage'
 import type { DownloadRecord } from '@/types'
 
 export default function Downloads() {
@@ -42,10 +42,18 @@ export default function Downloads() {
         subtitle="离线音乐会整齐地收在这里，下载时可在音频和视频之间自由选择。"
         tone="blue"
         action={(
-          <ActionButton tone="subtle" onClick={openDir}>
-            <FolderOpen size={16} />
-            打开下载目录
-          </ActionButton>
+          <>
+            {records.length > 0 && (
+              <ActionButton tone="subtle" onClick={() => { clearDownloadRecords(); refresh() }}>
+                <Trash2 size={16} />
+                清空记录
+              </ActionButton>
+            )}
+            <ActionButton tone="subtle" onClick={openDir}>
+              <FolderOpen size={16} />
+              打开下载目录
+            </ActionButton>
+          </>
         )}
       />
 

@@ -1,7 +1,22 @@
 # BiliMusic 更新日志
 
-> 汇总自 2026 年 8 月 4 日首次发布至 v1.2.20-beta 的全部更新。
+> 汇总自 2026 年 8 月 4 日首次发布至 v1.2.20-dev 的全部更新。
 > BiliMusic — 基于 Bilibili 的桌面音乐播放器（Electron + React + TypeScript）。
+
+---
+
+## v1.2.20-dev — 下载记录清除与遗留清理
+
+**发布日期：2026-08-06**
+
+### 新功能
+
+- **本地下载「清空记录」**：「本地下载」页新增「清空记录」按钮（与「最近播放」清空一致），可一键清空全部下载记录列表
+
+### 清理
+
+- 移除历史遗留的鸿蒙命令行构建脚本（`scripts/build-harmony.mjs`、`scripts/prepare-harmony.mjs`）及 `package.json` 中的 `harmony:prepare`、`harmony:build` 命令（鸿蒙改用 IDE 构建，见 `N:\\BiliHarmony`）
+- 保留 OTA 渲染热补丁构建能力（`scripts/build-ota.mjs` 与 `build:ota` 命令、CI 中的 OTA 步骤）
 
 ---
 
