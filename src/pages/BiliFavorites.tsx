@@ -72,6 +72,8 @@ export default function BiliFavorites() {
         setSelectedFolder(targetFolder.id)
         loadFolderContent(targetFolder.id)
       }
+      // 打开收藏夹页面时请求立即同步
+      window.dispatchEvent(new CustomEvent('bilimusic:bili-favorites-sync-request'))
     } catch (e) {
       setSyncMessage(e instanceof Error ? e.message : '获取收藏夹列表失败')
     } finally {
@@ -112,6 +114,8 @@ export default function BiliFavorites() {
     localStorage.setItem(SYNCED_FOLDER_KEY, String(folderId))
     setFolderDropdownOpen(false)
     loadFolderContent(folderId)
+    // 切换收藏夹时请求立即同步
+    window.dispatchEvent(new CustomEvent('bilimusic:bili-favorites-sync-request'))
   }
 
   const handleRemoveTrack = async (track: Track) => {
