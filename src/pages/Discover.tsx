@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Disc3, Loader2, Play, RefreshCw, TrendingUp } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import { getMusicRanking, type VideoInfo } from '@/services/api'
@@ -34,10 +35,12 @@ export default function Discover() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const player = usePlayer()
+  const location = useLocation()
 
+  // 首次挂载 + 每次切回本页时重新拉取（route 变化触发），保证内容始终最新
   useEffect(() => {
-    loadMusicRanking()
-  }, [])
+    void loadMusicRanking()
+  }, [location.pathname])
 
   async function loadMusicRanking() {
     setLoading(true)

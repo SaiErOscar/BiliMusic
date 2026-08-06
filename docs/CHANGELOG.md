@@ -1,7 +1,19 @@
 # BiliMusic 更新日志
 
-> 汇总自 2026 年 8 月 4 日首次发布至 v1.2.20-dev 的全部更新。
+> 汇总自 2026 年 8 月 4 日首次发布至 v1.2.20-pre 的全部更新。
 > BiliMusic — 基于 Bilibili 的桌面音乐播放器（Electron + React + TypeScript）。
+
+---
+
+## v1.2.20-pre — 发现/推荐切回自动刷新
+
+**发布日期：2026-08-06**
+
+### 优化
+
+- **发现页 / 推荐页切回自动刷新**：监听路由变化，每次切回「发现」「推荐」页面时自动重新拉取 B站最新数据（此前仅首次挂载时拉取一次，切回页面内容不更新）
+  - 发现页：使用 `useLocation` 监听路由，`[location.pathname]` 变化时重新调用 `getMusicRanking()`
+  - 推荐页：同样监听路由，重新调用 `getMusicCenterRank(30)` + `getNewSongs()`
 
 ---
 

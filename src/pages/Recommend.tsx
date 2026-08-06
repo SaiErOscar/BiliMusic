@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Flame, Loader2, Play, RefreshCw, Sparkles } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import { getMusicCenterRank, getNewSongs, type MusicSong } from '@/services/api'
@@ -37,10 +38,12 @@ export default function Recommend() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const player = usePlayer()
+  const location = useLocation()
 
+  // 首次挂载 + 每次切回本页时重新拉取（route 变化触发），保证推荐内容始终最新
   useEffect(() => {
-    loadAll()
-  }, [])
+    void loadAll()
+  }, [location.pathname])
 
   async function loadAll() {
     setLoading(true)
