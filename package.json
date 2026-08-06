@@ -92,7 +92,10 @@
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
       "uninstallDisplayName": "BiliMusic ${version}",
-      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
+      "installerIcon": "build/installerIcon.ico",
+      "uninstallerIcon": "build/uninstallerIcon.ico",
+      "installerSidebar": "build/installerSidebar.bmp"
     },
     "mac": {
       "target": [

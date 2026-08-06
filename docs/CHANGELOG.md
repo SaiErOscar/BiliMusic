@@ -13,6 +13,11 @@
 
 - **本地下载「清空记录」**：「本地下载」页新增「清空记录」按钮（与「最近播放」清空一致），可一键清空全部下载记录列表
 
+### 安装包美化
+
+- NSIS 安装程序界面美化：自定义安装程序/卸载程序图标（`installerIcon`/`uninstallerIcon`）与安装向导侧边栏位图（`installerSidebar`，暖粉色渐变 + 品牌 Logo）
+- 保留 electron-updater 自动更新能力（差分更新 `blockmap` 链路不变）
+
 ### 清理
 
 - 移除历史遗留的鸿蒙命令行构建脚本（`scripts/build-harmony.mjs`、`scripts/prepare-harmony.mjs`）及 `package.json` 中的 `harmony:prepare`、`harmony:build` 命令（鸿蒙改用 IDE 构建，见 `N:\\BiliHarmony`）
