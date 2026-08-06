@@ -280,7 +280,7 @@ export default function Settings() {
                   {updateAction === 'restart' ? '重启并安装' : '立即重载'}
                 </button>
               )}
-              <button type="button" onClick={() => window.electronAPI?.openExternal?.('https://github.com/HanversionOvO/BiliMusic')}>
+              <button type="button" onClick={() => window.electronAPI?.openExternal?.('https://github.com/SaiErOscar/BiliMusic')}>
                 <Github size={14} />
                 关于项目
               </button>

@@ -9,7 +9,7 @@ import {
   stageRendererUpdate,
 } from './otaUpdater'
 
-const RELEASES_URL = 'https://github.com/HanversionOvO/BiliMusic/releases/latest'
+const RELEASES_URL = 'https://github.com/SaiErOscar/BiliMusic/releases/latest'
 const CHECK_INTERVAL = 6 * 60 * 60 * 1000
 const STARTUP_DELAY = 10 * 1000
 

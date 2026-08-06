@@ -9,7 +9,7 @@ import { emitUpdater, ulog } from './updaterBus'
 // 单文件 asar（桌面端 net.fetch 读 asar 内部已被现有打包路径证明可用），无需解压、原子可回滚。
 // 鸿蒙：原生移植层能力（沙箱可写 / net.fetch 读 asar / 外网下载）未知 —— 全程防御化，
 // 任一能力缺失即优雅降级到包内 dist，绝不崩；坏包经 ready 心跳缺失自动回滚并加入黑名单。
-const REPO = 'HanversionOvO/BiliMusic'
+const REPO = 'SaiErOscar/BiliMusic'
 const RELEASE_BASE = `https://github.com/${REPO}/releases/latest/download`
 export const OTA_MANIFEST_URL = `${RELEASE_BASE}/ota.json`
 
