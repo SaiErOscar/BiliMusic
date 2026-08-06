@@ -18,7 +18,7 @@
     <img alt="Electron" src="https://img.shields.io/badge/Electron-36-47848F?style=for-the-badge&logo=electron&logoColor=fff" />
     <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?style=for-the-badge&logo=vite&logoColor=fff" />
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=fff" />
-    <img alt="Version" src="https://img.shields.io/badge/version-1.2.8-30d158?style=for-the-badge" />
+    <img alt="Version" src="https://img.shields.io/badge/version-1.2.15-30d158?style=for-the-badge" />
   </p>
 </div>
 
@@ -94,18 +94,27 @@ BiliMusic 不是简单地"把 B 站视频拿来播放"。它试图做的是另�
 - 歌词时间偏移调整（±0.2s 步进，按曲目独立保存）
 - 下载音频时可同时导出 `.lrc` 歌词文件，保留偏移设置
 
+### 登录
+
+- **扫码登录**：B站 App 扫码，官方推荐
+- **账号密码 / 手机验证码登录**：弹出 B站官方登录页窗口，官方页原生处理极验人机验证，支持账号密码、手机短信、扫码三种方式，登录成功后应用自动捕获 Cookie 生效
+
 ### 下载
 
 - 音频下载（m4a/flac）与视频下载（MP4，ffmpeg 合并音视频流）
 - 文件名选择：视频标题 / 过滤歌名 / 自定义输入（预设原视频名）
+- **属性与歌词选项分离**：下载时「修改文件属性（写入歌手）」与「下载歌词(.lrc)」为两个独立开关，可分别勾选
 - 流式写入文件，避免大文件内存峰值
 - 下载进度实时反馈
-- 下载时自动将歌词中的歌手信息写入文件"艺术家"属性（ffmpeg metadata）
+- 下载后自动保存记录（含原视频链接），可在下载页查看
+- 视频下载时临时辅助文件夹 `.tmp` 自动隐藏并在完成后删除
+- 空目标文件夹（非默认目录）自动标记为音/视频专属文件夹
 
 ### 批量下载
 
 - 歌单一键下载全部曲目
 - B站收藏夹一键下载全部内容
+- **后台化**：下载开始后可点「取消」终止，点「下载中…」隐藏窗口在后台继续，随时可恢复进度
 - 可选择下载位置（系统文件夹选择对话框）
 - 可选择文件名格式：视频标题 / 过滤歌名 / 自定义模板（`{title}` `{artist}` `{index}` 占位符）
 - 实时显示下载进度：当前/总数、成功/失败计数、进度条
@@ -125,11 +134,7 @@ BiliMusic 不是简单地"把 B 站视频拿来播放"。它试图做的是另�
 - 双向同步：本地收藏 ↔ B站收藏夹
 - 批量下载收藏夹内容
 - 导出收藏夹为本地歌单
-
-### 歌词下载与元数据
-
-- 下载音频时可选同时保存 `.lrc` 歌词文件（含 `[ti:]` `[ar:]` 元数据头，时间戳精确到毫秒）
-- 下载视频/音频时自动从歌词中提取歌手信息，通过 ffmpeg 写入文件属性的"艺术家"字段
+- 曲目可收藏至 B站收藏夹（aid 缺失时自动通过 bvid 解析）
 
 ### 设置
 
@@ -139,7 +144,7 @@ BiliMusic 不是简单地"把 B 站视频拿来播放"。它试图做的是另�
 - 自动播放 / 歌词显示
 - 下载目录配置
 - 歌单导入 / 导出
-- 扫码登录
+- 登录：扫码 / 账号密码 / 手机验证码
 
 ### WebDAV 同步与 OTA 热更新
 
@@ -233,7 +238,7 @@ npm run harmony:prepare  # 构建并同步资源
 npm run harmony:build    # 同步资源并尝试构建 HAP
 ```
 
-若命令行找不到 `hvigor`，使用 DevEco Studio 打开 `platform/HarmonyOS` 手动构建。
+> 注意：hvigor 构建工具要求工程路径为纯英文，且命令行 hvigor 与 DevEco 6.1 SDK 存在元数据格式差异（`sdk-pkg.json` vs `uni-package.json`）。若命令行无法识别 SDK，请使用 DevEco Studio 打开 `platform/HarmonyOS` 手动构建（IDE 内 hvigor-support 与 SDK 版本匹配）。
 
 ## 项目结构
 
@@ -242,17 +247,17 @@ BiliMusic
 ├─ electron/
 │  ├─ main.ts             主进程入口
 │  ├─ preload.cjs          渲染层安全 bridge
-│  ├─ biliApi.ts           Bilibili API 代理 + 下载 + ffmpeg
+│  ├─ biliApi.ts           Bilibili API 代理 + 下载 + ffmpeg + 登录窗口
 │  ├─ lyricsApi.ts         歌词 API 代理
 │  ├─ otaUpdater.ts        OTA 渲染热补丁
 │  ├─ webdav.ts            WebDAV 同步
 │  └─ tray-preload.cjs     托盘专用 preload
 ├─ src/
-│  ├─ components/          播放器、歌词、队列、下载、布局
+│  ├─ components/          播放器、歌词、队列、下载、布局、登录、收藏
 │  ├─ contexts/            播放、登录、播放页状态
 │  ├─ hooks/               主题、设置、歌词
-│  ├─ pages/               发现、搜索、推荐、歌单、收藏夹、设置
-│  ├─ services/            Bilibili 数据、歌词匹配、下载、收藏夹同步
+│  ├─ pages/               发现、搜索、推荐、歌单、收藏夹、设置、下载
+│  ├─ services/            Bilibili 数据、歌词匹配、下载、收藏夹同步、批量下载
 │  ├─ styles/              全局样式与 Apple Music 风格系统
 │  └─ types/               类型定义
 ├─ tests/                  Vitest 单元测试
@@ -263,7 +268,7 @@ BiliMusic
 
 ## 数据持久化
 
-- **localStorage**：播放状态、队列、歌单、收藏、歌词缓存、设置
+- **localStorage**：播放状态、队列、歌单、收藏、歌词缓存、设置、下载记录
 - **Electron userData**：下载文件
 - **WebDAV**：歌单和收藏的云端双向同步
 

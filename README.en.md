@@ -18,7 +18,7 @@
     <img alt="Electron" src="https://img.shields.io/badge/Electron-36-47848F?style=for-the-badge&logo=electron&logoColor=fff" />
     <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?style=for-the-badge&logo=vite&logoColor=fff" />
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=fff" />
-    <img alt="Version" src="https://img.shields.io/badge/version-1.2.8-30d158?style=for-the-badge" />
+    <img alt="Version" src="https://img.shields.io/badge/version-1.2.15-30d158?style=for-the-badge" />
   </p>
 </div>
 
@@ -94,18 +94,27 @@ Video titles are cleaned before lyric search. Search results become music-like t
 - Lyric time offset adjustment (±0.2s steps, persisted per track)
 - Export `.lrc` lyric files with offset preserved when downloading audio
 
+### Login
+
+- **QR code login**: scan with the Bilibili app, officially recommended
+- **Password / SMS login**: opens the official Bilibili login page in a dedicated window (the official page natively handles GeeTest CAPTCHA), supporting password, SMS, and QR code; cookies are captured automatically after login
+
 ### Download
 
 - Audio download (m4a/flac) and video download (MP4 via ffmpeg merge)
 - Filename options: video title / cleaned song name / custom input (pre-filled with original title)
+- **Separate toggles for metadata and lyrics**: "embed artist metadata" and "download .lrc lyrics" are independent options
 - Stream-to-file writing to avoid memory spikes on large files
 - Real-time download progress feedback
-- Automatic artist metadata embedding via ffmpeg
+- Download history is recorded (including the original video link) and shown on the download page
+- The temporary `.tmp` helper folder is auto-hidden and removed after video download
+- Empty target folders (non-default) are auto-marked as video/audio-specific folders
 
 ### Batch Download
 
 - One-click download all tracks from a playlist
 - One-click download all content from a Bilibili favorites folder
+- **Background execution**: cancel anytime, hide the window to keep downloading in the background, and resume progress later
 - Custom download location (system folder picker)
 - Filename format: video title / cleaned name / custom template (`{title}` `{artist}` `{index}` placeholders)
 - Real-time progress: current/total, success/fail count, progress bar
@@ -125,11 +134,7 @@ Video titles are cleaned before lyric search. Search results become music-like t
 - Bidirectional sync: local favorites ↔ Bilibili folders
 - Batch download favorites content
 - Export favorites as a local playlist
-
-### Lyric Export & Metadata
-
-- Optionally save `.lrc` lyric file when downloading audio (includes `[ti:]` `[ar:]` headers, millisecond timestamps)
-- Automatically extract artist from matched lyrics and embed into file's "Artist" metadata field via ffmpeg
+- Favorite tracks to a Bilibili folder (aid auto-resolved via bvid when missing)
 
 ### Settings
 
@@ -139,7 +144,7 @@ Video titles are cleaned before lyric search. Search results become music-like t
 - Auto play / lyric display
 - Download directory
 - Playlist import / export
-- QR code login
+- Login: QR code / password / SMS
 
 ### WebDAV Sync & OTA Hot-Patch
 
@@ -233,7 +238,7 @@ npm run harmony:prepare  # Build and sync resources
 npm run harmony:build    # Sync resources and try building HAP
 ```
 
-If `hvigor` is unavailable, open `platform/HarmonyOS` in DevEco Studio and build manually.
+> Note: the hvigor build tool requires a pure-ASCII project path, and the CLI hvigor has a metadata format mismatch with the DevEco 6.1 SDK (`sdk-pkg.json` vs `uni-package.json`). If the CLI cannot locate the SDK, open `platform/HarmonyOS` in DevEco Studio and build manually — the IDE's built-in hvigor-support matches the SDK version.
 
 ## Project Structure
 
@@ -242,17 +247,17 @@ BiliMusic
 ├─ electron/
 │  ├─ main.ts             Main process entry
 │  ├─ preload.cjs          Renderer bridge
-│  ├─ biliApi.ts           Bilibili API proxy + download + ffmpeg
+│  ├─ biliApi.ts           Bilibili API proxy + download + ffmpeg + login window
 │  ├─ lyricsApi.ts         Lyrics API proxy
 │  ├─ otaUpdater.ts        OTA renderer hot-patch
 │  ├─ webdav.ts            WebDAV sync
 │  └─ tray-preload.cjs     Tray-specific preload
 ├─ src/
-│  ├─ components/          Player, lyrics, queue, download, layout
+│  ├─ components/          Player, lyrics, queue, download, layout, login, favorites
 │  ├─ contexts/            Playback, auth, now-playing state
 │  ├─ hooks/               Theme, settings, lyrics
-│  ├─ pages/               Discover, search, recommendations, playlists, favorites, settings
-│  ├─ services/            Bilibili data, lyric matching, download, favorites sync
+│  ├─ pages/               Discover, search, recommendations, playlists, favorites, settings, downloads
+│  ├─ services/            Bilibili data, lyric matching, download, favorites sync, batch download
 │  ├─ styles/              Global styles and Apple Music design system
 │  └─ types/               Type definitions
 ├─ tests/                  Vitest unit tests
@@ -263,7 +268,7 @@ BiliMusic
 
 ## Persistence
 
-- **localStorage**: playback state, queue, playlists, favorites, lyric cache, settings
+- **localStorage**: playback state, queue, playlists, favorites, lyric cache, settings, download history
 - **Electron userData**: downloaded files
 - **WebDAV**: cloud bidirectional sync for playlists and favorites
 
