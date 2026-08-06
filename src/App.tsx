@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import { Routes, Route } from 'react-router-dom'
 import { useAutoSync } from '@/hooks/useAutoSync'
+import { useAutoBiliFavoritesSync } from '@/hooks/useAutoBiliFavoritesSync'
 import { PlayerProvider } from '@/contexts/PlayerContext'
 import { NowPlayingProvider } from '@/contexts/NowPlayingContext'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
@@ -40,6 +41,7 @@ export default function App() {
 
   // 云同步自动触发（启动 + 改动防抖 + 周期）
   useAutoSync()
+  useAutoBiliFavoritesSync()
 
   return (
     <ErrorBoundary>

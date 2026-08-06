@@ -20,7 +20,7 @@ import {
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAppSettings } from '@/hooks/useAppSettings'
-import { createPlaylist, loadPlaylists, PLAYLISTS_CHANGED_EVENT } from '@/utils/storage'
+import { createPlaylist, loadPlaylists, updatePlaylist, PLAYLISTS_CHANGED_EVENT } from '@/utils/storage'
 import type { Playlist } from '@/types'
 
 interface NavItem {
@@ -72,6 +72,8 @@ export default function Sidebar() {
   const navigate = useNavigate()
   const [playlists, setPlaylists] = useState<Playlist[]>(() => loadPlaylists())
   const [creating, setCreating] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draftName, setDraftName] = useState('')
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [isNarrow, setIsNarrow] = useState(() => window.innerWidth < 1100)
   const collapsed = settings.sidebarState === 'collapsed' || (settings.sidebarState === 'auto' && isNarrow)
@@ -91,6 +93,15 @@ export default function Sidebar() {
     window.addEventListener('resize', syncWidth)
     return () => window.removeEventListener('resize', syncWidth)
   }, [])
+
+  const handleRename = (playlistId: string, newName: string) => {
+    const trimmed = newName.trim()
+    if (trimmed) {
+      const pl = loadPlaylists().find((x) => x.id === playlistId)
+      if (pl) updatePlaylist({ ...pl, name: trimmed })
+    }
+    setEditingId(null)
+  }
 
   const handleCreatePlaylist = (input: { name: string; description?: string }) => {
     const playlist = createPlaylist(input)
@@ -198,11 +209,43 @@ export default function Sidebar() {
                 <SidebarLink key={item.path} item={item} collapsed={collapsed} />
               ))}
               {group.title === '播放列表' && playlists.map((playlist) => (
-                <SidebarLink
-                  key={playlist.id}
-                  item={{ icon: ListMusic, label: playlist.name, path: `/playlists/${playlist.id}` }}
-                  collapsed={collapsed}
-                />
+                editingId === playlist.id ? (
+                  <input
+                    key={playlist.id}
+                    autoFocus
+                    value={draftName}
+                    onChange={(e) => setDraftName(e.target.value)}
+                    onBlur={() => handleRename(playlist.id, draftName)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleRename(playlist.id, draftName)
+                      if (e.key === 'Escape') setEditingId(null)
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    style={{
+                      width: '100%',
+                      height: 34,
+                      padding: '0 10px',
+                      borderRadius: 8,
+                      border: '1px solid var(--color-primary)',
+                      background: 'var(--sidebar-bg)',
+                      color: 'var(--sidebar-text)',
+                      fontSize: 13,
+                      outline: 'none',
+                    }}
+                  />
+                ) : (
+                  <SidebarLink
+                    key={playlist.id}
+                    item={{ icon: ListMusic, label: playlist.name, path: `/playlists/${playlist.id}` }}
+                    collapsed={collapsed}
+                    onDoubleClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setEditingId(playlist.id)
+                      setDraftName(playlist.name)
+                    }}
+                  />
+                )
               ))}
             </div>
           </motion.section>
@@ -469,12 +512,12 @@ function CreatePlaylistDialog({
   )
 }
 
-function SidebarLink({ item, compact = false, collapsed = false }: { item: NavItem; compact?: boolean; collapsed?: boolean }) {
+function SidebarLink({ item, compact = false, collapsed = false, onDoubleClick }: { item: NavItem; compact?: boolean; collapsed?: boolean; onDoubleClick?: React.MouseEventHandler }) {
   const Icon = item.icon
   const { pathname } = useLocation()
 
   return (
-    <NavLink to={item.path} style={{ textDecoration: 'none' }}>
+    <NavLink to={item.path} style={{ textDecoration: 'none' }} onDoubleClick={onDoubleClick}>
       {() => {
         const selected = item.path === '/discover'
           ? pathname === '/' || pathname === '/discover'

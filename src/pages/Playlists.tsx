@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { CheckSquare, ListMusic, Music, Play, Square, Trash2, X, FolderHeart, Download } from 'lucide-react'
+import { CheckSquare, ListMusic, Music, Pencil, Play, Square, Trash2, X, FolderHeart, Download } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import AddToPlaylistButton from '@/components/AddToPlaylistButton'
 import BatchDownloadDialog from '@/components/BatchDownloadDialog'
 import { showBatchDialog } from '@/services/batchDownloadStore'
+import EditPlaylistDialog from '@/components/EditPlaylistDialog'
 import {
   ActionButton,
   EmptyLibrary,
@@ -17,6 +18,7 @@ import {
 import {
   deletePlaylist,
   getPlaylist,
+  updatePlaylist,
   loadPlaylists,
   PLAYLISTS_CHANGED_EVENT,
   removeTracksFromPlaylist,
@@ -96,6 +98,7 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
   const [editing, setEditing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const [batchDownloading, setBatchDownloading] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
   const player = usePlayer()
   const navigate = useNavigate()
 
@@ -130,6 +133,12 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
     // 确保对话框可见：首次打开时 store.visible 为 false，需手动置为 true；
     // 已有后台任务时则恢复显示进度
     showBatchDialog()
+  }
+
+  const handleSaveEdit = (input: { name: string; description?: string }) => {
+    if (!playlist) return
+    updatePlaylist({ ...playlist, name: input.name, description: input.description })
+    setEditOpen(false)
   }
 
   const handleDelete = () => {
@@ -198,6 +207,10 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
                 </button>
               </>
             )}
+            <button className="am-action am-action--subtle" onClick={() => setEditOpen(true)}>
+              <Pencil size={16} />
+              修改
+            </button>
             <button className="am-action am-action--subtle" onClick={handleDelete}>
               <Trash2 size={16} />
               删除歌单
@@ -268,6 +281,15 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
         <BatchDownloadDialog
           tracks={tracks}
           onClose={() => setBatchDownloading(false)}
+        />
+      )}
+      {playlist && (
+        <EditPlaylistDialog
+          open={editOpen}
+          initialName={playlist.name}
+          initialDescription={playlist.description}
+          onClose={() => setEditOpen(false)}
+          onSave={handleSaveEdit}
         />
       )}
     </MusicPageShell>

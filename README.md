@@ -7,7 +7,7 @@
   <p>
     <a href="./README.en.md">English</a>
     ·
-    <a href="./docs/CHANGELOG.md">更新日志 v1.0.1 → v1.2.15</a>
+    <a href="./docs/CHANGELOG.md">更新日志 v1.0.1 → v1.2.16</a>
     ·
     <a href="#-快速开始">快速开始</a>
     ·
@@ -18,7 +18,7 @@
     <img alt="Electron" src="https://img.shields.io/badge/Electron-36-47848F?style=for-the-badge&logo=electron&logoColor=fff" />
     <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?style=for-the-badge&logo=vite&logoColor=fff" />
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=fff" />
-    <img alt="Version" src="https://img.shields.io/badge/version-1.2.15-30d158?style=for-the-badge" />
+    <img alt="Version" src="https://img.shields.io/badge/version-1.2.16-30d158?style=for-the-badge" />
   </p>
 </div>
 
@@ -125,6 +125,7 @@ BiliMusic 不是简单地"把 B 站视频拿来播放"。它试图做的是另�
 - 歌曲可从任意页面添加至歌单
 - 歌单详情页支持播放全部、删除歌单、单曲移出、批量移出
 - 歌单导入/导出 JSON
+- 歌单名称与描述修改（详情页「修改」按钮 / 侧边栏双击改名）
 - B站收藏夹可一键导出为本地歌单
 
 ### B站收藏夹
@@ -135,6 +136,7 @@ BiliMusic 不是简单地"把 B 站视频拿来播放"。它试图做的是另�
 - 批量下载收藏夹内容
 - 导出收藏夹为本地歌单
 - 曲目可收藏至 B站收藏夹（aid 缺失时自动通过 bvid 解析）
+- 自动同步：登录后启动时 + 每 2 分钟自动执行「导入本地 + 双向同步」
 
 ### 设置
 

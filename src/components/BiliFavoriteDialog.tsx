@@ -175,6 +175,7 @@ export default function BiliFavoriteDialog({
                           fontFamily: 'inherit',
                           textAlign: 'left',
                           transition: 'all 0.15s ease',
+                          overflow: 'hidden',
                         }}
                       >
                         <div style={{ minWidth: 0, flex: 1 }}>

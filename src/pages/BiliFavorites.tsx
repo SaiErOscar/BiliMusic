@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Play, RefreshCw, Loader2, FolderHeart, Check, ChevronDown, Download, ListPlus } from 'lucide-react'
+import { Play, Loader2, FolderHeart, Check, ChevronDown, Download, ListPlus } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -16,11 +16,7 @@ import type { FavoriteFolder, FavoriteItem } from '@/services/bilibiliApi'
 import BatchDownloadDialog from '@/components/BatchDownloadDialog'
 import { showBatchDialog } from '@/services/batchDownloadStore'
 import { createPlaylist, addTrackToPlaylist, PLAYLISTS_CHANGED_EVENT } from '@/utils/storage'
-import {
-  listBiliFavoriteFolders,
-  importBiliFavorites,
-  syncBiliFavorites,
-} from '@/services/biliFavorites'
+import { listBiliFavoriteFolders } from '@/services/biliFavorites'
 import {
   getFavoriteFolderContent,
   toHttpsUrl,
@@ -52,7 +48,6 @@ export default function BiliFavorites() {
   const [tracks, setTracks] = useState<Track[]>([])
   const [loadingFolders, setLoadingFolders] = useState(false)
   const [loadingContent, setLoadingContent] = useState(false)
-  const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
   const [folderDropdownOpen, setFolderDropdownOpen] = useState(false)
   const [batchDownloading, setBatchDownloading] = useState(false)
@@ -115,34 +110,6 @@ export default function BiliFavorites() {
     localStorage.setItem(SYNCED_FOLDER_KEY, String(folderId))
     setFolderDropdownOpen(false)
     loadFolderContent(folderId)
-  }
-
-  const handleSync = async () => {
-    if (!selectedFolder) return
-    setSyncing(true)
-    setSyncMessage('正在双向同步...')
-    try {
-      const result = await syncBiliFavorites(selectedFolder)
-      setSyncMessage(result.message)
-    } catch (e) {
-      setSyncMessage(e instanceof Error ? e.message : '同步失败')
-    } finally {
-      setSyncing(false)
-    }
-  }
-
-  const handleImport = async () => {
-    if (!selectedFolder) return
-    setSyncing(true)
-    setSyncMessage('正在导入到本地收藏...')
-    try {
-      const result = await importBiliFavorites(selectedFolder)
-      setSyncMessage(result.message)
-    } catch (e) {
-      setSyncMessage(e instanceof Error ? e.message : '导入失败')
-    } finally {
-      setSyncing(false)
-    }
   }
 
   const handleExportToPlaylist = () => {
@@ -208,7 +175,9 @@ export default function BiliFavorites() {
                 }}
               >
                 <FolderHeart size={15} />
-                {selectedFolderInfo?.title || '选择收藏夹'}
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>
+                  {selectedFolderInfo?.title || '选择收藏夹'}
+                </span>
                 <ChevronDown size={14} />
               </button>
               {folderDropdownOpen && (
@@ -265,14 +234,6 @@ export default function BiliFavorites() {
                 </>
               )}
             </div>
-            <ActionButton tone="subtle" onClick={handleImport} disabled={syncing || !selectedFolder}>
-              {syncing ? <Loader2 size={15} className="spin" /> : <Check size={15} />}
-              导入本地
-            </ActionButton>
-            <ActionButton tone="subtle" onClick={handleSync} disabled={syncing || !selectedFolder}>
-              {syncing ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
-              双向同步
-            </ActionButton>
             {tracks.length > 0 && (
               <>
                 <ActionButton tone="subtle" onClick={handleBatchDownload}>

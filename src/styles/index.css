@@ -2105,7 +2105,7 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 16px 0;
+  padding: 5px 0;
   border-radius: 18px;
   background: rgba(28, 28, 31, 0.66);
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -2139,9 +2139,12 @@ body {
 
 /* 竖向音量滑块：轨道缩矮、底部对齐、顶部留白 */
 .now-playing-volume-slider-wrap {
-  height: 72%;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Volume slider in vertical mode */
