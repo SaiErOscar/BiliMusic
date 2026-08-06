@@ -603,6 +603,38 @@ export function registerBiliApiHandlers() {
     return { code: data.code, message: data.message }
   })
 
+  // 通用 B站 JSON GET（主进程 net.fetch，自动带 Cookie + Referer + UA）
+  // 解决渲染层 fetch 跨域/风控导致返回 HTML（如 HTTP 412 验证页）而无法解析 JSON 的问题
+  ipcMain.handle('bili:fetchBiliJson', async (_e, path: string, params?: Record<string, string | number | boolean>) => {
+    const url = new URL(`${BILI_API}${path}`)
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)))
+    }
+    const resp = await net.fetch(url.toString(), {
+      headers: {
+        Referer: 'https://www.bilibili.com',
+        'User-Agent': BILI_UA,
+      },
+    })
+    const text = await resp.text()
+    // 风控/登录页等返回 HTML，而非 JSON，需先判断再解析，避免 raw SyntaxError 暴露给 UI
+    const ct = resp.headers.get('content-type') || ''
+    if (resp.status !== 200 || (ct && !ct.includes('application/json') && !ct.includes('text/json'))) {
+      throw new Error(`B站接口返回异常（HTTP ${resp.status}），可能触发风控或登录失效，请重新登录后重试`)
+    }
+    let data: unknown
+    try {
+      data = JSON.parse(text)
+    } catch {
+      throw new Error(`B站接口返回非 JSON 数据，可能触发风控或登录失效，请重新登录后重试`)
+    }
+    const body = data as { code?: number; message?: string; data?: unknown }
+    if (body.code !== 0) {
+      throw new Error(`B站接口错误（${body.code}）：${body.message || '未知错误'}`)
+    }
+    return body.data
+  })
+
   // 打开 B站官方登录页窗口，登录成功后自动捕获 Cookie（官方页原生处理极验人机验证）
   ipcMain.handle('bili:openLoginWindow', async () => {
     // 已有登录窗口则聚焦并等待

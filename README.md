@@ -7,7 +7,7 @@
   <p>
     <a href="./README.en.md">English</a>
     ·
-    <a href="./docs/CHANGELOG.md">更新日志 v1.0.1 → v1.2.18-new</a>
+    <a href="./docs/CHANGELOG.md">更新日志 v1.0.1 → v1.2.19</a>
     ·
     <a href="#-快速开始">快速开始</a>
     ·
@@ -18,7 +18,7 @@
     <img alt="Electron" src="https://img.shields.io/badge/Electron-36-47848F?style=for-the-badge&logo=electron&logoColor=fff" />
     <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?style=for-the-badge&logo=vite&logoColor=fff" />
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=fff" />
-    <img alt="Version" src="https://img.shields.io/badge/version-1.2.18--new-30d158?style=for-the-badge" />
+    <img alt="Version" src="https://img.shields.io/badge/version-1.2.19-30d158?style=for-the-badge" />
   </p>
 </div>
 
@@ -134,12 +134,12 @@ BiliMusic 不是简单地"把 B 站视频拿来播放"。它试图做的是另�
 
 - 登录后获取收藏夹列表
 - 导入收藏夹到本地
-- 双向同步：本地收藏 ↔ B站收藏夹（启动后每 10 秒自动同步，打开/切换收藏夹即同步，变更时即时同步）
+- 双向同步：本地收藏 ↔ B站收藏夹（启动后每 30 秒自动同步，打开/切换收藏夹即同步，变更时即时同步）
 - 批量下载收藏夹内容
 - 导出收藏夹为本地歌单
 - 曲目可收藏至 B站收藏夹（aid 缺失时自动通过 bvid 解析，已收藏的收藏夹默认勾选，可一键取消收藏）
 - 收藏夹内容行支持「×」一键移除
-- 自动同步：登录后每 10 秒自动执行「导入本地 + 双向同步」
+- 自动同步：登录后每 30 秒自动执行「导入本地 + 双向同步」
 
 ### 设置
 

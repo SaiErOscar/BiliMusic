@@ -671,18 +671,19 @@ export async function getFavoriteFolderContent(
   page = 1,
   pageSize = 20,
 ): Promise<FavoriteFolderContent> {
-  return biliFetch('/x/v3/fav/resource/list', {
-    params: {
-      media_id: folderId,
-      pn: page,
-      ps: pageSize,
-      keyword: '',
-      order: 'mtime',
-      type: 0,
-      tid: 0,
-      platform: 'web',
-    },
+  // 走主进程 net.fetch：渲染层 fetch 跨域且无法携带完整 B站 Cookie，
+  // 该接口在无 Cookie 时会被风控返回 HTTP 412 + HTML（非 JSON）导致解析失败
+  const data = await window.electronAPI?.biliApi?.fetchBiliJson?.('/x/v3/fav/resource/list', {
+    media_id: folderId,
+    pn: page,
+    ps: pageSize,
+    keyword: '',
+    order: 'mtime',
+    type: 0,
+    tid: 0,
+    platform: 'web',
   })
+  return data as FavoriteFolderContent
 }
 
 /**

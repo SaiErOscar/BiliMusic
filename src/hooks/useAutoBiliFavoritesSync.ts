@@ -3,11 +3,11 @@ import { getUserInfo } from '@/services/api'
 import { getFavoriteFolders } from '@/services/bilibiliApi'
 import { importBiliFavorites, syncBiliFavorites } from '@/services/biliFavorites'
 
-const PERIODIC = 10 * 1000 // 每 10 秒
+const PERIODIC = 30 * 1000 // 每 30 秒
 const STARTUP_DELAY = 3000 // 启动后延迟，避开启动高峰
 
 /**
- * B站收藏夹自动同步：登录后启动时执行一次「导入本地 + 双向同步」，随后每 10 秒自动执行。
+ * B站收藏夹自动同步：登录后启动时执行一次「导入本地 + 双向同步」，随后每 30 秒自动执行。
  * 静默执行，不打扰 UI；未登录或网络失败时自动跳过。
  */
 export function useAutoBiliFavoritesSync(): void {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Play, Loader2, FolderHeart, Check, ChevronDown, Download, ListPlus, X } from 'lucide-react'
+import { Play, Loader2, FolderHeart, Check, ChevronDown, Download, ListPlus, X, AlertTriangle } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -50,6 +50,7 @@ export default function BiliFavorites() {
   const [tracks, setTracks] = useState<Track[]>([])
   const [loadingFolders, setLoadingFolders] = useState(false)
   const [loadingContent, setLoadingContent] = useState(false)
+  const [loadError, setLoadError] = useState('')
   const [syncMessage, setSyncMessage] = useState('')
   const [folderDropdownOpen, setFolderDropdownOpen] = useState(false)
   const [batchDownloading, setBatchDownloading] = useState(false)
@@ -88,6 +89,7 @@ export default function BiliFavorites() {
   // Load folder content
   const loadFolderContent = useCallback(async (folderId: number) => {
     setLoadingContent(true)
+    setLoadError('')
     setTracks([])
     try {
       let page = 1
@@ -103,7 +105,7 @@ export default function BiliFavorites() {
       }
       setTracks(all)
     } catch (e) {
-      setSyncMessage(e instanceof Error ? e.message : '加载收藏夹内容失败')
+      setLoadError(e instanceof Error ? e.message : '加载收藏夹内容失败')
     } finally {
       setLoadingContent(false)
     }
@@ -313,6 +315,12 @@ export default function BiliFavorites() {
           <Loader2 size={28} className="spin" style={{ margin: '0 auto 8px' }} />
           <p style={{ color: 'var(--color-muted)', fontSize: 13 }}>正在加载收藏夹内容...</p>
         </div>
+      ) : loadError ? (
+        <EmptyLibrary
+          icon={<AlertTriangle size={40} />}
+          title="收藏夹加载失败"
+          subtitle={loadError}
+        />
       ) : tracks.length === 0 ? (
         <EmptyLibrary
           icon={<FolderHeart size={40} />}

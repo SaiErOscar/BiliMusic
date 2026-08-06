@@ -1,7 +1,23 @@
 # BiliMusic 更新日志
 
-> 汇总自 2026 年 8 月 4 日首次发布至 v1.2.18-new 的全部更新。
+> 汇总自 2026 年 8 月 4 日首次发布至 v1.2.19 的全部更新。
 > BiliMusic — 基于 Bilibili 的桌面音乐播放器（Electron + React + TypeScript）。
+
+---
+
+## v1.2.19 — 收藏夹加载修复与同步频率调整
+
+**发布日期：2026-08-06**
+
+### 修复
+
+- **收藏夹内容加载失败（返回 HTML 而非 JSON）**：根因是 B站收藏夹内容接口 `/x/v3/fav/resource/list` 在请求未携带完整登录 Cookie 时会被风控返回 **HTTP 412 + HTML 验证页**（而非 JSON）。原实现走渲染层 `biliFetch`，无法携带完整 Cookie，`resp.json()` 解析 HTML 触发 `Unexpected token '<' ...` 错误，且错误信息直接暴露到 UI、误判「收藏夹为空」
+- 现改为：收藏夹内容请求改走**主进程 `net.fetch`**（自动带 Cookie + Referer + UA，与收藏/取消收藏一致）；新增通用 `bili:fetchBiliJson` handler，先读取文本并校验 content-type / HTTP 状态，返回非 JSON 或风控时抛出友好错误（提示重新登录），不再暴露原始解析错误
+- UI 层新增 `loadError` 状态：加载失败时显示「收藏夹加载失败」+ 友好错误信息，而非误判为「收藏夹为空」
+
+### 优化
+
+- **收藏夹自动同步频率**：由每 10 秒调整为每 30 秒一次（打开页面 / 切换收藏夹仍即时触发）
 
 ---
 

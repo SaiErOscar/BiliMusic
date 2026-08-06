@@ -36,6 +36,7 @@ interface BiliApi {
   }>
   logout: () => Promise<{ success: boolean }>
   dealFavorite: (rid: number | string, addMediaIds: number[], delMediaIds?: number[]) => Promise<{ code: number; message: string }>
+  fetchBiliJson: (path: string, params?: Record<string, string | number | boolean>) => Promise<unknown>
   openLoginWindow: () => Promise<{ success: boolean }>
 }
 
