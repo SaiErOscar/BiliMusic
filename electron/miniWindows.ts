@@ -263,10 +263,22 @@ export function showLyricWindow() {
   win.setAlwaysOnTop(true, 'screen-saver')
   win.showInactive()
   broadcast()
+  notifyLyricVisible()
 }
 
 export function hideLyricWindow() {
   lyricWindow?.hide()
+  notifyLyricVisible()
+}
+
+export function isLyricVisible() {
+  return Boolean(lyricWindow && !lyricWindow.isDestroyed() && lyricWindow.isVisible())
+}
+
+function notifyLyricVisible() {
+  const main = getMainWindow?.()
+  if (!main || main.isDestroyed()) return
+  main.webContents.send('mini:lyric-visible', isLyricVisible())
 }
 
 export function toggleLyricWindow() {
@@ -309,4 +321,7 @@ export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserW
 
   // 主窗口请求打开/关闭桌面歌词
   ipcMain.on('mini:toggle-lyric', () => toggleLyricWindow())
+
+  // 主窗口查询桌面歌词当前可见状态（用于播放页按钮文字）
+  ipcMain.handle('mini:get-lyric-visible', () => isLyricVisible())
 }

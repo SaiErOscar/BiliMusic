@@ -166,6 +166,8 @@ declare global {
       updateMiniPlayerState?: (state: MiniPlayerState) => void
       onMiniPlayerCommand?: (callback: (command: MiniCommand) => void) => () => void
       toggleDesktopLyric?: () => void
+      getDesktopLyricVisible?: () => Promise<boolean>
+      onDesktopLyricVisible?: (callback: (visible: boolean) => void) => () => void
       openExternal: (url: string) => Promise<void>
       getAppVersion?: () => Promise<string>
       checkForUpdate?: () => Promise<void>

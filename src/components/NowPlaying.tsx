@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronDown, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat,
-  Heart, Volume2, VolumeX, Search, Music, Loader2, Maximize2, Minimize2, X, MessageCircle, ExternalLink, ThumbsUp, RefreshCw, ChevronUp, RotateCcw, Star,
+  Heart, Volume2, VolumeX, Search, Music, Loader2, Maximize2, Minimize2, X, MessageCircle, ExternalLink, ThumbsUp, RefreshCw, ChevronUp, RotateCcw, Star, Monitor,
 } from 'lucide-react'
 import DownloadButton from '@/components/DownloadButton'
 import BiliFavoriteDialog from '@/components/BiliFavoriteDialog'
@@ -11,6 +11,7 @@ import { usePlayer, usePlayerProgress } from '@/contexts/PlayerContext'
 import { useNowPlaying } from '@/contexts/NowPlayingContext'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { useLyrics } from '@/hooks/useLyrics'
+import { useDesktopLyricVisible } from '@/hooks/useDesktopLyric'
 import PlayerSlider from '@/components/PlayerSlider'
 import LyricsView from '@/components/LyricsView'
 import type { LyricCandidate } from '@/services/lyrics'
@@ -572,6 +573,7 @@ function LyricsPanel({
   const [results, setResults] = useState<LyricCandidate[]>([])
   const [searching, setSearching] = useState(false)
   const [choosingId, setChoosingId] = useState<string | null>(null)
+  const { visible: desktopLyricVisible, toggle: toggleDesktopLyric } = useDesktopLyricVisible()
 
   const openSearch = () => {
     setQuery(`${track.title} ${track.artist}`.trim())
@@ -622,6 +624,10 @@ function LyricsPanel({
       {/* 歌词底部控制栏：切换歌词 + 时间偏移调整 */}
       {(status === 'ok' || status === 'unsynced') && (
         <div className="lyrics-panel__controls">
+          <button type="button" className="lyrics-panel__ctrl-btn" onClick={toggleDesktopLyric} title={desktopLyricVisible ? '隐藏桌面歌词' : '显示桌面歌词'}>
+            <Monitor size={15} />
+            <span>{desktopLyricVisible ? '隐藏桌面歌词' : '显示桌面歌词'}</span>
+          </button>
           <button type="button" className="lyrics-panel__ctrl-btn" onClick={openSearch} title="切换歌词版本">
             <Search size={15} />
             <span>切换歌词</span>
