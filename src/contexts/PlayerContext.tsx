@@ -21,7 +21,16 @@ function shouldIgnoreSpaceShortcut(target: EventTarget | null): boolean {
 }
 
 function getArtworkType(url: string): string {
-  const ext = url.split('.').pop()?.toLowerCase()
+  // B站 CDN 封面 URL 常带查询参数或派生路径（如 /bfs/archive/xxx.jpg@672w_378h_1c_!web-common.avif），
+  // 直接 split('.') 取末段会把参数/路径片段当成扩展名，导致 MediaSession 封面 MIME 误判。
+  // 用 URL.pathname 解析真正的文件扩展名。
+  let ext = ''
+  try {
+    ext = (new URL(url).pathname.split('.').pop() || '').toLowerCase()
+  } catch {
+    // 非法 URL 时回退到原始拆分
+    ext = (url.split('.').pop() || '').toLowerCase()
+  }
   switch (ext) {
     case 'png': return 'image/png'
     case 'jpg':

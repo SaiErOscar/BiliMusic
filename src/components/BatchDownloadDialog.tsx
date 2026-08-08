@@ -47,6 +47,7 @@ export default function BatchDownloadDialog({ tracks, onClose }: BatchDownloadDi
   const progress = store.progress
   const completedCount = store.completedCount
   const errorCount = store.errorCount
+  const errors = store.errors
 
   // 新开对话框时确保可见
   useEffect(() => {
@@ -138,6 +139,36 @@ export default function BatchDownloadDialog({ tracks, onClose }: BatchDownloadDi
           transition: 'width 0.3s ease',
         }} />
       </div>
+      {/* 当前文件字节进度（audio 格式实时更新） */}
+      {isRunning && progress?.filePercent != null && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+          <span style={{ fontSize: 10, color: 'var(--color-muted)', flexShrink: 0 }}>当前文件</span>
+          <div style={{ flex: 1, height: 3, borderRadius: 2, background: 'var(--glass-border)', overflow: 'hidden' }}>
+            <div style={{
+              height: '100%',
+              width: `${Math.min(100, Math.max(0, progress.filePercent))}%`,
+              background: 'var(--color-accent)',
+              opacity: 0.7,
+              borderRadius: 2,
+              transition: 'width 0.25s ease',
+            }} />
+          </div>
+          <span style={{ fontSize: 10, color: 'var(--color-muted)', flexShrink: 0 }}>
+            {Math.round(Math.min(100, Math.max(0, progress.filePercent)))}%
+          </span>
+        </div>
+      )}
+      {/* 失败原因列表 */}
+      {!isRunning && errors.length > 0 && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--glass-border)', maxHeight: 110, overflowY: 'auto', fontSize: 11 }}>
+          <div style={{ color: '#ff6961', fontWeight: 600, marginBottom: 4 }}>失败 {errors.length} 项：</div>
+          {errors.map((e, i) => (
+            <div key={i} style={{ color: 'var(--color-muted)', marginBottom: 2, wordBreak: 'break-all' }}>
+              <span style={{ color: 'var(--color-foreground)' }}>{e.title}</span> · {e.message}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 

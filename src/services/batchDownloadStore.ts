@@ -25,6 +25,16 @@ export interface BatchProgress {
   trackTitle: string
   status: 'pending' | 'downloading' | 'done' | 'error'
   error?: string
+  /** 当前文件下载字节进度（audio 格式经 onDownloadProgress 实时更新） */
+  fileReceived?: number
+  fileTotal?: number
+  filePercent?: number
+}
+
+/** 单个失败曲目的错误信息，供 UI 展示具体失败原因 */
+export interface BatchError {
+  title: string
+  message: string
 }
 
 interface BatchDownloadState {
@@ -36,6 +46,7 @@ interface BatchDownloadState {
   progress: BatchProgress | null
   completedCount: number
   errorCount: number
+  errors: BatchError[]
 }
 
 let state: BatchDownloadState = {
@@ -47,6 +58,7 @@ let state: BatchDownloadState = {
   progress: null,
   completedCount: 0,
   errorCount: 0,
+  errors: [],
 }
 
 // 取消标志：置 true 后，当前文件下载完成后停止后续
@@ -100,6 +112,7 @@ export function startBatchDownload(tracks: Track[], config: BatchConfig) {
     progress: null,
     completedCount: 0,
     errorCount: 0,
+    errors: [],
   }
   cancelled = false
   emit()
@@ -112,62 +125,86 @@ async function run() {
   const dir = config.downloadDir || undefined
   const qualityPref = 'lossless'
 
-  for (let i = 0; i < tracks.length; i++) {
-    if (cancelled) break
-    const track = tracks[i]
-    setState({
-      progress: {
-        current: i + 1,
-        total: tracks.length,
-        trackTitle: track.title,
-        status: 'downloading',
-      },
-    })
+  // 订阅主进程单文件下载字节进度（audio 格式有实时回调），写回当前 progress
+  const unsubProgress = window.electronAPI?.biliApi?.onDownloadProgress?.(
+    ({ received, total, percent }) => {
+      if (!state.running || !state.progress) return
+      setState({
+        progress: {
+          ...state.progress,
+          fileReceived: received,
+          fileTotal: total,
+          filePercent: percent,
+        },
+      })
+    },
+  )
 
-    try {
-      let lyricContent: string | undefined
-      let artist: string | undefined
-
-      if (config.embedMeta || config.includeLyric) {
-        const lyricResult = await getLyricForTrack(track)
-        if (lyricResult) {
-          if (config.embedMeta && lyricResult.artistName) {
-            artist = lyricResult.artistName
-          }
-          if (config.includeLyric && lyricResult.lines.length > 0) {
-            lyricContent = formatLrc(lyricResult)
-          }
-        }
-      }
-
-      const filename = getFilename(config, track, i + 1)
-
-      await downloadTrack(
-        track.bvid || track.id,
-        { aid: track.aid, cid: track.cid },
-        filename,
-        config.format,
-        qualityPref,
-        dir,
-        { artist, title: filename, lyricContent },
-      )
-
-      saveDownloadRecord({
-        id: crypto.randomUUID ? crypto.randomUUID() : `dl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-        title: filename,
-        artist: artist || track.artist || '',
-        bvid: track.bvid || track.id,
-        format: config.format,
-        quality: qualityPref,
-        filename,
-        downloadDir: dir || '',
-        downloadedAt: new Date().toISOString(),
+  try {
+    for (let i = 0; i < tracks.length; i++) {
+      if (cancelled) break
+      const track = tracks[i]
+      setState({
+        progress: {
+          current: i + 1,
+          total: tracks.length,
+          trackTitle: track.title,
+          status: 'downloading',
+        },
       })
 
-      setState({ completedCount: state.completedCount + 1 })
-    } catch {
-      setState({ errorCount: state.errorCount + 1 })
+      try {
+        let lyricContent: string | undefined
+        let artist: string | undefined
+
+        if (config.embedMeta || config.includeLyric) {
+          const lyricResult = await getLyricForTrack(track)
+          if (lyricResult) {
+            if (config.embedMeta && lyricResult.artistName) {
+              artist = lyricResult.artistName
+            }
+            if (config.includeLyric && lyricResult.lines.length > 0) {
+              lyricContent = formatLrc(lyricResult)
+            }
+          }
+        }
+
+        const filename = getFilename(config, track, i + 1)
+
+        await downloadTrack(
+          track.bvid || track.id,
+          { aid: track.aid, cid: track.cid },
+          filename,
+          config.format,
+          qualityPref,
+          dir,
+          { artist, title: filename, lyricContent },
+        )
+
+        saveDownloadRecord({
+          id: crypto.randomUUID ? crypto.randomUUID() : `dl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+          title: filename,
+          artist: artist || track.artist || '',
+          bvid: track.bvid || track.id,
+          format: config.format,
+          quality: qualityPref,
+          filename,
+          downloadDir: dir || '',
+          downloadedAt: new Date().toISOString(),
+        })
+
+        setState({ completedCount: state.completedCount + 1 })
+      } catch (e) {
+        // 记录失败原因，UI 可展示具体错误（此前静默吞掉，用户看不到失败原因）
+        const message = e instanceof Error ? e.message : String(e)
+        setState({
+          errorCount: state.errorCount + 1,
+          errors: [...state.errors, { title: track.title, message }],
+        })
+      }
     }
+  } finally {
+    unsubProgress?.()
   }
 
   setState({ running: false, progress: null })
@@ -199,5 +236,6 @@ export function closeBatchDialog() {
     progress: null,
     completedCount: 0,
     errorCount: 0,
+    errors: [],
   })
 }

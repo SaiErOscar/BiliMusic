@@ -250,22 +250,33 @@ async function downloadStreamToFile(
     return buffer.length
   }
 
-  const fileHandle = await fs.open(filePath, 'w')
+  // 用可写流替代逐块 fileHandle.write：Node 内部批量写，吞吐更高且天然处理背压。
+  const writeStream = fsSync.createWriteStream(filePath)
   let received = 0
   try {
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
       if (value) {
-        await fileHandle.write(value)
         received += value.length
+        if (!writeStream.write(value)) {
+          // 背压：等待内部缓冲排空，避免大文件下载时内存无限增长
+          await new Promise<void>((resolve, reject) => {
+            writeStream.once('drain', resolve)
+            writeStream.once('error', reject)
+          })
+        }
         if (total > 0 && progressLabel) {
           console.log(`[biliApi] ${progressLabel}: ${Math.round((received / total) * 100)}% (${received}/${total})`)
         }
       }
     }
+    // 正常结束：等待写入缓冲 flush 到磁盘
+    await new Promise<void>((resolve, reject) => {
+      writeStream.end((err) => (err ? reject(err) : resolve()))
+    })
   } finally {
-    await fileHandle.close()
+    if (!writeStream.closed) writeStream.destroy()
   }
   return received
 }
