@@ -3,8 +3,12 @@ import TitleBar from './TitleBar'
 import Sidebar from './Sidebar'
 import PlayerBar from './PlayerBar'
 import NowPlaying from '@/components/NowPlaying'
+import { useMiniWindowSync } from '@/hooks/useMiniWindowSync'
 
 export default function MainLayout() {
+  // 迷你窗口（桌面歌词/悬浮窗）状态同步：挂在主布局，随播放状态实时推送
+  useMiniWindowSync()
+
   return (
     <div
       style={{

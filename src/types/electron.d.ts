@@ -86,6 +86,37 @@ export interface TrayPlayerState {
 
 export type TrayPlayerCommand = 'toggle-play' | 'next' | 'prev'
 
+export interface MiniLyricLine {
+  time: number
+  text: string
+}
+
+export interface MiniPlayerState {
+  hasTrack: boolean
+  title: string
+  artist: string
+  coverUrl: string
+  isPlaying: boolean
+  volume: number
+  isMuted: boolean
+  progress: number
+  duration: number
+  lyricLines: MiniLyricLine[]
+  synced: boolean
+  theme: 'light' | 'dark'
+}
+
+export type MiniCommand =
+  | { type: 'toggle' }
+  | { type: 'next' }
+  | { type: 'prev' }
+  | { type: 'volume'; value: number }
+  | { type: 'seek'; value: number }
+  | { type: 'show-window' }
+  | { type: 'show-lyric-window' }
+  | { type: 'show-mini-window' }
+  | { type: 'hide-mini-window' }
+
 export interface WebdavConfigInput {
   url: string
   username: string
@@ -131,6 +162,10 @@ declare global {
       onFullscreenChange?: (callback: (isFullscreen: boolean) => void) => () => void
       updateTrayPlayerState?: (state: TrayPlayerState) => void
       onTrayPlayerCommand?: (callback: (command: TrayPlayerCommand) => void) => () => void
+      updateMiniPlayerState?: (state: MiniPlayerState) => void
+      onMiniPlayerCommand?: (callback: (command: MiniCommand) => void) => () => void
+      toggleDesktopLyric?: () => void
+      toggleMiniWindow?: () => void
       openExternal: (url: string) => Promise<void>
       getAppVersion?: () => Promise<string>
       checkForUpdate?: () => Promise<void>

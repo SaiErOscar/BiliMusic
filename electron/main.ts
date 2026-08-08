@@ -6,6 +6,7 @@ import { registerBiliApiHandlers } from './biliApi'
 import { registerLyricsApiHandlers } from './lyricsApi'
 import { initUpdates, getActiveRendererRoot } from './updater'
 import { registerWebdavHandlers } from './webdav'
+import { registerMiniWindowHandlers } from './miniWindows'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -594,6 +595,7 @@ ipcMain.on('tray:player-state', (_event, state: TrayPlayerState) => {
     coverUrl: String(state?.coverUrl || ''),
     isPlaying: Boolean(state?.isPlaying),
     queueLength: Number(state?.queueLength || 0),
+    theme: state?.theme === 'light' ? 'light' : 'dark',
   }
   updateTrayState()
 })
@@ -642,6 +644,7 @@ app.whenReady().then(() => {
   registerBiliApiHandlers()
   registerLyricsApiHandlers()
   registerWebdavHandlers()
+  registerMiniWindowHandlers({ getMainWindow: () => mainWindow })
   // 更新模块须在创建窗口前初始化：bootReconcile 先定下生效的渲染层根目录，供 app:// 加载
   initUpdates({
     window: () => mainWindow,

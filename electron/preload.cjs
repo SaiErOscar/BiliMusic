@@ -95,6 +95,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('tray:player-command', listener)
     return () => ipcRenderer.removeListener('tray:player-command', listener)
   },
+  // 迷你窗口（桌面歌词/悬浮窗）状态同步与命令
+  updateMiniPlayerState: (state) => ipcRenderer.send('mini:state', state),
+  onMiniPlayerCommand: (callback) => {
+    const listener = (_event, cmd) => callback(cmd)
+    ipcRenderer.on('mini:player-command', listener)
+    return () => ipcRenderer.removeListener('mini:player-command', listener)
+  },
+  toggleDesktopLyric: () => ipcRenderer.send('mini:toggle-lyric'),
+  toggleMiniWindow: () => ipcRenderer.send('mini:toggle-mini'),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   checkForUpdate: () => ipcRenderer.invoke('updater:check'),

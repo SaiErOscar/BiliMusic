@@ -15,6 +15,8 @@ import {
   Mic,
   Music,
   Maximize2,
+  TextCursorInput,
+  PictureInPicture2,
 } from 'lucide-react'
 import { usePlayer, usePlayerProgress } from '@/contexts/PlayerContext'
 import { useNowPlaying } from '@/contexts/NowPlayingContext'
@@ -340,6 +342,22 @@ export default function PlayerBar() {
       >
         <IconButton ariaLabel="歌词麦克风">
           <Mic size={18} />
+        </IconButton>
+
+        <IconButton
+          ariaLabel="桌面歌词"
+          active={false}
+          onClick={() => window.electronAPI?.toggleDesktopLyric?.()}
+        >
+          <TextCursorInput size={18} />
+        </IconButton>
+
+        <IconButton
+          ariaLabel="悬浮窗"
+          active={false}
+          onClick={() => window.electronAPI?.toggleMiniWindow?.()}
+        >
+          <PictureInPicture2 size={18} />
         </IconButton>
 
         <IconButton
