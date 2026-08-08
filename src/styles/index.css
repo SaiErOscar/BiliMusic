@@ -3798,6 +3798,12 @@ body {
   font-weight: 700;
 }
 
+.settings-hint {
+  color: var(--color-success, #34c759);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .settings-actions {
   display: flex;
   align-items: center;

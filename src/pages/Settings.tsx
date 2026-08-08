@@ -18,6 +18,7 @@ import {
   RefreshCw,
   Settings as SettingsIcon,
   Sun,
+  Trash2,
   UserRound,
 } from 'lucide-react'
 import { ActionButton, MusicHero, MusicPageShell, MusicSection } from '@/components/AppleMusicPage'
@@ -27,6 +28,7 @@ import { selectDownloadFolder } from '@/services/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { createPlaylistsExport, importPlaylistsFromText } from '@/utils/storage'
 import { runSync, forceUpload, forceDownload, getLastSync, SYNC_STATE_EVENT, WEBDAV_CONFIGURED_EVENT, type SyncResult } from '@/utils/sync'
+import { clearNonCriticalCache } from '@/utils/safeStorage'
 import type { AppSettings, DownloadFormat, SidebarState, ThemeMode } from '@/types'
 
 export default function Settings() {
@@ -38,6 +40,7 @@ export default function Settings() {
   const [appVersion, setAppVersion] = useState('1.0.0')
   const [updateStatus, setUpdateStatus] = useState('')
   const [updateAction, setUpdateAction] = useState<'restart' | 'reload' | null>(null)
+  const [cacheMsg, setCacheMsg] = useState('')
 
   useEffect(() => {
     window.electronAPI?.getAppVersion?.()?.then((v) => {
@@ -290,6 +293,15 @@ export default function Settings() {
                 <Github size={14} />
                 关于项目
               </button>
+              <button type="button" onClick={() => {
+                const n = clearNonCriticalCache()
+                setCacheMsg(`已清除 ${n} 项歌词缓存`)
+                setTimeout(() => setCacheMsg(''), 3000)
+              }}>
+                <Trash2 size={14} />
+                清除缓存
+              </button>
+              {cacheMsg && <span className="settings-hint">{cacheMsg}</span>}
               {updateStatus && <span>{updateStatus}</span>}
             </div>
           </SettingsGroup>

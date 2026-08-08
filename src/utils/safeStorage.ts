@@ -5,8 +5,11 @@
 
 const CACHE_KEYS_PREFIX = 'bilimusic_lyrics'
 
-/** 尝试清理非关键缓存数据以释放空间 */
-function pruneCacheKeys(): void {
+/**
+ * 手动清除非关键缓存（歌词缓存等），返回被清除的键数量。
+ * 供设置页「清除缓存」使用；绝不触碰用户关键数据（偏移、歌单、收藏、设置、下载记录等）。
+ */
+export function clearNonCriticalCache(): number {
   const cacheKeys: string[] = []
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i)
@@ -23,6 +26,12 @@ function pruneCacheKeys(): void {
       // continue pruning
     }
   }
+  return cacheKeys.length
+}
+
+/** 尝试清理非关键缓存数据以释放空间 */
+function pruneCacheKeys(): void {
+  clearNonCriticalCache()
 }
 
 /**
