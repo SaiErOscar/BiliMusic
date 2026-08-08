@@ -226,6 +226,12 @@ export default function Settings() {
             <SettingsRow label="歌词显示" description="播放页自动显示歌词">
               <ToggleSwitch checked={settings.showLyrics} onChange={() => setAppSettings({ showLyrics: !settings.showLyrics })} />
             </SettingsRow>
+            <SettingsRow label="歌词文字颜色" description="桌面歌词的文字颜色">
+              <input type="color" className="settings-color" value={settings.lyricTextColor} onChange={(e) => setAppSettings({ lyricTextColor: e.target.value })} />
+            </SettingsRow>
+            <SettingsRow label="歌词按钮颜色" description="桌面歌词的播放/上一首等按钮颜色">
+              <input type="color" className="settings-color" value={settings.lyricControlColor} onChange={(e) => setAppSettings({ lyricControlColor: e.target.value })} />
+            </SettingsRow>
           </SettingsGroup>
 
           <SettingsGroup title="歌单迁移" icon={<FileDown size={20} />}>

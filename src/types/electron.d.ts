@@ -104,6 +104,8 @@ export interface MiniPlayerState {
   lyricLines: MiniLyricLine[]
   synced: boolean
   theme: 'light' | 'dark'
+  lyricTextColor: string
+  lyricControlColor: string
 }
 
 export type MiniCommand =
@@ -114,8 +116,7 @@ export type MiniCommand =
   | { type: 'seek'; value: number }
   | { type: 'show-window' }
   | { type: 'show-lyric-window' }
-  | { type: 'show-mini-window' }
-  | { type: 'hide-mini-window' }
+  | { type: 'close-lyric-window' }
 
 export interface WebdavConfigInput {
   url: string
@@ -165,7 +166,6 @@ declare global {
       updateMiniPlayerState?: (state: MiniPlayerState) => void
       onMiniPlayerCommand?: (callback: (command: MiniCommand) => void) => () => void
       toggleDesktopLyric?: () => void
-      toggleMiniWindow?: () => void
       openExternal: (url: string) => Promise<void>
       getAppVersion?: () => Promise<string>
       checkForUpdate?: () => Promise<void>

@@ -3613,6 +3613,18 @@ body {
   transform: translateX(20px);
 }
 
+.settings-color {
+  width: 40px;
+  height: 34px;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--text-secondary) 30%, transparent);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+.settings-color::-webkit-color-swatch-wrapper { padding: 0; }
+.settings-color::-webkit-color-swatch { border: none; border-radius: 6px; }
+
 .settings-path {
   display: inline-flex;
   align-items: center;

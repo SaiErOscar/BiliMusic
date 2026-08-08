@@ -23,6 +23,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   downloadDir: '',
   autoPlay: true,
   showLyrics: true,
+  lyricTextColor: '#ffffff',
+  lyricControlColor: '#ff375f',
 }
 
 function notifySettingsChanged() {

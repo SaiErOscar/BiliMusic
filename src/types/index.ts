@@ -56,6 +56,9 @@ export interface AppSettings {
   downloadDir: string
   autoPlay: boolean
   showLyrics: boolean
+  // 桌面歌词配色（hex，如 #ffffff / #ff375f）
+  lyricTextColor: string
+  lyricControlColor: string
 }
 
 export type NavItem = {

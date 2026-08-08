@@ -103,7 +103,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('mini:player-command', listener)
   },
   toggleDesktopLyric: () => ipcRenderer.send('mini:toggle-lyric'),
-  toggleMiniWindow: () => ipcRenderer.send('mini:toggle-mini'),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   checkForUpdate: () => ipcRenderer.invoke('updater:check'),

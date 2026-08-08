@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { usePlayer, usePlayerProgress } from '@/contexts/PlayerContext'
 import { getLyricForTrack } from '@/services/lyrics'
+import { useAppSettings } from '@/hooks/useAppSettings'
 import type { MiniPlayerState, MiniCommand } from '@/types/electron'
 
 /**
@@ -14,6 +15,7 @@ import type { MiniPlayerState, MiniCommand } from '@/types/electron'
 export function useMiniWindowSync() {
   const player = usePlayer()
   const { progress, duration, setProgress } = usePlayerProgress()
+  const { settings } = useAppSettings()
   const [lyrics, setLyrics] = useState<{ lines: { time: number; text: string }[]; synced: boolean }>({
     lines: [],
     synced: false,
@@ -56,6 +58,8 @@ export function useMiniWindowSync() {
     lyricLines: [],
     synced: false,
     theme: 'dark',
+    lyricTextColor: settings.lyricTextColor,
+    lyricControlColor: settings.lyricControlColor,
   })
   stateRef.current = {
     hasTrack: Boolean(player.currentTrack),
@@ -70,6 +74,8 @@ export function useMiniWindowSync() {
     lyricLines: lyrics.lines,
     synced: lyrics.synced,
     theme: document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark',
+    lyricTextColor: settings.lyricTextColor,
+    lyricControlColor: settings.lyricControlColor,
   }
 
   // 节流推送完整状态到主进程
