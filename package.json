@@ -33,7 +33,7 @@
   },
   "devDependencies": {
     "@electron/asar": "^3.4.1",
-    "@eslint/js": "^10.0.1",
+    "@eslint/js": "^9.0.0",
     "@tailwindcss/vite": "^4.1.0",
     "@types/fluent-ffmpeg": "^2.1.27",
     "@types/qrcode": "^1.5.6",
