@@ -4,18 +4,18 @@
  */
 
 const CACHE_KEYS_PREFIX = 'bilimusic_lyrics'
-const OFFSET_KEY = 'bilimusic_lyric_offset'
 
 /** 尝试清理非关键缓存数据以释放空间 */
 function pruneCacheKeys(): void {
   const cacheKeys: string[] = []
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i)
-    if (key && (key.startsWith(CACHE_KEYS_PREFIX) || key === OFFSET_KEY)) {
+    // 只清歌词缓存（可重新获取，非关键数据）；
+    // 歌词偏移（bilimusic_lyric_offset）是用户设置，属关键数据，绝不在此清除
+    if (key && key.startsWith(CACHE_KEYS_PREFIX)) {
       cacheKeys.push(key)
     }
   }
-  // 清除歌词缓存（可重新获取，非关键数据）
   for (const key of cacheKeys) {
     try {
       localStorage.removeItem(key)

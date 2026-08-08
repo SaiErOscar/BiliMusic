@@ -9,6 +9,7 @@ import {
   savePlaylistTombstones,
   savePlaylists,
 } from './storage'
+import { loadLyricOffsetMap, saveLyricOffsetMap } from '@/services/lyrics'
 
 const SYNC_FILE = 'sync.json'
 const DEVICE_ID_KEY = 'bilimusic_device_id'
@@ -28,6 +29,7 @@ export interface SyncPayload {
   playlistTombstones: Tombstone[]
   favorites: Track[]
   favoriteTombstones: Tombstone[]
+  lyricOffsets: Record<string, number>
 }
 
 export interface SyncResult {
@@ -111,6 +113,7 @@ function buildPayload(
   playlistTombstones: Tombstone[],
   favorites: Track[],
   favoriteTombstones: Tombstone[],
+  lyricOffsets: Record<string, number>,
 ): SyncPayload {
   return {
     app: 'biliMusic',
@@ -122,7 +125,15 @@ function buildPayload(
     playlistTombstones,
     favorites,
     favoriteTombstones,
+    lyricOffsets,
   }
+}
+
+// 歌词偏移合并：本地优先（偏移是用户高频调整的设置，本地通常为最新操作），并补上云端独有的条目
+function mergeLyricOffsets(localMap: Record<string, number>, remoteMap?: Record<string, number>): Record<string, number> {
+  const merged: Record<string, number> = { ...(remoteMap || {}) }
+  for (const [k, v] of Object.entries(localMap)) merged[k] = v
+  return merged
 }
 
 let syncing = false
@@ -161,8 +172,11 @@ export async function runSync(): Promise<SyncResult> {
       savePlaylistTombstones(pl.tombstones)
       saveFavoriteTracks(fav.items)
       saveFavoriteTombstones(fav.tombstones)
+      // 合并歌词偏移（本地优先 + 云端独有）并回写本地
+      const lyricOffsets = mergeLyricOffsets(loadLyricOffsetMap(), remote?.lyricOffsets)
+      saveLyricOffsetMap(lyricOffsets)
 
-      const payload = buildPayload(pl.items, pl.tombstones, fav.items, fav.tombstones)
+      const payload = buildPayload(pl.items, pl.tombstones, fav.items, fav.tombstones, lyricOffsets)
       const putRes = await api.webdavPut(SYNC_FILE, JSON.stringify(payload), remoteRes.etag || undefined)
       if (putRes.ok) {
         setLastSync(payload.syncedAt)
@@ -190,6 +204,7 @@ export async function forceUpload(): Promise<SyncResult> {
       loadPlaylistTombstones(),
       loadFavoriteTracks(),
       loadFavoriteTombstones(),
+      loadLyricOffsetMap(),
     )
     const res = await api.webdavPut(SYNC_FILE, JSON.stringify(payload))
     if (!res.ok) return { ok: false, message: res.message || '上传失败' }
@@ -213,6 +228,7 @@ export async function forceDownload(): Promise<SyncResult> {
     savePlaylistTombstones(remote.playlistTombstones ?? [])
     saveFavoriteTracks(remote.favorites ?? [])
     saveFavoriteTombstones(remote.favoriteTombstones ?? [])
+    saveLyricOffsetMap(remote.lyricOffsets ?? {})
     setLastSync(new Date().toISOString())
     return { ok: true, message: '已从云端覆盖本地' }
   } catch (err) {

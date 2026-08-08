@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { usePlayer, usePlayerProgress } from '@/contexts/PlayerContext'
-import { getLyricForTrack } from '@/services/lyrics'
+import { getLyricForTrack, LYRIC_OFFSET_CHANGED_EVENT } from '@/services/lyrics'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import type { MiniPlayerState, MiniCommand } from '@/types/electron'
 
@@ -36,6 +36,14 @@ export function useMiniWindowSync() {
     return () => ob.disconnect()
   }, [])
 
+  // 监听歌词偏移变化：播放页调整偏移后，桌面歌词据此重新拉取歌词以保持同步
+  const [offsetVersion, setOffsetVersion] = useState(0)
+  useEffect(() => {
+    const onOffset = () => setOffsetVersion((v) => v + 1)
+    window.addEventListener(LYRIC_OFFSET_CHANGED_EVENT, onOffset)
+    return () => window.removeEventListener(LYRIC_OFFSET_CHANGED_EVENT, onOffset)
+  }, [])
+
   // 曲目变化时获取歌词（供桌面歌词使用，与歌词页的 useLyrics 相互独立）
   useEffect(() => {
     let cancelled = false
@@ -56,7 +64,7 @@ export function useMiniWindowSync() {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackId])
+  }, [trackId, offsetVersion])
 
   // 实时组装完整播放状态：任一关键字段变化即重建对象
   const miniState = useMemo<MiniPlayerState>(() => ({

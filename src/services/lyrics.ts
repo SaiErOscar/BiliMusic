@@ -351,6 +351,19 @@ export function getLyricOffset(trackId: string): number {
   return readOffsetMap()[trackId] || 0
 }
 
+/** 读取全部歌词偏移 map（供 WebDAV 云端同步） */
+export function loadLyricOffsetMap(): Record<string, number> {
+  return readOffsetMap()
+}
+
+/** 覆盖写入歌词偏移 map（供 WebDAV 云端同步后合并回写） */
+export function saveLyricOffsetMap(map: Record<string, number>): void {
+  writeOffsetMap(map)
+}
+
+/** 偏移变化事件：播放页调整偏移后广播，桌面歌词据此重新拉取歌词以保持同步 */
+export const LYRIC_OFFSET_CHANGED_EVENT = 'bilimusic:lyric-offset-changed'
+
 export function setLyricOffset(trackId: string, offsetMs: number): void {
   const map = readOffsetMap()
   if (offsetMs === 0) {
@@ -359,6 +372,8 @@ export function setLyricOffset(trackId: string, offsetMs: number): void {
     map[trackId] = offsetMs
   }
   writeOffsetMap(map)
+  // 通知桌面歌词等消费方：偏移已变化，应重新应用最新偏移
+  window.dispatchEvent(new CustomEvent(LYRIC_OFFSET_CHANGED_EVENT, { detail: { trackId } }))
 }
 
 export function applyLyricOffset(result: LyricResult, trackId: string): LyricResult {
