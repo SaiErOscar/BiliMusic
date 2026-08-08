@@ -376,7 +376,9 @@ export function applyLyricOffset(result: LyricResult, trackId: string): LyricRes
 
 export async function getLyricForTrack(track: Track): Promise<LyricResult | null> {
   const entry = readCache()[track.id]
-  if (entry?.status === 'ok') return entry.result
+  // 缓存命中时也要应用偏移：缓存保存的是原始（未偏移）歌词，
+  // 否则第二次及以后播放/桌面歌词会拿到未偏移的时间轴，导致偏移失效
+  if (entry?.status === 'ok') return applyLyricOffset(entry.result, track.id)
   if (entry?.status === 'miss' && Date.now() - entry.ts < MISS_TTL) return null
 
   const candidate = await searchBestCandidate(track)
