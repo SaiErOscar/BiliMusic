@@ -104,6 +104,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   toggleDesktopLyric: () => ipcRenderer.send('mini:toggle-lyric'),
   getDesktopLyricVisible: () => ipcRenderer.invoke('mini:get-lyric-visible'),
+  showDesktopLyric: () => ipcRenderer.send('mini:show-lyric'),
+  hideDesktopLyric: () => ipcRenderer.send('mini:hide-lyric'),
+  onOpenNowPlaying: (callback) => {
+    const listener = () => callback()
+    ipcRenderer.on('mini:open-now-playing', listener)
+    return () => ipcRenderer.removeListener('mini:open-now-playing', listener)
+  },
   onDesktopLyricVisible: (callback) => {
     const listener = (_event, visible) => callback(Boolean(visible))
     ipcRenderer.on('mini:lyric-visible', listener)

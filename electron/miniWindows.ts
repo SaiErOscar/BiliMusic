@@ -41,6 +41,7 @@ export type MiniCommand =
   | { type: 'show-window' }
   | { type: 'show-lyric-window' }
   | { type: 'close-lyric-window' }
+  | { type: 'show-player' }
 
 const defaultState: MiniPlayerState = {
   hasTrack: false,
@@ -80,7 +81,8 @@ function sendMainCommand(cmd: MiniCommand) {
   if (!main || main.isDestroyed()) return
   if (cmd.type === 'toggle' || cmd.type === 'next' || cmd.type === 'prev') {
     // 播放控制复用 tray 通道（主窗口 PlayerContext 已监听）
-    main.webContents.send('tray:player-command', cmd.type)
+    // 注意：tray 命令为 'toggle-play'，mini 命令为 'toggle'，这里做映射避免播放/暂停失效
+    main.webContents.send('tray:player-command', cmd.type === 'toggle' ? 'toggle-play' : cmd.type)
   } else if (cmd.type === 'volume' || cmd.type === 'seek') {
     main.webContents.send('mini:player-command', cmd)
   } else if (cmd.type === 'show-window') {
@@ -109,6 +111,17 @@ function handleCommand(cmd: MiniCommand) {
     case 'close-lyric-window':
       hideLyricWindow()
       break
+    case 'show-player': {
+      // 弹出主窗口并通知渲染层打开当前歌曲播放页
+      const main = getMainWindow?.()
+      if (main && !main.isDestroyed()) {
+        if (main.isMinimized()) main.restore()
+        main.show()
+        main.focus()
+        main.webContents.send('mini:open-now-playing')
+      }
+      break
+    }
     default:
       break
   }
@@ -172,6 +185,7 @@ function getLyricHtml() {
       <button class="btn" id="prev" title="上一首">⏮</button>
       <button class="btn play" id="play" title="播放/暂停">▶</button>
       <button class="btn" id="next" title="下一首">⏭</button>
+      <button class="btn" id="openPlayer" title="打开播放器">⤢</button>
       <span class="vol">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
         <input type="range" id="volume" min="0" max="100" value="80" />
@@ -226,6 +240,7 @@ function getLyricHtml() {
     $('next').onclick = () => sendCommand({ type: 'next' })
     $('prev').onclick = () => sendCommand({ type: 'prev' })
     $('closeBtn').onclick = () => sendCommand({ type: 'close-lyric-window' })
+    $('openPlayer').onclick = () => sendCommand({ type: 'show-player' })
     volInput.addEventListener('input', () => sendCommand({ type: 'volume', value: Number(volInput.value) }))
     render()
   </script>
@@ -324,4 +339,8 @@ export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserW
 
   // 主窗口查询桌面歌词当前可见状态（用于播放页按钮文字）
   ipcMain.handle('mini:get-lyric-visible', () => isLyricVisible())
+
+  // 主窗口显式打开/关闭桌面歌词（播放页自动隐藏 / 退出恢复用）
+  ipcMain.on('mini:show-lyric', () => showLyricWindow())
+  ipcMain.on('mini:hide-lyric', () => hideLyricWindow())
 }

@@ -117,6 +117,7 @@ export type MiniCommand =
   | { type: 'show-window' }
   | { type: 'show-lyric-window' }
   | { type: 'close-lyric-window' }
+  | { type: 'show-player' }
 
 export interface WebdavConfigInput {
   url: string
@@ -168,6 +169,9 @@ declare global {
       toggleDesktopLyric?: () => void
       getDesktopLyricVisible?: () => Promise<boolean>
       onDesktopLyricVisible?: (callback: (visible: boolean) => void) => () => void
+      showDesktopLyric?: () => void
+      hideDesktopLyric?: () => void
+      onOpenNowPlaying?: (callback: () => void) => () => void
       openExternal: (url: string) => Promise<void>
       getAppVersion?: () => Promise<string>
       checkForUpdate?: () => Promise<void>

@@ -9,7 +9,8 @@ import type { MiniPlayerState, MiniCommand } from '@/types/electron'
  *
  * 挂载一次即可：
  * - 曲目变化时拉取歌词，供两个小窗显示
- * - 以 500ms 节流把完整播放状态（曲目/进度/音量/歌词行）推送给主进程，由主进程广播给小窗
+ * - 以 100ms 节流把完整播放状态（曲目/进度/音量/歌词行）推送给主进程，由主进程广播给小窗
+ *   说明：降低推送间隔以减少桌面歌词歌词随播放切换的延迟（原 500ms）
  * - 监听并处理小窗发来的音量 / 进度命令
  */
 export function useMiniWindowSync() {
@@ -82,7 +83,7 @@ export function useMiniWindowSync() {
   useEffect(() => {
     const push = () => window.electronAPI?.updateMiniPlayerState?.(stateRef.current)
     push()
-    const timer = setInterval(push, 500)
+    const timer = setInterval(push, 100)
     return () => clearInterval(timer)
   }, [])
 
