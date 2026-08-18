@@ -293,4 +293,4 @@ BiliMusic 仅用于学习、研究和个人使用。项目与 Bilibili、Apple M
 
 ## 作者
 
-由 MikannQAQ 设计与开发。
+本项目由 [SaiErOscar](https://github.com/SaiErOscar) 维护与开发，修改自 [Hanversion](https://github.com/Hanversion) 的开源项目。

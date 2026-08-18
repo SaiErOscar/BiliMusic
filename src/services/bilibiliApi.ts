@@ -4,6 +4,8 @@
  * 已验证的 API 接口，通过浏览器 Cookie 认证访问 B 站接口
  */
 
+import { httpRequest, setBilibiliAuthCookies, getNativeCookie } from './http'
+
 const BILI_API = 'https://api.bilibili.com'
 
 // B站图片地址统一转 https：http:// 的 hdslb 图在渲染进程会加载失败
@@ -22,19 +24,12 @@ interface BiliFetchOptions {
 
 async function biliFetch<T>(path: string, options: BiliFetchOptions = {}): Promise<T> {
   const { credentials = 'include', params } = options
-  const url = new URL(`${BILI_API}${path}`)
-  if (params) {
-    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)))
-  }
 
-  const resp = await fetch(url.toString(), {
+  const data = await httpRequest<{ code: number; message: string; data: T }>(`${BILI_API}${path}`, {
     credentials,
-    headers: {
-      Referer: 'https://www.bilibili.com',
-    },
+    params,
+    headers: { Referer: 'https://www.bilibili.com' },
   })
-
-  const data = await resp.json()
   if (data.code !== 0) {
     throw new BiliApiError(data.code, data.message, path)
   }
@@ -136,11 +131,10 @@ async function getWbiKeys(): Promise<{ imgKey: string; subKey: string }> {
     return { imgKey: wbiKeysCache.imgKey, subKey: wbiKeysCache.subKey }
   }
   // 不能用 biliFetch：未登录时 nav 返回 code -101 会抛错，但 wbi_img 仍有效
-  const resp = await fetch(`${BILI_API}/x/web-interface/nav`, {
-    credentials: 'include',
-    headers: { Referer: 'https://www.bilibili.com' },
-  })
-  const json = await resp.json()
+  const json = await httpRequest<{ data?: { wbi_img?: { img_url?: string; sub_url?: string } } }>(
+    `${BILI_API}/x/web-interface/nav`,
+    { headers: { Referer: 'https://www.bilibili.com' } },
+  )
   const imgUrl: string = json?.data?.wbi_img?.img_url || ''
   const subUrl: string = json?.data?.wbi_img?.sub_url || ''
   const imgKey = imgUrl.slice(imgUrl.lastIndexOf('/') + 1).split('.')[0]
@@ -213,11 +207,10 @@ export async function searchVideo(
     page,
     page_size: pageSize,
   })
-  const resp = await fetch(`${BILI_API}/x/web-interface/wbi/search/type?${query}`, {
-    credentials: 'include',
-    headers: { Referer: 'https://www.bilibili.com' },
-  })
-  const data = await resp.json()
+  const data = await httpRequest<{ code: number; message: string; data: SearchResponse }>(
+    `${BILI_API}/x/web-interface/wbi/search/type?${query}`,
+    { headers: { Referer: 'https://www.bilibili.com' } },
+  )
   if (data.code !== 0) {
     throw new BiliApiError(data.code, data.message, '/x/web-interface/wbi/search/type')
   }
@@ -257,11 +250,10 @@ export async function searchUser(
     page,
     page_size: pageSize,
   })
-  const resp = await fetch(`${BILI_API}/x/web-interface/wbi/search/type?${query}`, {
-    credentials: 'include',
-    headers: { Referer: 'https://www.bilibili.com' },
-  })
-  const data = await resp.json()
+  const data = await httpRequest<{ code: number; message: string; data: UserSearchResponse }>(
+    `${BILI_API}/x/web-interface/wbi/search/type?${query}`,
+    { headers: { Referer: 'https://www.bilibili.com' } },
+  )
   if (data.code !== 0) {
     throw new BiliApiError(data.code, data.message, '/x/web-interface/wbi/search/type')
   }
@@ -296,11 +288,10 @@ export async function getUserVideos(
   order: 'pubdate' | 'click' = 'pubdate',
 ): Promise<SpaceArcSearchData> {
   const query = await encodeWbi({ mid, pn: page, ps: pageSize, order, platform: 'web' })
-  const resp = await fetch(`${BILI_API}/x/space/wbi/arc/search?${query}`, {
-    credentials: 'include',
-    headers: { Referer: `https://space.bilibili.com/${mid}/video` },
-  })
-  const data = await resp.json()
+  const data = await httpRequest<{ code: number; message: string; data: SpaceArcSearchData }>(
+    `${BILI_API}/x/space/wbi/arc/search?${query}`,
+    { headers: { Referer: `https://space.bilibili.com/${mid}/video` } },
+  )
   if (data.code !== 0) {
     throw new BiliApiError(data.code, data.message, '/x/space/wbi/arc/search')
   }
@@ -671,19 +662,34 @@ export async function getFavoriteFolderContent(
   page = 1,
   pageSize = 20,
 ): Promise<FavoriteFolderContent> {
-  // 走主进程 net.fetch：渲染层 fetch 跨域且无法携带完整 B站 Cookie，
+  // 优先走主进程 net.fetch：桌面端渲染层 fetch 跨域且无法携带完整 B站 Cookie，
   // 该接口在无 Cookie 时会被风控返回 HTTP 412 + HTML（非 JSON）导致解析失败
-  const data = await window.electronAPI?.biliApi?.fetchBiliJson?.('/x/v3/fav/resource/list', {
-    media_id: folderId,
-    pn: page,
-    ps: pageSize,
-    keyword: '',
-    order: 'mtime',
-    type: 0,
-    tid: 0,
-    platform: 'web',
+  if (window.electronAPI?.biliApi?.fetchBiliJson) {
+    const data = await window.electronAPI.biliApi.fetchBiliJson('/x/v3/fav/resource/list', {
+      media_id: folderId,
+      pn: page,
+      ps: pageSize,
+      keyword: '',
+      order: 'mtime',
+      type: 0,
+      tid: 0,
+      platform: 'web',
+    })
+    return data as FavoriteFolderContent
+  }
+  // WebView / 移动端兜底：渲染层 fetch（credentials: 'include' 携带 WebView Cookie + Referer）
+  return biliFetch<FavoriteFolderContent>('/x/v3/fav/resource/list', {
+    params: {
+      media_id: folderId,
+      pn: page,
+      ps: pageSize,
+      keyword: '',
+      order: 'mtime',
+      type: 0,
+      tid: 0,
+      platform: 'web',
+    },
   })
-  return data as FavoriteFolderContent
 }
 
 /**
@@ -726,9 +732,8 @@ export async function dealFavorite(
   }
   // 浏览器回退：渲染层 fetch（带 Cookie）
   const cookies = await getCookiesForRequest()
-  const resp = await fetch(`${BILI_API}/x/v3/fav/resource/deal`, {
+  const data = await httpRequest<{ code: number; message: string }>(`${BILI_API}/x/v3/fav/resource/deal`, {
     method: 'POST',
-    credentials: 'include',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
       Referer: 'https://www.bilibili.com',
@@ -742,7 +747,6 @@ export async function dealFavorite(
       platform: 'web',
     }).toString(),
   })
-  const data = await resp.json()
   if (data.code !== 0) {
     throw new Error(`收藏失败（${data.code}）：${data.message || '未知错误'}`)
   }
@@ -757,7 +761,8 @@ async function getCookiesForRequest(): Promise<{ biliJct: string }> {
     const cookies = await window.electronAPI.biliApi.getCookies()
     return { biliJct: cookies.biliJct }
   }
-  return { biliJct: '' }
+  // 移动端：从 WebView CookieManager 读取 bili_jct（登录成功后已写入）
+  return { biliJct: await getNativeCookie('bili_jct') }
 }
 
 // ===== 完整流程：搜索 → 详情 → 音频 =====
@@ -886,11 +891,10 @@ export interface QrPollResult {
  * 生成扫码登录二维码
  */
 export async function generateQrCode(): Promise<QrCodeData> {
-  const resp = await fetch(`${BILI_API.replace('api', 'passport')}/x/passport-login/web/qrcode/generate`, {
-    credentials: 'include',
-    headers: { Referer: 'https://passport.bilibili.com/login' },
-  })
-  const data = await resp.json()
+  const data = await httpRequest<{ code: number; message: string; data: { url: string; qrcode_key: string } }>(
+    `${BILI_API.replace('api', 'passport')}/x/passport-login/web/qrcode/generate`,
+    { headers: { Referer: 'https://passport.bilibili.com/login' } },
+  )
   if (data.code !== 0) {
     throw new BiliApiError(data.code, data.message, 'qrGenerate')
   }
@@ -909,19 +913,21 @@ export async function generateQrCode(): Promise<QrCodeData> {
  * 0     = 登录成功
  */
 export async function pollQrCode(qrcodeKey: string): Promise<QrPollResult> {
-  const resp = await fetch(
+  const data = await httpRequest<{ code: number; message: string; data: { code: number; message: string; url: string } }>(
     `${BILI_API.replace('api', 'passport')}/x/passport-login/web/qrcode/poll?qrcode_key=${qrcodeKey}`,
-    {
-      credentials: 'include',
-      headers: { Referer: 'https://passport.bilibili.com/login' },
-    },
+    { headers: { Referer: 'https://passport.bilibili.com/login' } },
   )
-  const data = await resp.json()
   // 外层 code 是 API 结果，内层 data.code 才是扫码状态
+  const status = data.data?.code ?? data.code
+  const callbackUrl = data.data?.url || ''
+  // 登录成功：把回调 URL 里携带的 SESSDATA/bili_jct 等 Cookie 写入 WebView（移动端）
+  if (status === 0 && callbackUrl) {
+    await setBilibiliAuthCookies(callbackUrl)
+  }
   return {
-    code: data.data?.code ?? data.code,
-    status: data.data?.code ?? data.code,
+    code: status,
+    status,
     message: data.data?.message || data.message,
-    url: data.data?.url || '',
+    url: callbackUrl,
   }
 }

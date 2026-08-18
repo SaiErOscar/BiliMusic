@@ -4,7 +4,9 @@ import appIcon from '@/assets/icon.png'
 
 export default function TitleBar() {
   const [maximized, setMaximized] = useState(false)
-  const useNativeWindowControls = window.electronAPI?.platform === 'openharmony'
+
+  // 窗口控制按钮只在桌面端（Electron 且非鸿蒙）显示；手机端没有 electronAPI，不显示
+  const showWindowControls = !!window.electronAPI && window.electronAPI.platform !== 'openharmony'
 
   useEffect(() => {
     const api = window.electronAPI
@@ -15,13 +17,13 @@ export default function TitleBar() {
   }, [])
 
   return (
-    <div className={`app-titlebar ${useNativeWindowControls ? 'app-titlebar--native' : ''}`}>
+    <div className={`app-titlebar ${showWindowControls ? '' : 'app-titlebar--native'}`}>
       <div className="app-titlebar__brand">
         <img src={appIcon} alt="" className="app-titlebar__logo" draggable={false} />
         BiliMusic
       </div>
 
-      {!useNativeWindowControls && (
+      {showWindowControls && (
         <div className="app-titlebar__controls">
           <WindowButton icon={<Minus size={14} />} action="minimize" label="最小化" />
           <WindowButton icon={maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />} action="maximize" label={maximized ? '还原窗口' : '最大化'} />

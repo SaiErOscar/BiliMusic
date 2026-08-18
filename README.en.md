@@ -292,4 +292,4 @@ BiliMusic is intended for learning, research, and personal use. It is not affili
 
 ## Author
 
-Designed and built by MikannQAQ.
+Maintained and developed by [SaiErOscar](https://github.com/SaiErOscar), based on the open-source project by [Hanversion](https://github.com/Hanversion).

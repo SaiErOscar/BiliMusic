@@ -25,6 +25,7 @@ import {
   getBestVideoUrl,
   type TrackSource,
 } from '@/services/bilibiliApi'
+import { clearBilibiliAuthCookies } from '@/services/http'
 
 // ===== 搜索 =====
 
@@ -491,6 +492,6 @@ export async function logout(): Promise<void> {
     return
   }
 
-  // 浏览器环境无法清除 bilibili.com 的 Cookie（跨域）
-  throw new Error('Logout requires Electron environment')
+  // 移动端：清除 WebView 中的 B 站登录 Cookie
+  await clearBilibiliAuthCookies()
 }

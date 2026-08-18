@@ -6,6 +6,7 @@
  */
 
 import type { Track } from '@/types'
+import { httpRequest } from './http'
 
 export interface LyricLine {
   time: number
@@ -39,9 +40,24 @@ function bridge() {
   return typeof window !== 'undefined' ? window.electronAPI?.lyricsApi : undefined
 }
 
+// OIAPI 歌词接口（与主进程 electron/lyricsApi.ts 保持一致）
+const OIAPI_QQ_LYRIC = 'https://www.oiapi.net/api/QQMusicLyric'
+
 async function oiSearch(keyword: string, limit = 10): Promise<LyricCandidate[]> {
   const api = bridge()
-  if (!api) return []
+  if (!api) {
+    // 移动端回退：httpRequest 直连 OIAPI（CapacitorHttp 无 CORS 限制）
+    try {
+      const json = await httpRequest<{ code: number; data?: RawOiapiSong[] }>(OIAPI_QQ_LYRIC, {
+        params: { keyword, page: 1, limit, type: 'json' },
+      })
+      const rows = json?.data
+      if (!Array.isArray(rows)) return []
+      return rows.map(normalizeCandidate).filter(Boolean) as LyricCandidate[]
+    } catch {
+      return []
+    }
+  }
   try {
     const rows = await api.search(keyword, 1, limit)
     return rows.map(normalizeCandidate).filter(Boolean) as LyricCandidate[]
@@ -52,7 +68,21 @@ async function oiSearch(keyword: string, limit = 10): Promise<LyricCandidate[]> 
 
 async function oiGetLyric(id: string | number): Promise<string> {
   const api = bridge()
-  if (!api) return ''
+  if (!api) {
+    // 移动端回退：httpRequest 直连 OIAPI 取 LRC
+    try {
+      const json = await httpRequest<{ code: number; data?: string | { content?: string; conteng?: string } }>(
+        OIAPI_QQ_LYRIC,
+        { params: { id: String(id), format: 'lrc', type: 'json' } },
+      )
+      if (!json || json.code !== 1) return ''
+      if (typeof json.data === 'string') return json.data
+      if (json.data && typeof json.data === 'object') return json.data.content || json.data.conteng || ''
+      return ''
+    } catch {
+      return ''
+    }
+  }
   try {
     const data = await api.get(id, 'lrc')
     return data?.content || data?.conteng || ''

@@ -4,7 +4,7 @@
   "devDependencies": {
     "@ohos/hypium": "1.0.6"
   },
-  "author": "Hanversion",
+  "author": "SaiErOscar",
   "name": "bilimusic",
   "description": "BiliMusic HarmonyOS PC package.",
   "main": "",

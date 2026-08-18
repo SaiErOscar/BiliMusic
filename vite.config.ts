@@ -15,22 +15,30 @@ const electronExternals = [
   ...builtinModules.map((m) => `node:${m}`),
 ]
 
+// Capacitor / 移动端构建：设置 CAPACITOR 环境变量时跳过 electron 插件，
+// 只产出纯 Web 渲染层产物（供 Android WebView 使用）。
+const useElectron = !process.env.CAPACITOR
+
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    electron([
-      {
-        entry: 'electron/main.ts',
-        vite: {
-          build: {
-            rollupOptions: {
-              external: electronExternals,
+    ...(useElectron
+      ? [
+          electron([
+            {
+              entry: 'electron/main.ts',
+              vite: {
+                build: {
+                  rollupOptions: {
+                    external: electronExternals,
+                  },
+                },
+              },
             },
-          },
-        },
-      },
-    ]),
+          ]),
+        ]
+      : []),
   ],
   resolve: {
     alias: {

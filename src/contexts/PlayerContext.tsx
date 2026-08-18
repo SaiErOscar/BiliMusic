@@ -3,6 +3,7 @@ import { createContext, useContext } from 'react'
 import type { Track, RepeatMode } from '@/types'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { toggleFavoriteTrack, loadFavoriteTracks, addRecentTrack } from '@/utils/storage'
+import { resolveAudioPlayableUrl, releaseAudioPlayableUrl } from '@/services/http'
 
 function shuffleArray<T>(arr: T[]): T[] {
   const result = [...arr]
@@ -164,6 +165,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const isShuffled = repeatMode === 'shuffle'
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  // 当前播放用的 Blob URL（移动端音频下载转 Blob 后，切歌/停止时需释放）
+  const playableUrlRef = useRef<string | null>(null)
   const shuffledQueueRef = useRef<Track[]>([])
   const currentIndexRef = useRef(restoredRef.current.currentIndex)
   const shouldAutoplayRef = useRef(Boolean(restoredRef.current.currentTrack && restoredRef.current.wasPlaying))
@@ -216,6 +219,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       audio.removeEventListener('ended', onEnded)
       audio.removeEventListener('error', onError)
       audio.pause()
+      if (playableUrlRef.current) {
+        releaseAudioPlayableUrl(playableUrlRef.current)
+        playableUrlRef.current = null
+      }
       audio.src = ''
     }
   }, [])
@@ -321,7 +328,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
         if (cancelled) return
 
-        audio.src = source.audioUrl
+        // 释放上一个 Blob URL（移动端音频下载转 Blob 后需释放）
+        if (playableUrlRef.current) {
+          releaseAudioPlayableUrl(playableUrlRef.current)
+          playableUrlRef.current = null
+        }
+
+        // 移动端需先下载音频流转 Blob（绕过 Referer 防盗链），桌面端原样返回
+        const playableUrl = await resolveAudioPlayableUrl(source.audioUrl)
+        if (cancelled) return
+        playableUrlRef.current = playableUrl
+        audio.src = playableUrl
         audio.load()
 
         if (shouldAutoplayRef.current) {
@@ -510,6 +527,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setIsPlaying(false)
     if (audioRef.current) {
       audioRef.current.pause()
+      if (playableUrlRef.current) {
+        releaseAudioPlayableUrl(playableUrlRef.current)
+        playableUrlRef.current = null
+      }
       audioRef.current.src = ''
     }
   }, [])

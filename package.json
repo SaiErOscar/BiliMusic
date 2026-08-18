@@ -1,9 +1,9 @@
 {
   "name": "bilimusic",
   "private": true,
-  "version": "1.2.26-beta",
+  "version": "1.2.27",
   "description": "BiliMusic - 基于 Bilibili 的桌面音乐播放器",
-  "author": "Hanversion",
+  "author": "SaiErOscar",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -18,7 +18,9 @@
     "lint:fix": "eslint src/ electron/ --ext .ts,.tsx,.cjs --fix",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build:ota": "npm run build && node scripts/build-ota.mjs"
+    "build:ota": "npm run build && node scripts/build-ota.mjs",
+    "build:web": "node scripts/build-web.mjs",
+    "cap:sync": "npm run build:web && cap sync android"
   },
   "dependencies": {
     "electron-updater": "^6.3.9",
@@ -29,7 +31,9 @@
     "qrcode": "^1.5.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-router-dom": "^7.6.0"
+    "react-router-dom": "^7.6.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/android": "^8.5.0"
   },
   "devDependencies": {
     "@electron/asar": "^3.4.1",
@@ -55,12 +59,13 @@
     "vite-plugin-electron": "^0.29.1",
     "vite-plugin-electron-renderer": "^0.14.7",
     "vitest": "^4.1.10",
-    "wait-on": "^8.0.0"
+    "wait-on": "^8.0.0",
+    "@capacitor/cli": "^8.5.0"
   },
   "build": {
-    "appId": "com.hanversion.bilimusic",
+    "appId": "com.saieroscar.bilimusic",
     "productName": "BiliMusic",
-    "copyright": "Copyright © 2026 Hanversion",
+    "copyright": "Copyright © 2026 SaiErOscar",
     "publish": [
       {
         "provider": "github",
@@ -116,7 +121,7 @@
       ],
       "icon": "electron/icon.png",
       "category": "AudioVideo",
-      "maintainer": "Hanversion <hanversion@gmail.com>",
+      "maintainer": "SaiErOscar",
       "synopsis": "基于 Bilibili 的桌面音乐播放器",
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
