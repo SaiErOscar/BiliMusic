@@ -112,10 +112,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('mini:open-now-playing', listener)
   },
   onDesktopLyricVisible: (callback) => {
-    const listener = (_event, visible) => callback(Boolean(visible))
+    // v1.3.1：载荷由 boolean 变为 { visible, intent, suppressed }，兼容旧 boolean
+    const listener = (_event, state) => {
+      if (state && typeof state === 'object') callback(state)
+      else callback(Boolean(state))
+    }
     ipcRenderer.on('mini:lyric-visible', listener)
     return () => ipcRenderer.removeListener('mini:lyric-visible', listener)
   },
+  setNowPlayingOpen: (open) => ipcRenderer.send('mini:set-now-playing', Boolean(open)),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   checkForUpdate: () => ipcRenderer.invoke('updater:check'),

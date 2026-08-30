@@ -64,6 +64,36 @@ let miniState: MiniPlayerState = { ...defaultState }
 let lyricWindow: BrowserWindow | null = null
 let getMainWindow: (() => BrowserWindow | null) | null = null
 
+// ===== 桌面歌词显示状态机（v1.3.1）=====
+// 拆分“用户意图”与“实际可见性”：
+//   lyricIntent    用户是否想显示桌面歌词（按钮切换的是它，本次运行内持久）
+//   nowPlayingOpen 播放页（NowPlaying）是否打开，由主窗口渲染层上报
+//   抑制条件       nowPlayingOpen && 主窗口可见且聚焦（主窗口不在焦点即视为不在播放页）
+// 实际可见 = lyricIntent && !抑制
+let lyricIntent = false
+let nowPlayingOpen = false
+
+/** 主窗口是否处于“正在看播放页”的活动状态（可见、未最小化、有焦点） */
+function isMainWindowActive(): boolean {
+  const main = getMainWindow?.()
+  if (!main || main.isDestroyed()) return false
+  return main.isVisible() && !main.isMinimized() && main.isFocused()
+}
+
+/** 当前是否应抑制桌面歌词（播放页打开且主窗口聚焦时） */
+function isLyricSuppressed(): boolean {
+  return nowPlayingOpen && isMainWindowActive()
+}
+
+/** 按状态机同步桌面歌词窗的实际可见性（窗口事件 / 渲染层上报变化时调用） */
+function applyLyricVisibility() {
+  if (lyricIntent && !isLyricSuppressed()) {
+    showLyricWindow()
+  } else {
+    hideLyricWindow()
+  }
+}
+
 function miniPreloadPath(): string {
   return process.env.VITE_DEV_SERVER_URL
     ? path.join(__dirname, '../electron/mini-preload.cjs')
@@ -106,10 +136,13 @@ function handleCommand(cmd: MiniCommand) {
       sendMainCommand(cmd)
       break
     case 'show-lyric-window':
-      showLyricWindow()
+      lyricIntent = true
+      applyLyricVisibility()
       break
     case 'close-lyric-window':
-      hideLyricWindow()
+      // 桌面歌词右上角 ✕：视为用户关闭（清除意图，退出播放页也不再恢复）
+      lyricIntent = false
+      applyLyricVisibility()
       break
     case 'show-player': {
       // 弹出主窗口并通知渲染层打开当前歌曲播放页
@@ -293,15 +326,24 @@ export function isLyricVisible() {
 function notifyLyricVisible() {
   const main = getMainWindow?.()
   if (!main || main.isDestroyed()) return
-  main.webContents.send('mini:lyric-visible', isLyricVisible())
+  // 同时下发意图与抑制状态：渲染层按钮文字跟随“用户意图”，
+  // 播放页可据 suppressed 判断是否需要提示“退出后即出现”
+  main.webContents.send('mini:lyric-visible', {
+    visible: isLyricVisible(),
+    intent: lyricIntent,
+    suppressed: isLyricSuppressed(),
+  })
 }
 
+/** 切换桌面歌词（切换的是用户意图，是否立即显示由状态机决定） */
 export function toggleLyricWindow() {
-  if (lyricWindow && lyricWindow.isVisible()) {
-    lyricWindow.hide()
-  } else {
-    showLyricWindow()
-  }
+  lyricIntent = !lyricIntent
+  applyLyricVisibility()
+}
+
+/** 主窗口焦点/显隐变化时重新计算桌面歌词可见性 */
+export function onMainWindowActivityChanged() {
+  applyLyricVisibility()
 }
 
 export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserWindow | null }) {
@@ -337,10 +379,26 @@ export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserW
   // 主窗口请求打开/关闭桌面歌词
   ipcMain.on('mini:toggle-lyric', () => toggleLyricWindow())
 
-  // 主窗口查询桌面歌词当前可见状态（用于播放页按钮文字）
-  ipcMain.handle('mini:get-lyric-visible', () => isLyricVisible())
+  // 主窗口查询桌面歌词状态（visible=实际可见 / intent=用户意图 / suppressed=播放页抑制中）
+  ipcMain.handle('mini:get-lyric-visible', () => ({
+    visible: isLyricVisible(),
+    intent: lyricIntent,
+    suppressed: isLyricSuppressed(),
+  }))
 
-  // 主窗口显式打开/关闭桌面歌词（播放页自动隐藏 / 退出恢复用）
-  ipcMain.on('mini:show-lyric', () => showLyricWindow())
-  ipcMain.on('mini:hide-lyric', () => hideLyricWindow())
+  // 主窗口显式打开/关闭桌面歌词（同时修改用户意图）
+  ipcMain.on('mini:show-lyric', () => {
+    lyricIntent = true
+    applyLyricVisibility()
+  })
+  ipcMain.on('mini:hide-lyric', () => {
+    lyricIntent = false
+    applyLyricVisibility()
+  })
+
+  // 主窗口渲染层上报播放页（NowPlaying）开关状态，用于计算抑制
+  ipcMain.on('mini:set-now-playing', (_event, open: unknown) => {
+    nowPlayingOpen = Boolean(open)
+    applyLyricVisibility()
+  })
 }

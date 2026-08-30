@@ -6,7 +6,7 @@ import { registerBiliApiHandlers } from './biliApi'
 import { registerLyricsApiHandlers } from './lyricsApi'
 import { initUpdates, getActiveRendererRoot } from './updater'
 import { registerWebdavHandlers } from './webdav'
-import { registerMiniWindowHandlers } from './miniWindows'
+import { registerMiniWindowHandlers, onMainWindowActivityChanged } from './miniWindows'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -547,6 +547,16 @@ function createWindow() {
   }
   mainWindow.on('maximize', sendMaximizeState)
   mainWindow.on('unmaximize', sendMaximizeState)
+
+  // v1.3.1：主窗口焦点/显隐变化 → 重新计算桌面歌词可见性
+  // （主窗口不在焦点即视为不在播放页，可正常显示桌面歌词）
+  const notifyLyricActivity = () => onMainWindowActivityChanged()
+  mainWindow.on('focus', notifyLyricActivity)
+  mainWindow.on('blur', notifyLyricActivity)
+  mainWindow.on('show', notifyLyricActivity)
+  mainWindow.on('hide', notifyLyricActivity)
+  mainWindow.on('restore', notifyLyricActivity)
+  mainWindow.on('minimize', notifyLyricActivity)
   mainWindow.on('enter-full-screen', () => {
     sendMaximizeState()
     sendFullscreenState()

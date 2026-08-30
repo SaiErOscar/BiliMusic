@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -573,7 +573,30 @@ function LyricsPanel({
   const [results, setResults] = useState<LyricCandidate[]>([])
   const [searching, setSearching] = useState(false)
   const [choosingId, setChoosingId] = useState<string | null>(null)
-  const { visible: desktopLyricVisible, toggle: toggleDesktopLyric } = useDesktopLyricVisible()
+  const { visible: desktopLyricVisible, suppressed: desktopLyricSuppressed, toggle: toggleDesktopLyric } = useDesktopLyricVisible()
+
+  // v1.3.1：播放页内切换桌面歌词的小提示（顶部悬浮 3 秒，不干扰体验）
+  const [lyricToast, setLyricToast] = useState<string | null>(null)
+  const lyricToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showLyricToast = (text: string) => {
+    setLyricToast(text)
+    if (lyricToastTimer.current) clearTimeout(lyricToastTimer.current)
+    lyricToastTimer.current = setTimeout(() => setLyricToast(null), 3000)
+  }
+  useEffect(() => () => {
+    if (lyricToastTimer.current) clearTimeout(lyricToastTimer.current)
+  }, [])
+
+  // 播放页抑制中：点击“显示桌面歌词”只记录意图，退出播放页后才出现
+  const handleToggleDesktopLyric = () => {
+    const nextIntent = !desktopLyricVisible
+    if (nextIntent && desktopLyricSuppressed) {
+      showLyricToast('桌面歌词已显示，退出后即出现')
+    } else if (!nextIntent) {
+      showLyricToast('桌面歌词已隐藏')
+    }
+    toggleDesktopLyric()
+  }
 
   const openSearch = () => {
     setQuery(`${track.title} ${track.artist}`.trim())
@@ -598,6 +621,7 @@ function LyricsPanel({
 
   return (
     <div className="lyrics-panel">
+      {lyricToast && <div className="lyrics-panel__toast">{lyricToast}</div>}
       <div className="lyrics-panel__body">
         {status === 'loading' && (
           <Centered>
@@ -624,7 +648,7 @@ function LyricsPanel({
       {/* 歌词底部控制栏：切换歌词 + 时间偏移调整 */}
       {(status === 'ok' || status === 'unsynced') && (
         <div className="lyrics-panel__controls">
-          <button type="button" className="lyrics-panel__ctrl-btn" onClick={toggleDesktopLyric} title={desktopLyricVisible ? '隐藏桌面歌词' : '显示桌面歌词'}>
+          <button type="button" className="lyrics-panel__ctrl-btn" onClick={handleToggleDesktopLyric} title={desktopLyricVisible ? '隐藏桌面歌词' : '显示桌面歌词'}>
             <Monitor size={15} />
             <span>{desktopLyricVisible ? '隐藏桌面歌词' : '显示桌面歌词'}</span>
           </button>

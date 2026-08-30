@@ -2244,6 +2244,31 @@ body {
   background: rgba(255, 255, 255, 0.2);
 }
 
+.lyrics-panel__toast {
+  /* v1.3.1：播放页内切换桌面歌词的悬浮小提示（3 秒自动消失，不干扰体验） */
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-primary, #eee);
+  background: var(--color-surface-muted, rgba(20, 20, 24, 0.72));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  pointer-events: none;
+  animation: lyric-toast-in 0.25s ease;
+}
+
+@keyframes lyric-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 .lyrics-panel__hint {
   color: rgba(255, 255, 255, 0.42);
   font-size: 12px;

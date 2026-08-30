@@ -1,3 +1,12 @@
+export interface DesktopLyricState {
+  /** 桌面歌词窗当前是否实际可见 */
+  visible: boolean
+  /** 用户意图：是否想显示桌面歌词（播放页按钮文字以此为准） */
+  intent: boolean
+  /** 播放页抑制中（播放页打开且主窗口聚焦，此时即使 intent=true 也不显示） */
+  suppressed: boolean
+}
+
 export interface DownloadOptions {
   artist?: string
   title?: string
@@ -167,10 +176,13 @@ declare global {
       updateMiniPlayerState?: (state: MiniPlayerState) => void
       onMiniPlayerCommand?: (callback: (command: MiniCommand) => void) => () => void
       toggleDesktopLyric?: () => void
-      getDesktopLyricVisible?: () => Promise<boolean>
-      onDesktopLyricVisible?: (callback: (visible: boolean) => void) => () => void
+      /** 桌面歌词状态：visible=实际可见 / intent=用户意图（按钮文字跟随它）/ suppressed=播放页抑制中 */
+      getDesktopLyricVisible?: () => Promise<DesktopLyricState>
+      onDesktopLyricVisible?: (callback: (state: DesktopLyricState) => void) => () => void
       showDesktopLyric?: () => void
       hideDesktopLyric?: () => void
+      /** 上报播放页（NowPlaying）开关状态，主进程据此计算桌面歌词抑制 */
+      setNowPlayingOpen?: (open: boolean) => void
       onOpenNowPlaying?: (callback: () => void) => () => void
       openExternal: (url: string) => Promise<void>
       getAppVersion?: () => Promise<string>
