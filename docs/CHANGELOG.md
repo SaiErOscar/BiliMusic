@@ -1,7 +1,23 @@
 # BiliMusic 更新日志
 
-> 汇总自 2026 年 8 月 4 日首次发布至 v1.3.3 的全部更新。
+> 汇总自 2026 年 8 月 4 日首次发布至 v1.3.4 的全部更新。
 > BiliMusic — 基于 Bilibili 的桌面音乐播放器（Electron + React + TypeScript）。
+
+---
+
+## v1.3.4 — 桌面歌词播放顺序图标主题化 + 安装器强杀残留进程
+
+**发布日期：2026-08-31**
+
+### 修复
+
+- **播放顺序按钮图标与主题不匹配**：v1.3.2 的四态图标使用系统 emoji（🔁🔂🔀），彩色样式与软件粉色主题冲突（随机模式显示为蓝色 emoji）。现改为与主窗口播放条同源的 lucide 线性 SVG（ArrowRight / Repeat / Repeat1 / Shuffle），`stroke="currentColor"` 自动跟随用户自定义的控件颜色；单曲循环改为右上角小角标"1"，与主窗口播放条角标样式一致
+- **升级安装报「无法关闭应用」，必须先卸载重装**：应用退出后偶发残留挂死进程（不响应关闭消息），安装器内置的关闭请求检查对其无效。现安装器 `customInit` 阶段直接 `taskkill /F` 强杀残留的 BiliMusic.exe（连同子进程）再走正常安装流程，覆盖安装不再被残留进程阻断
+
+### 技术说明
+
+- 歌词窗 HTML 中播放顺序按钮由文本 emoji 改为内联 SVG，`renderRepeatBtn()` 切换 `innerHTML` 与角标显隐
+- `build/installer.nsh` 通过 electron-builder `nsis.include` 挂载 `customInit` 宏
 
 ---
 

@@ -207,6 +207,8 @@ function getLyricHtml() {
   .btn:active { transform: scale(.92); }
   .btn.play { background: var(--ctrl-color); color: #fff; width: 40px; height: 40px; font-size: 17px; }
   .btn.play:hover { filter: brightness(1.08); }
+  #repeat { position: relative; }
+  #repeatBadge { position: absolute; top: -3px; right: -3px; min-width: 11px; height: 11px; border-radius: 6px; background: rgba(0,0,0,.75); color: #fff; font-size: 8px; font-weight: 700; line-height: 11px; text-align: center; padding: 0 2px; }
   .vol { display: flex; align-items: center; gap: 6px; color: var(--lyric-color); opacity: .75; }
   .vol svg { width: 15px; height: 15px; }
   .vol input { width: 90px; accent-color: var(--ctrl-color); cursor: pointer; }
@@ -222,7 +224,7 @@ function getLyricHtml() {
       <button class="btn" id="prev" title="上一首">⏮</button>
       <button class="btn play" id="play" title="播放/暂停">▶</button>
       <button class="btn" id="next" title="下一首">⏭</button>
-      <button class="btn" id="repeat" title="播放顺序：顺序播放">→1</button>
+      <button class="btn" id="repeat" title="播放顺序：顺序播放"><svg id="repeatIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg><span id="repeatBadge" style="display:none">1</span></button>
       <button class="btn" id="openPlayer" title="打开播放器">⤢</button>
       <span class="vol">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
@@ -274,18 +276,25 @@ function getLyricHtml() {
       renderLyric()
     }
 
-    // 播放顺序按钮：四态循环切换 none → all → one → shuffle → none（v1.3.2）
+    // 播放顺序按钮：四态循环切换 none → all → one → shuffle → none（v1.3.2 / v1.3.4 换 lucide 风格 SVG 跟随主题色）
+    // SVG path 与主窗口 lucide-react 的 ArrowRight / Repeat / Repeat1 / Shuffle 保持一致
+    const SVG_ARROW_RIGHT = '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>'
+    const SVG_REPEAT = '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>'
+    const SVG_REPEAT1 = SVG_REPEAT + '<path d="M11 10h1v4"/>'
+    const SVG_SHUFFLE = '<path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.8-1.1 2-1.7 3.3-1.7H22"/><path d="m18 2 4 4-4 4"/><path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2"/><path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8"/><path d="m18 14 4 4-4 4"/>'
     const REPEAT_META = {
-      none:    { icon: '→1', title: '播放顺序：顺序播放（点击切换为列表循环）' },
-      all:     { icon: '🔁', title: '播放顺序：列表循环（点击切换为单曲循环）' },
-      one:     { icon: '🔂', title: '播放顺序：单曲循环（点击切换为随机播放）' },
-      shuffle: { icon: '🔀', title: '播放顺序：随机播放（点击切换为顺序播放）' },
+      none:    { icon: SVG_ARROW_RIGHT, badge: false, title: '播放顺序：顺序播放（点击切换为列表循环）' },
+      all:     { icon: SVG_REPEAT, badge: false, title: '播放顺序：列表循环（点击切换为单曲循环）' },
+      one:     { icon: SVG_REPEAT1, badge: true, title: '播放顺序：单曲循环（点击切换为随机播放）' },
+      shuffle: { icon: SVG_SHUFFLE, badge: false, title: '播放顺序：随机播放（点击切换为顺序播放）' },
     }
     function renderRepeatBtn() {
       const m = REPEAT_META[state.repeatMode] || REPEAT_META.none
-      const btn = $('repeat')
-      btn.textContent = m.icon
-      btn.title = m.title
+      const icon = $('repeatIcon')
+      const badge = $('repeatBadge')
+      icon.innerHTML = m.icon
+      badge.style.display = m.badge ? 'block' : 'none'
+      $('repeat').title = m.title
     }
 
     onState((next) => { state = next || state; render() })

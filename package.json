@@ -1,7 +1,7 @@
 {
   "name": "bilimusic",
   "private": true,
-  "version": "1.3.3",
+  "version": "1.3.4",
   "description": "BiliMusic - 基于 Bilibili 的桌面音乐播放器",
   "author": "SaiErOscar",
   "type": "module",
@@ -102,7 +102,8 @@
       "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
       "installerIcon": "build/installerIcon.ico",
       "uninstallerIcon": "build/uninstallerIcon.ico",
-      "installerSidebar": "build/installerSidebar.bmp"
+      "installerSidebar": "build/installerSidebar.bmp",
+      "include": "build/installer.nsh"
     },
     "mac": {
       "target": [
