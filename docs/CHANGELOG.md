@@ -1,7 +1,24 @@
 # BiliMusic 更新日志
 
-> 汇总自 2026 年 8 月 4 日首次发布至 v1.3.2 的全部更新。
+> 汇总自 2026 年 8 月 4 日首次发布至 v1.3.3 的全部更新。
 > BiliMusic — 基于 Bilibili 的桌面音乐播放器（Electron + React + TypeScript）。
+
+---
+
+## v1.3.3 — 修复：升级后旧 OTA 渲染层残留导致新功能不生效
+
+**发布日期：2026-08-31**
+
+> v1.3.2 紧急热修复：全量安装包升级后，OTA 缓存的旧版渲染层持续覆盖包内新版渲染层，导致 v1.3.2 新功能（桌面歌词窗播放顺序按钮）不生效。
+
+### 修复
+
+- **升级后新功能不生效**：通过全量安装包升级到新版本时，若本地存在旧版本的 OTA 渲染热补丁缓存（如 `ota/renderer-1.3.1.asar`），启动时 OTA 对账逻辑只校验缓存是否「已验证」，不比较缓存版本与当前应用版本——旧渲染层（不含新代码）持续覆盖包内新渲染层，表现为：主窗口界面停留在旧版行为、桌面歌词窗播放顺序按钮点击无效且图标不随模式变化。现启动对账时检测到 OTA 缓存版本落后于当前应用版本即自动删除缓存并回退包内渲染层，落后版本为 active 或 pending 时均处理
+
+### 技术说明
+
+- `otaUpdater.ts` 的 `bootReconcile()` 新增步骤 0：`semverGt(app.getVersion(), state.activeVersion)` 为真时清除 active/pending 缓存文件与状态并回退 `bundledRoot`
+- OTA 下载条件本就要求 `manifest.rendererVersion > currentRendererVersion`，缓存被清除后不会重新下发旧版本
 
 ---
 

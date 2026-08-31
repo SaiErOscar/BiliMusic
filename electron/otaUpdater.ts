@@ -149,6 +149,34 @@ export async function stageRendererUpdate(manifest: OtaManifest): Promise<void> 
 function bootReconcile(): void {
   if (!otaRoot) return
   readState()
+  // 0) OTA 缓存版本落后于当前应用版本（全量安装包升级后残留）→ 丢弃缓存，回退包内 dist
+  //    否则旧 OTA asar 会持续覆盖新版包内渲染层，新功能永远不生效（v1.3.2 踩坑）
+  if (state.activeVersion && semverGt(app.getVersion(), state.activeVersion)) {
+    ulog('drop stale OTA renderer (older than app):', state.activeVersion, '<', app.getVersion())
+    if (state.activeFile) {
+      try {
+        fs.rmSync(path.join(otaRoot, state.activeFile), { force: true })
+      } catch {
+        /* ignore */
+      }
+    }
+    state.activeVersion = null
+    state.activeFile = null
+    state.verified = false
+    // 落后的 pending 一并丢弃
+    if (state.pendingVersion && semverGt(app.getVersion(), state.pendingVersion)) {
+      if (state.pendingFile) {
+        try {
+          fs.rmSync(path.join(otaRoot, state.pendingFile), { force: true })
+        } catch {
+          /* ignore */
+        }
+      }
+      state.pendingVersion = null
+      state.pendingFile = null
+    }
+    writeState()
+  }
   // 1) 上次 active 未确认 ready → 视为坏包，删除、加入黑名单、回退包内 dist
   if (state.activeVersion && !state.verified) {
     ulog('rollback unverified renderer (asar serving may have failed):', state.activeVersion)
