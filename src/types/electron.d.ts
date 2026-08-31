@@ -115,6 +115,8 @@ export interface MiniPlayerState {
   theme: 'light' | 'dark'
   lyricTextColor: string
   lyricControlColor: string
+  /** 播放顺序（v1.3.2）：供桌面歌词窗播放顺序按钮展示当前模式 */
+  repeatMode: 'none' | 'all' | 'one' | 'shuffle'
 }
 
 export type MiniCommand =
@@ -124,6 +126,7 @@ export type MiniCommand =
   | { type: 'volume'; value: number }
   | { type: 'seek'; value: number }
   | { type: 'show-window' }
+  | { type: 'cycle-repeat-mode' }
   | { type: 'show-lyric-window' }
   | { type: 'close-lyric-window' }
   | { type: 'show-player' }

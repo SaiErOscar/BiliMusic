@@ -30,6 +30,7 @@ export interface MiniPlayerState {
   theme: 'light' | 'dark'
   lyricTextColor: string
   lyricControlColor: string
+  repeatMode: 'none' | 'all' | 'one' | 'shuffle'
 }
 
 export type MiniCommand =
@@ -39,6 +40,7 @@ export type MiniCommand =
   | { type: 'volume'; value: number }
   | { type: 'seek'; value: number }
   | { type: 'show-window' }
+  | { type: 'cycle-repeat-mode' }
   | { type: 'show-lyric-window' }
   | { type: 'close-lyric-window' }
   | { type: 'show-player' }
@@ -58,6 +60,7 @@ const defaultState: MiniPlayerState = {
   theme: 'dark',
   lyricTextColor: '#ffffff',
   lyricControlColor: '#ff375f',
+  repeatMode: 'none',
 }
 
 let miniState: MiniPlayerState = { ...defaultState }
@@ -113,7 +116,7 @@ function sendMainCommand(cmd: MiniCommand) {
     // 播放控制复用 tray 通道（主窗口 PlayerContext 已监听）
     // 注意：tray 命令为 'toggle-play'，mini 命令为 'toggle'，这里做映射避免播放/暂停失效
     main.webContents.send('tray:player-command', cmd.type === 'toggle' ? 'toggle-play' : cmd.type)
-  } else if (cmd.type === 'volume' || cmd.type === 'seek') {
+  } else if (cmd.type === 'volume' || cmd.type === 'seek' || cmd.type === 'cycle-repeat-mode') {
     main.webContents.send('mini:player-command', cmd)
   } else if (cmd.type === 'show-window') {
     if (main.isMinimized()) main.restore()
@@ -130,6 +133,7 @@ function handleCommand(cmd: MiniCommand) {
     case 'prev':
     case 'volume':
     case 'seek':
+    case 'cycle-repeat-mode':
       sendMainCommand(cmd)
       break
     case 'show-window':
@@ -218,6 +222,7 @@ function getLyricHtml() {
       <button class="btn" id="prev" title="上一首">⏮</button>
       <button class="btn play" id="play" title="播放/暂停">▶</button>
       <button class="btn" id="next" title="下一首">⏭</button>
+      <button class="btn" id="repeat" title="播放顺序：顺序播放">→1</button>
       <button class="btn" id="openPlayer" title="打开播放器">⤢</button>
       <span class="vol">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
@@ -227,7 +232,7 @@ function getLyricHtml() {
   </div>
   <script>
     const { onState, sendCommand } = window.miniAPI
-    let state = { hasTrack:false, title:'', artist:'', coverUrl:'', isPlaying:false, volume:80, isMuted:false, progress:0, duration:0, lyricLines:[], synced:false, theme:'dark', lyricTextColor:'#ffffff', lyricControlColor:'#ff375f' }
+    let state = { hasTrack:false, title:'', artist:'', coverUrl:'', isPlaying:false, volume:80, isMuted:false, progress:0, duration:0, lyricLines:[], synced:false, theme:'dark', lyricTextColor:'#ffffff', lyricControlColor:'#ff375f', repeatMode:'none' }
     const $ = (id) => document.getElementById(id)
     const volInput = $('volume')
     let lyricTimer = null
@@ -265,7 +270,22 @@ function getLyricHtml() {
       $('play').textContent = state.isPlaying ? '⏸' : '▶'
       $('play').disabled = $('prev').disabled = $('next').disabled = !state.hasTrack
       if (volInput.value !== String(state.volume)) volInput.value = state.volume
+      renderRepeatBtn()
       renderLyric()
+    }
+
+    // 播放顺序按钮：四态循环切换 none → all → one → shuffle → none（v1.3.2）
+    const REPEAT_META = {
+      none:    { icon: '→1', title: '播放顺序：顺序播放（点击切换为列表循环）' },
+      all:     { icon: '🔁', title: '播放顺序：列表循环（点击切换为单曲循环）' },
+      one:     { icon: '🔂', title: '播放顺序：单曲循环（点击切换为随机播放）' },
+      shuffle: { icon: '🔀', title: '播放顺序：随机播放（点击切换为顺序播放）' },
+    }
+    function renderRepeatBtn() {
+      const m = REPEAT_META[state.repeatMode] || REPEAT_META.none
+      const btn = $('repeat')
+      btn.textContent = m.icon
+      btn.title = m.title
     }
 
     onState((next) => { state = next || state; render() })
@@ -273,6 +293,7 @@ function getLyricHtml() {
     $('next').onclick = () => sendCommand({ type: 'next' })
     $('prev').onclick = () => sendCommand({ type: 'prev' })
     $('closeBtn').onclick = () => sendCommand({ type: 'close-lyric-window' })
+    $('repeat').onclick = () => sendCommand({ type: 'cycle-repeat-mode' })
     $('openPlayer').onclick = () => sendCommand({ type: 'show-player' })
     volInput.addEventListener('input', () => sendCommand({ type: 'volume', value: Number(volInput.value) }))
     render()
@@ -367,6 +388,7 @@ export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserW
       theme: state.theme === 'light' ? 'light' : 'dark',
       lyricTextColor: typeof state.lyricTextColor === 'string' && state.lyricTextColor ? state.lyricTextColor : miniState.lyricTextColor,
       lyricControlColor: typeof state.lyricControlColor === 'string' && state.lyricControlColor ? state.lyricControlColor : miniState.lyricControlColor,
+    repeatMode: state.repeatMode === 'all' || state.repeatMode === 'one' || state.repeatMode === 'shuffle' ? state.repeatMode : miniState.repeatMode,
     }
     broadcast()
   })

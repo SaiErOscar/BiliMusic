@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePlayer, usePlayerProgress } from '@/contexts/PlayerContext'
 import { getLyricForTrack, LYRIC_OFFSET_CHANGED_EVENT } from '@/services/lyrics'
 import { useAppSettings } from '@/hooks/useAppSettings'
@@ -12,7 +12,7 @@ import type { MiniPlayerState, MiniCommand } from '@/types/electron'
  * - 实时推送完整播放状态（曲目/进度/音量/歌词行）给主进程，由主进程广播给桌面歌词窗
  *   说明：不再用定时节流，改为「每次关键状态变化即推送」（progress 由 audio timeupdate 驱动，
  *   约 250ms 一次），歌词高亮与播放/暂停切换即时同步
- * - 监听并处理小窗发来的音量 / 进度命令
+ * - 监听并处理小窗发来的音量 / 进度 / 播放顺序命令
  */
 export function useMiniWindowSync() {
   const player = usePlayer()
@@ -82,6 +82,7 @@ export function useMiniWindowSync() {
     theme,
     lyricTextColor: settings.lyricTextColor,
     lyricControlColor: settings.lyricControlColor,
+    repeatMode: player.repeatMode,
   }), [
     player.currentTrack,
     player.isPlaying,
@@ -94,6 +95,7 @@ export function useMiniWindowSync() {
     theme,
     settings.lyricTextColor,
     settings.lyricControlColor,
+    player.repeatMode,
   ])
 
   // 实时推送：每次 miniState 变化（progress/播放状态/歌词/主题/配色等）即发送给主进程
@@ -101,11 +103,21 @@ export function useMiniWindowSync() {
     window.electronAPI?.updateMiniPlayerState?.(miniState)
   }, [miniState])
 
-  // 处理小窗发来的音量 / 进度命令
+  // 命令回调闭包只注册一次，用 ref 持有最新 repeatMode，避免读到初始值
+  const repeatModeRef = useRef(player.repeatMode)
+  repeatModeRef.current = player.repeatMode
+
+  // 处理小窗发来的音量 / 进度 / 播放顺序命令
   useEffect(() => {
     return window.electronAPI?.onMiniPlayerCommand?.((cmd: MiniCommand) => {
       if (cmd.type === 'volume') player.setVolume(cmd.value)
       else if (cmd.type === 'seek') setProgress(cmd.value)
+      else if (cmd.type === 'cycle-repeat-mode') {
+        // 桌面歌词窗播放顺序按钮：none → all → one → shuffle → none（v1.3.2）
+        const order = ['none', 'all', 'one', 'shuffle'] as const
+        const idx = order.indexOf(repeatModeRef.current)
+        player.setRepeatMode(order[(idx + 1) % order.length])
+      }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

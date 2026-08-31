@@ -7,7 +7,7 @@
   <p>
     <a href="./README.en.md">English</a>
     ·
-    <a href="./docs/CHANGELOG.md">更新日志 v1.0.1 → v1.3.1</a>
+    <a href="./docs/CHANGELOG.md">更新日志 v1.0.1 → v1.3.2</a>
     ·
     <a href="#-快速开始">快速开始</a>
     ·
@@ -18,7 +18,7 @@
     <img alt="Electron" src="https://img.shields.io/badge/Electron-36-47848F?style=for-the-badge&logo=electron&logoColor=fff" />
     <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?style=for-the-badge&logo=vite&logoColor=fff" />
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=fff" />
-    <img alt="Version" src="https://img.shields.io/badge/version-1.3.1-30d158?style=for-the-badge" />
+    <img alt="Version" src="https://img.shields.io/badge/version-1.3.2-30d158?style=for-the-badge" />
   </p>
 </div>
 
@@ -246,6 +246,13 @@ npm run harmony:build    # 同步资源并尝试构建 HAP
 ```
 
 > 注意：hvigor 构建工具要求工程路径为纯英文，且命令行 hvigor 与 DevEco 6.1 SDK 存在元数据格式差异（`sdk-pkg.json` vs `uni-package.json`）。若命令行无法识别 SDK，请使用 DevEco Studio 打开 `platform/HarmonyOS` 手动构建（IDE 内 hvigor-support 与 SDK 版本匹配）。
+
+资源同步：`harmony:prepare` 会把渲染层 `dist/` 同步到 `web_engine/src/main/resources/rawfile`，把主进程 `dist-electron/` 同步到 `resfile`，由 `libadapter.so` 在运行时加载。
+
+鸿蒙端与桌面端的功能差异：
+
+- **更新**：鸿蒙端不提供应用内更新能力，设置页仅显示版本号，不显示「检查更新」按钮（版本更新走 HAP 应用分发）
+- **托盘**：仅提供状态栏图标，不提供托盘右键弹出小窗
 
 ## 项目结构
 

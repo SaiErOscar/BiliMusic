@@ -41,6 +41,8 @@ export default function Settings() {
   const [updateStatus, setUpdateStatus] = useState('')
   const [updateAction, setUpdateAction] = useState<'restart' | 'reload' | null>(null)
   const [cacheMsg, setCacheMsg] = useState('')
+  // 鸿蒙端不提供更新能力，仅展示版本号
+  const isHarmonyOS = window.electronAPI?.platform === 'openharmony'
 
   useEffect(() => {
     window.electronAPI?.getAppVersion?.()?.then((v) => {
@@ -279,11 +281,13 @@ export default function Settings() {
               <span className="settings-version">BiliMusic v{appVersion}</span>
             </SettingsRow>
             <div className="settings-actions">
-              <button type="button" onClick={checkUpdate}>
-                <SettingsIcon size={14} />
-                检查更新
-              </button>
-              {updateAction && (
+              {!isHarmonyOS && (
+                <button type="button" onClick={checkUpdate}>
+                  <SettingsIcon size={14} />
+                  检查更新
+                </button>
+              )}
+              {!isHarmonyOS && updateAction && (
                 <button type="button" onClick={runUpdateAction}>
                   <RefreshCw size={14} />
                   {updateAction === 'restart' ? '重启并安装' : '立即重载'}
