@@ -115,6 +115,9 @@ export interface MiniPlayerState {
   theme: 'light' | 'dark'
   lyricTextColor: string
   lyricControlColor: string
+  /** 桌面歌词字号/粗细（v1.3.6） */
+  lyricFontSize: number
+  lyricFontWeight: number
   /** 播放顺序（v1.3.2）：供桌面歌词窗播放顺序按钮展示当前模式 */
   repeatMode: 'none' | 'all' | 'one' | 'shuffle'
 }
@@ -130,6 +133,7 @@ export type MiniCommand =
   | { type: 'show-lyric-window' }
   | { type: 'close-lyric-window' }
   | { type: 'show-player' }
+  | { type: 'update-lyric-appearance'; lyricTextColor?: string; lyricControlColor?: string; lyricFontSize?: number; lyricFontWeight?: number }
 
 export interface WebdavConfigInput {
   url: string

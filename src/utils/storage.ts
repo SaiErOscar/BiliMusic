@@ -25,6 +25,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   showLyrics: true,
   lyricTextColor: '#ffffff',
   lyricControlColor: '#ff375f',
+  lyricFontSize: 30,
+  lyricFontWeight: 820,
 }
 
 function notifySettingsChanged() {

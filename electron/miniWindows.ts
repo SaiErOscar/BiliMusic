@@ -30,6 +30,8 @@ export interface MiniPlayerState {
   theme: 'light' | 'dark'
   lyricTextColor: string
   lyricControlColor: string
+  lyricFontSize: number
+  lyricFontWeight: number
   repeatMode: 'none' | 'all' | 'one' | 'shuffle'
 }
 
@@ -44,6 +46,7 @@ export type MiniCommand =
   | { type: 'show-lyric-window' }
   | { type: 'close-lyric-window' }
   | { type: 'show-player' }
+  | { type: 'update-lyric-appearance'; lyricTextColor?: string; lyricControlColor?: string; lyricFontSize?: number; lyricFontWeight?: number }
 
 const defaultState: MiniPlayerState = {
   hasTrack: false,
@@ -60,6 +63,8 @@ const defaultState: MiniPlayerState = {
   theme: 'dark',
   lyricTextColor: '#ffffff',
   lyricControlColor: '#ff375f',
+  lyricFontSize: 30,
+  lyricFontWeight: 820,
   repeatMode: 'none',
 }
 
@@ -116,7 +121,7 @@ function sendMainCommand(cmd: MiniCommand) {
     // 播放控制复用 tray 通道（主窗口 PlayerContext 已监听）
     // 注意：tray 命令为 'toggle-play'，mini 命令为 'toggle'，这里做映射避免播放/暂停失效
     main.webContents.send('tray:player-command', cmd.type === 'toggle' ? 'toggle-play' : cmd.type)
-  } else if (cmd.type === 'volume' || cmd.type === 'seek' || cmd.type === 'cycle-repeat-mode') {
+  } else if (cmd.type === 'volume' || cmd.type === 'seek' || cmd.type === 'cycle-repeat-mode' || cmd.type === 'update-lyric-appearance') {
     main.webContents.send('mini:player-command', cmd)
   } else if (cmd.type === 'show-window') {
     if (main.isMinimized()) main.restore()
@@ -147,6 +152,11 @@ function handleCommand(cmd: MiniCommand) {
       // 桌面歌词右上角 ✕：视为用户关闭（清除意图，退出播放页也不再恢复）
       lyricIntent = false
       applyLyricVisibility()
+      break
+    case 'update-lyric-appearance':
+      // 外观小面板即时修改：转发主窗口渲染层持久化到 AppSettings，
+      // 渲染层经 useMiniWindowSync 推回 mini:state 实现闭环即时生效
+      sendMainCommand(cmd)
       break
     case 'show-player': {
       // 弹出主窗口并通知渲染层打开当前歌曲播放页
@@ -180,7 +190,8 @@ function getLyricHtml() {
   body.light { color-scheme: light; }
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif; }
-  .wrap { display: flex; flex-direction: column; height: 100%; padding: 4px 14px; -webkit-app-region: drag; }
+  .wrap { display: flex; flex-direction: column; height: 100%; padding: 4px 14px; position: relative; -webkit-app-region: drag; }
+  .wrap button, .wrap input, #appearPanel { -webkit-app-region: no-drag; }
   .close {
     position: absolute; top: 6px; right: 8px; z-index: 10;
     width: 24px; height: 24px; border-radius: 50%;
@@ -193,7 +204,7 @@ function getLyricHtml() {
   body.light .close { background: rgba(0,0,0,.08); }
   body.light .close:hover { background: rgba(0,0,0,.16); }
   .lyric { flex: 1; display: grid; place-items: center; position: relative; }
-  .line { font-size: 30px; font-weight: 820; text-align: center; line-height: 1.35; color: var(--lyric-color); text-shadow: 0 2px 20px rgba(0,0,0,.5); opacity: 0; transform: translateY(8px); transition: opacity .45s ease, transform .45s ease; max-width: 100%; }
+  .line { font-size: var(--lyric-font-size, 30px); font-weight: var(--lyric-font-weight, 820); text-align: center; line-height: 1.35; color: var(--lyric-color); text-shadow: 0 2px 20px rgba(0,0,0,.5); opacity: 0; transform: translateY(8px); transition: opacity .45s ease, transform .45s ease; max-width: 100%; }
   .line.show { opacity: 1; transform: translateY(0); }
   .line.idle { opacity: .45; font-size: 22px; font-weight: 600; }
   .controls { display: flex; align-items: center; justify-content: center; gap: 14px; height: 44px; -webkit-app-region: no-drag; }
@@ -208,6 +219,22 @@ function getLyricHtml() {
   .btn.play { background: var(--ctrl-color); color: #fff; width: 40px; height: 40px; font-size: 17px; }
   .btn.play:hover { filter: brightness(1.08); }
   #repeat { position: relative; }
+  /* v1.3.6 外观设置小面板：齿轮按钮 + 浮层面板（覆盖歌词区显示，不改窗口尺寸） */
+  .btn.gear svg { width: 15px; height: 15px; }
+  #appearPanel {
+    display: none; position: absolute; left: 50%; transform: translateX(-50%); top: 6px;
+    z-index: 10; padding: 10px 14px; border-radius: 12px;
+    background: rgba(20, 20, 22, .92); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, .12); color: #eee;
+    font-size: 12px; line-height: 1.4; min-width: 250px;
+  }
+  body.light #appearPanel { background: rgba(250, 250, 252, .95); border-color: rgba(0, 0, 0, .1); color: #333; }
+  #appearPanel.open { display: block; }
+  #appearPanel .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 0; }
+  #appearPanel .row label { opacity: .8; white-space: nowrap; }
+  #appearPanel input[type="color"] { width: 32px; height: 22px; border: none; border-radius: 5px; background: none; cursor: pointer; padding: 0; }
+  #appearPanel input[type="range"] { width: 110px; accent-color: var(--ctrl-color); cursor: pointer; }
+  #appearPanel .val { width: 34px; text-align: right; opacity: .7; font-variant-numeric: tabular-nums; }
   #repeatBadge { position: absolute; top: -3px; right: -3px; min-width: 11px; height: 11px; border-radius: 6px; background: rgba(0,0,0,.75); color: #fff; font-size: 8px; font-weight: 700; line-height: 11px; text-align: center; padding: 0 2px; }
   .vol { display: flex; align-items: center; gap: 6px; color: var(--lyric-color); opacity: .75; }
   .vol svg { width: 15px; height: 15px; }
@@ -217,6 +244,13 @@ function getLyricHtml() {
 <body>
   <div class="wrap">
     <button class="close" id="closeBtn" title="关闭桌面歌词">✕</button>
+    <button class="btn gear" id="appearBtn" title="外观设置" style="position:absolute;top:6px;right:34px;width:24px;height:24px;font-size:13px;border-radius:7px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.61.67 1.05 1.51 1H21a2 2 0 0 1 0 4h-.09c-.84-.05-1.37.39-1.51 1z"/></svg></button>
+    <div id="appearPanel">
+      <div class="row"><label>文字颜色</label><input type="color" id="apTextColor" value="#ffffff" /></div>
+      <div class="row"><label>按钮颜色</label><input type="color" id="apCtrlColor" value="#ff375f" /></div>
+      <div class="row"><label>字号 <span class="val" id="apFontSizeVal">30</span></label><input type="range" id="apFontSize" min="18" max="60" step="1" value="30" /></div>
+      <div class="row"><label>粗细 <span class="val" id="apFontWeightVal">820</span></label><input type="range" id="apFontWeight" min="400" max="900" step="20" value="820" /></div>
+    </div>
     <div class="lyric">
       <div id="line" class="line idle">未在播放</div>
     </div>
@@ -234,7 +268,7 @@ function getLyricHtml() {
   </div>
   <script>
     const { onState, sendCommand } = window.miniAPI
-    let state = { hasTrack:false, title:'', artist:'', coverUrl:'', isPlaying:false, volume:80, isMuted:false, progress:0, duration:0, lyricLines:[], synced:false, theme:'dark', lyricTextColor:'#ffffff', lyricControlColor:'#ff375f', repeatMode:'none' }
+    let state = { hasTrack:false, title:'', artist:'', coverUrl:'', isPlaying:false, volume:80, isMuted:false, progress:0, duration:0, lyricLines:[], synced:false, theme:'dark', lyricTextColor:'#ffffff', lyricControlColor:'#ff375f', lyricFontSize:30, lyricFontWeight:820, repeatMode:'none' }
     const $ = (id) => document.getElementById(id)
     const volInput = $('volume')
     let lyricTimer = null
@@ -267,8 +301,15 @@ function getLyricHtml() {
       document.body.classList.toggle('light', (state.theme || 'dark') === 'light')
       // 应用用户自定义配色
       const root = document.documentElement
-      root.style.setProperty('--lyric-color', state.lyricTextColor || '#ffffff')
-      root.style.setProperty('--ctrl-color', state.lyricControlColor || '#ff375f')
+      // 面板拖动预览期间跳过回流覆盖（progress 推送约 250ms 一次，避免预览闪烁）
+      if (typeof apEditing === 'undefined' || !apEditing) {
+        root.style.setProperty('--lyric-color', state.lyricTextColor || '#ffffff')
+        root.style.setProperty('--ctrl-color', state.lyricControlColor || '#ff375f')
+        root.style.setProperty('--lyric-font-size', (state.lyricFontSize || 30) + 'px')
+        root.style.setProperty('--lyric-font-weight', String(state.lyricFontWeight || 820))
+      }
+      // 面板控件值跟随状态（用户未在拖动时才回写，避免输入中被重置）
+      syncPanelInputs()
       $('play').textContent = state.isPlaying ? '⏸' : '▶'
       $('play').disabled = $('prev').disabled = $('next').disabled = !state.hasTrack
       if (volInput.value !== String(state.volume)) volInput.value = state.volume
@@ -305,6 +346,55 @@ function getLyricHtml() {
     $('repeat').onclick = () => sendCommand({ type: 'cycle-repeat-mode' })
     $('openPlayer').onclick = () => sendCommand({ type: 'show-player' })
     volInput.addEventListener('input', () => sendCommand({ type: 'volume', value: Number(volInput.value) }))
+
+    // ===== v1.3.6 外观设置小面板 =====
+    const apPanel = $('appearPanel')
+    const apTextColor = $('apTextColor'), apCtrlColor = $('apCtrlColor')
+    const apFontSize = $('apFontSize'), apFontWeight = $('apFontWeight')
+    let apEditing = false  // 用户正在拖动面板控件时，状态回流不覆盖控件值
+
+    function syncPanelInputs() {
+      if (apEditing) return
+      if (apTextColor.value !== (state.lyricTextColor || '#ffffff')) apTextColor.value = state.lyricTextColor || '#ffffff'
+      if (apCtrlColor.value !== (state.lyricControlColor || '#ff375f')) apCtrlColor.value = state.lyricControlColor || '#ff375f'
+      if (Number(apFontSize.value) !== (state.lyricFontSize || 30)) apFontSize.value = state.lyricFontSize || 30
+      if (Number(apFontWeight.value) !== (state.lyricFontWeight || 820)) apFontWeight.value = state.lyricFontWeight || 820
+      $('apFontSizeVal').textContent = String(state.lyricFontSize || 30)
+      $('apFontWeightVal').textContent = String(state.lyricFontWeight || 820)
+    }
+
+    // 即时预览：直接改 CSS var（不等主进程回流），同时节流发送持久化命令
+    let apTimer = null
+    function pushAppearance() {
+      if (apTimer) clearTimeout(apTimer)
+      apTimer = setTimeout(() => {
+        sendCommand({ type: 'update-lyric-appearance',
+          lyricTextColor: apTextColor.value, lyricControlColor: apCtrlColor.value,
+          lyricFontSize: Number(apFontSize.value), lyricFontWeight: Number(apFontWeight.value) })
+      }, 300)
+    }
+    function applyAppearance() {
+      const root = document.documentElement
+      root.style.setProperty('--lyric-color', apTextColor.value)
+      root.style.setProperty('--ctrl-color', apCtrlColor.value)
+      root.style.setProperty('--lyric-font-size', apFontSize.value + 'px')
+      root.style.setProperty('--lyric-font-weight', apFontWeight.value)
+      $('apFontSizeVal').textContent = apFontSize.value
+      $('apFontWeightVal').textContent = apFontWeight.value
+      pushAppearance()
+    }
+    [apTextColor, apCtrlColor].forEach((el) => {
+      el.addEventListener('input', () => { apEditing = true; applyAppearance() })
+      el.addEventListener('change', () => { apEditing = false; applyAppearance() })
+    })
+    [apFontSize, apFontWeight].forEach((el) => {
+      el.addEventListener('pointerdown', () => { apEditing = true })
+      el.addEventListener('input', applyAppearance)
+      el.addEventListener('change', () => { apEditing = false })
+    })
+    // 打开/关闭面板；面板内点击不冒泡到窗口拖拽层
+    $('appearBtn').onclick = (e) => { e.stopPropagation(); apPanel.classList.toggle('open') }
+    apPanel.onclick = (e) => e.stopPropagation()
     render()
   </script>
 </body>
@@ -406,6 +496,8 @@ export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserW
       theme: state.theme === 'light' ? 'light' : 'dark',
       lyricTextColor: typeof state.lyricTextColor === 'string' && state.lyricTextColor ? state.lyricTextColor : miniState.lyricTextColor,
       lyricControlColor: typeof state.lyricControlColor === 'string' && state.lyricControlColor ? state.lyricControlColor : miniState.lyricControlColor,
+      lyricFontSize: Number.isFinite(state.lyricFontSize) ? state.lyricFontSize : miniState.lyricFontSize,
+      lyricFontWeight: Number.isFinite(state.lyricFontWeight) ? state.lyricFontWeight : miniState.lyricFontWeight,
     repeatMode: state.repeatMode === 'all' || state.repeatMode === 'one' || state.repeatMode === 'shuffle' ? state.repeatMode : miniState.repeatMode,
     }
     broadcast()

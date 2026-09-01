@@ -59,6 +59,9 @@ export interface AppSettings {
   // 桌面歌词配色（hex，如 #ffffff / #ff375f）
   lyricTextColor: string
   lyricControlColor: string
+  // 桌面歌词字号/粗细（v1.3.6 外观小面板）
+  lyricFontSize: number
+  lyricFontWeight: number
 }
 
 export type NavItem = {

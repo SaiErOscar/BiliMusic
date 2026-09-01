@@ -17,7 +17,7 @@ import type { MiniPlayerState, MiniCommand } from '@/types/electron'
 export function useMiniWindowSync() {
   const player = usePlayer()
   const { progress, duration, setProgress } = usePlayerProgress()
-  const { settings } = useAppSettings()
+  const { settings, setAppSettings } = useAppSettings()
   const [lyrics, setLyrics] = useState<{ lines: { time: number; text: string }[]; synced: boolean }>({
     lines: [],
     synced: false,
@@ -82,6 +82,8 @@ export function useMiniWindowSync() {
     theme,
     lyricTextColor: settings.lyricTextColor,
     lyricControlColor: settings.lyricControlColor,
+    lyricFontSize: settings.lyricFontSize,
+    lyricFontWeight: settings.lyricFontWeight,
     repeatMode: player.repeatMode,
   }), [
     player.currentTrack,
@@ -95,6 +97,8 @@ export function useMiniWindowSync() {
     theme,
     settings.lyricTextColor,
     settings.lyricControlColor,
+    settings.lyricFontSize,
+    settings.lyricFontWeight,
     player.repeatMode,
   ])
 
@@ -110,7 +114,16 @@ export function useMiniWindowSync() {
   // 处理小窗发来的音量 / 进度 / 播放顺序命令
   useEffect(() => {
     return window.electronAPI?.onMiniPlayerCommand?.((cmd: MiniCommand) => {
-      if (cmd.type === 'volume') player.setVolume(cmd.value)
+      if (cmd.type === 'update-lyric-appearance') {
+        // v1.3.6 桌面歌词窗外观小面板：持久化到 AppSettings，
+        // settings 变化经上方 miniState 推送回流歌词窗，形成即时生效闭环
+        const patch: { lyricTextColor?: string; lyricControlColor?: string; lyricFontSize?: number; lyricFontWeight?: number } = {}
+        if (typeof cmd.lyricTextColor === 'string') patch.lyricTextColor = cmd.lyricTextColor
+        if (typeof cmd.lyricControlColor === 'string') patch.lyricControlColor = cmd.lyricControlColor
+        if (Number.isFinite(cmd.lyricFontSize)) patch.lyricFontSize = cmd.lyricFontSize
+        if (Number.isFinite(cmd.lyricFontWeight)) patch.lyricFontWeight = cmd.lyricFontWeight
+        setAppSettings(patch)
+      } else if (cmd.type === 'volume') player.setVolume(cmd.value)
       else if (cmd.type === 'seek') setProgress(cmd.value)
       else if (cmd.type === 'cycle-repeat-mode') {
         // 桌面歌词窗播放顺序按钮：none → all → one → shuffle → none（v1.3.2）

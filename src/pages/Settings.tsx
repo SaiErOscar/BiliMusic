@@ -237,6 +237,14 @@ export default function Settings() {
             <SettingsRow label="歌词按钮颜色" description="桌面歌词的播放/上一首等按钮颜色">
               <input type="color" className="settings-color" value={settings.lyricControlColor} onChange={(e) => setAppSettings({ lyricControlColor: e.target.value })} />
             </SettingsRow>
+            <SettingsRow label="歌词字号" description="桌面歌词的文字大小（18-60px，桌面歌词窗内也可调）">
+              <input type="range" min={18} max={60} step={1} value={settings.lyricFontSize} onChange={(e) => setAppSettings({ lyricFontSize: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--accent, #ff375f)' }} />
+              <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontSize}</span>
+            </SettingsRow>
+            <SettingsRow label="歌词粗细" description="桌面歌词的文字粗细（400-900，桌面歌词窗内也可调）">
+              <input type="range" min={400} max={900} step={20} value={settings.lyricFontWeight} onChange={(e) => setAppSettings({ lyricFontWeight: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--accent, #ff375f)' }} />
+              <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontWeight}</span>
+            </SettingsRow>
           </SettingsGroup>
 
           <SettingsGroup title="歌单迁移" icon={<FileDown size={20} />}>
