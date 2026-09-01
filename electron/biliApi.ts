@@ -82,6 +82,38 @@ function sanitizeFilename(filename: string): string {
     .trim()
 }
 
+// ===== 子进程登记与退出清理 =====
+// 正常退出后偶发残留挂死进程（任务管理器内存 12~240KB）：
+// 退出路径未终止 ffmpeg/attrib 子进程，句柄互等待导致主进程无法落盘退出。
+// 所有 spawn 的子进程登记于此，will-quit 时统一 kill。
+const childProcesses = new Set<ReturnType<typeof spawn>>()
+
+/** 登记子进程：exit/close 时自动移除 */
+function trackChild(proc: ReturnType<typeof spawn>): ReturnType<typeof spawn> {
+  childProcesses.add(proc)
+  proc.once('close', () => childProcesses.delete(proc))
+  proc.once('error', () => childProcesses.delete(proc))
+  return proc
+}
+
+/** 终止全部存活子进程（退出清理用） */
+export function killAllChildren(): number {
+  let killed = 0
+  for (const proc of childProcesses) {
+    if (proc.exitCode === null && !proc.killed) {
+      try {
+        proc.kill()
+        killed += 1
+      } catch {
+        // 已死亡的进程 kill 可能抛错，忽略
+      }
+    }
+    childProcesses.delete(proc)
+  }
+  if (killed > 0) console.log(`[quit] 已终止 ${killed} 个存活子进程`)
+  return killed
+}
+
 // ===== 下载目录辅助 =====
 
 /** 默认下载目录 */
@@ -92,7 +124,7 @@ function defaultDownloadDir(): string {
 /** 设置 Windows 隐藏属性（attrib +h） */
 function setHiddenWindows(p: string): Promise<void> {
   return new Promise((resolve) => {
-    const proc = spawn('attrib', ['+h', p], { windowsHide: true })
+    const proc = trackChild(spawn('attrib', ['+h', p], { windowsHide: true }))
     proc.on('close', () => resolve())
     proc.on('error', () => resolve())
   })
@@ -125,7 +157,7 @@ async function markFolderPurpose(downloadDir: string, kind: 'video' | 'audio') {
 /** 运行 ffmpeg 命令，返回 Promise */
 function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(ffmpegPath, args, { windowsHide: true })
+    const proc = trackChild(spawn(ffmpegPath, args), { windowsHide: true })
     let stderr = ''
     proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
     proc.on('error', (err: Error) => {
@@ -168,9 +200,9 @@ function mergeWithFfmpegMeta(
       '-y',
       outputPath,
     ]
-    const proc = spawn(ffmpegPath, args, {
+    const proc = trackChild(spawn(ffmpegPath, args, {
       windowsHide: true,
-    })
+    }))
     let stderr = ''
     proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
     proc.on('error', (err: Error) => {
@@ -206,7 +238,7 @@ function mergeWithFfmpegDirectUrlMeta(
       '-y',
       outputPath,
     ]
-    const proc = spawn(ffmpegPath, args, { windowsHide: true })
+    const proc = trackChild(spawn(ffmpegPath, args), { windowsHide: true })
     let stderr = ''
     proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
     proc.on('error', (err: Error) => {

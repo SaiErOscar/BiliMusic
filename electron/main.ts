@@ -2,11 +2,11 @@ import { app, BrowserWindow, Tray, ipcMain, nativeImage, net, protocol, screen, 
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
-import { registerBiliApiHandlers } from './biliApi'
+import { registerBiliApiHandlers, killAllChildren } from './biliApi'
 import { registerLyricsApiHandlers } from './lyricsApi'
 import { initUpdates, getActiveRendererRoot } from './updater'
 import { registerWebdavHandlers } from './webdav'
-import { registerMiniWindowHandlers, onMainWindowActivityChanged } from './miniWindows'
+import { registerMiniWindowHandlers, onMainWindowActivityChanged, destroyLyricWindow } from './miniWindows'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -88,6 +88,8 @@ let trayWindow: BrowserWindow | null = null
 let trayWindowReady = false
 let pendingTrayShow: { x: number; y: number } | null = null
 let isQuitting = false
+let quitCleaned = false
+let forceExitTimer: ReturnType<typeof setTimeout> | null = null
 
 type TrayCommand = 'toggle-play' | 'next' | 'prev' | 'show-window' | 'quit'
 
@@ -680,4 +682,48 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (mainWindow === null) createWindow()
   else showMainWindow()
+})
+
+// 统一退出清理：无论从哪条路径退出（托盘 quit / app.quit / 系统关机），
+// 都在此兜底销毁全部窗口，防止窗口/定时器持有事件循环导致进程挂死。
+app.on('before-quit', () => {
+  if (quitCleaned) return
+  quitCleaned = true
+  console.log('[quit] before-quit：开始清理')
+  isQuitting = true
+  try {
+    destroyLyricWindow()
+    if (trayWindow && !trayWindow.isDestroyed()) {
+      trayWindow.destroy()
+      trayWindow = null
+      console.log('[quit] 托盘窗已销毁')
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      // destroy 绕过 close 拦截（主窗 close 默认进托盘），确保事件循环不再被窗口持有
+      mainWindow.destroy()
+      mainWindow = null
+      console.log('[quit] 主窗口已销毁')
+    }
+  } catch (err) {
+    console.log('[quit] 窗口清理异常：', err instanceof Error ? err.message : String(err))
+  }
+})
+
+// will-quit：终止存活子进程（ffmpeg/attrib），并设兜底强退计时器。
+// 正常情况下事件循环清空后进程自然退出；若 500ms 内仍未退出（挂死句柄），
+// app.exit(0) 强制落盘退出，消除僵尸残留。
+app.on('will-quit', (event) => {
+  console.log('[quit] will-quit：终止子进程')
+  try {
+    killAllChildren()
+  } catch (err) {
+    console.log('[quit] 子进程清理异常：', err instanceof Error ? err.message : String(err))
+  }
+  if (forceExitTimer) return
+  event.preventDefault()
+  forceExitTimer = setTimeout(() => {
+    console.log('[quit] 事件循环未自然退出，兜底 app.exit(0)')
+    app.exit(0)
+  }, 500)
+  // 窗口/子进程已清理完，若事件循环已空则会先于计时器触发自然退出
 })

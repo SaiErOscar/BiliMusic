@@ -371,6 +371,15 @@ export function toggleLyricWindow() {
   applyLyricVisibility()
 }
 
+/** 退出清理：销毁桌面歌词窗（destroy 绕过一切 close 拦截） */
+export function destroyLyricWindow() {
+  if (lyricWindow && !lyricWindow.isDestroyed()) {
+    lyricWindow.destroy()
+    console.log('[quit] 桌面歌词窗已销毁')
+  }
+  lyricWindow = null
+}
+
 /** 主窗口焦点/显隐变化时重新计算桌面歌词可见性 */
 export function onMainWindowActivityChanged() {
   applyLyricVisibility()
