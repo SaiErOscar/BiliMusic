@@ -1,7 +1,7 @@
 {
   "name": "bilimusic",
   "private": true,
-  "version": "1.3.6",
+  "version": "1.3.6-beta",
   "description": "BiliMusic - 基于 Bilibili 的桌面音乐播放器",
   "author": "SaiErOscar",
   "type": "module",
@@ -82,7 +82,9 @@
       "dist/**/*",
       "dist-electron/**/*",
       "node_modules/ffmpeg-static/**",
-      "node_modules/fluent-ffmpeg/**"
+      "node_modules/fluent-ffmpeg/**",
+      "!node_modules/@capacitor/**",
+      "!node_modules/@capacitor/android/capacitor/build/**"
     ],
     "win": {
       "target": "nsis",
@@ -130,7 +132,9 @@
     },
     "asarUnpack": [
       "node_modules/ffmpeg-static/**",
-      "node_modules/fluent-ffmpeg/**"
+      "node_modules/fluent-ffmpeg/**",
+      "!node_modules/@capacitor/**",
+      "!node_modules/@capacitor/android/capacitor/build/**"
     ]
   }
 }
