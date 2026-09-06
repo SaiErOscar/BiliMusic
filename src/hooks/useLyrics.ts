@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Track } from '@/types'
 import {
   getLyricForTrack,
-  searchLyricCandidates,
   chooseLyricCandidate,
   clearLyricCache,
   getLyricOffset,
@@ -46,7 +45,7 @@ export function useLyrics(track: Track | null, enabled: boolean) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, track?.id])
 
-  const search = useCallback((q: string): Promise<LyricCandidate[]> => searchLyricCandidates(q), [])
+  // v1.3.7：手动匹配改为抽屉内直接调 searchMultiSourceRound（多源+翻页），本 hook 不再提供单源 search
 
   const choose = useCallback(async (record: LyricCandidate) => {
     if (!track) return
@@ -96,5 +95,5 @@ export function useLyrics(track: Track | null, enabled: boolean) {
     }
   }, [track, result, offset])
 
-  return { status, result, search, choose, retry, offset, adjustOffset, resetOffset }
+  return { status, result, choose, retry, offset, adjustOffset, resetOffset }
 }

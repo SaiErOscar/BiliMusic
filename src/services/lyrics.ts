@@ -1,8 +1,11 @@
 /**
  * 歌词服务（渲染层）
  *
- * 数据源：OIAPI QQ Music Lyric。主进程负责跨域请求，本层负责：
+ * 自动匹配数据源：OIAPI QQ Music Lyric（不变）。主进程负责跨域请求，本层负责：
  * B站视频标题清洗 → 关键词候选 → QQ音乐候选评分 → LRC 解析 → 缓存 → 手动纠正。
+ *
+ * v1.3.7：手动匹配面板改为多源（QQ 音乐 + 网易云 + LRCLIB），结果合并去重并
+ * 标注来源，支持「加载更多」跨源翻页；自动匹配链路（getLyricForTrack）仍为 QQ 单源。
  */
 
 import type { Track } from '@/types'
@@ -23,9 +26,21 @@ export interface LyricResult {
   offset: number // 时间偏移（毫秒），正数=歌词延后，负数=歌词提前
 }
 
+/** v1.3.7 歌词候选来源 */
+export type LyricSource = 'qq' | 'netease' | 'lrclib'
+
+export const LYRIC_SOURCE_LABELS: Record<LyricSource, string> = {
+  qq: 'QQ',
+  netease: '网易',
+  lrclib: 'LRCLIB',
+}
+
 export interface LyricCandidate {
+  /** 全局唯一 id：带源前缀（qq: / ne: / lc:），避免跨源撞号 */
   id: string
+  /** 源内原始 id，取词接口用 */
   songId: string | number
+  source: LyricSource
   mid: string
   trackName: string
   artistName: string
@@ -35,21 +50,32 @@ export interface LyricCandidate {
 }
 
 type RawOiapiSong = Awaited<ReturnType<NonNullable<typeof window.electronAPI>['lyricsApi']['search']>>[number]
+type RawNeteaseSong = Awaited<ReturnType<NonNullable<typeof window.electronAPI>['lyricsApi']['searchNetease']>>[number]
+type RawLrclibSong = Awaited<ReturnType<NonNullable<typeof window.electronAPI>['lyricsApi']['searchLrclib']>>[number]
 
 function bridge() {
   return typeof window !== 'undefined' ? window.electronAPI?.lyricsApi : undefined
 }
 
-// OIAPI 歌词接口（与主进程 electron/lyricsApi.ts 保持一致）
+// 各源接口地址（与主进程 electron/lyricsApi.ts 保持一致）
 const OIAPI_QQ_LYRIC = 'https://www.oiapi.net/api/QQMusicLyric'
+const NETEASE_SEARCH = 'https://music.163.com/api/search/get'
+const NETEASE_LYRIC = 'https://music.163.com/api/song/lyric'
+const LRCLIB_GET = 'https://lrclib.net/api/get'
+// 网易云对裸 UA 请求易触发风控；LRCLIB 开放 CORS（ACAO:*），移动端可直连
+const NETEASE_REQ_HEADERS: Record<string, string> = {
+  Referer: 'https://music.163.com/',
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+}
 
-async function oiSearch(keyword: string, limit = 10): Promise<LyricCandidate[]> {
+async function oiSearch(keyword: string, limit = 10, page = 1): Promise<LyricCandidate[]> {
   const api = bridge()
   if (!api) {
     // 移动端回退：httpRequest 直连 OIAPI（CapacitorHttp 无 CORS 限制）
     try {
       const json = await httpRequest<{ code: number; data?: RawOiapiSong[] }>(OIAPI_QQ_LYRIC, {
-        params: { keyword, page: 1, limit, type: 'json' },
+        params: { keyword, page, limit, type: 'json' },
       })
       const rows = json?.data
       if (!Array.isArray(rows)) return []
@@ -59,11 +85,109 @@ async function oiSearch(keyword: string, limit = 10): Promise<LyricCandidate[]> 
     }
   }
   try {
-    const rows = await api.search(keyword, 1, limit)
+    const rows = await api.search(keyword, page, limit)
     return rows.map(normalizeCandidate).filter(Boolean) as LyricCandidate[]
   } catch {
     return []
   }
+}
+
+async function neteaseSearch(keyword: string, offset = 0, limit = 20): Promise<LyricCandidate[]> {
+  const api = bridge()
+  if (!api) {
+    // 移动端：CapacitorHttp 无 CORS，带 Referer/UA 防风控
+    try {
+      const json = await httpRequest<{ result?: { songs?: RawNeteaseSong[] } }>(NETEASE_SEARCH, {
+        params: { s: keyword, type: 1, offset, limit },
+        headers: NETEASE_REQ_HEADERS,
+        credentials: 'omit',
+      })
+      const rows = json?.result?.songs
+      if (!Array.isArray(rows)) return []
+      return rows.map(normalizeNetease).filter(Boolean) as LyricCandidate[]
+    } catch {
+      return []
+    }
+  }
+  try {
+    const rows = await api.searchNetease(keyword, offset, limit)
+    return rows.map(normalizeNetease).filter(Boolean) as LyricCandidate[]
+  } catch {
+    return []
+  }
+}
+
+async function lrclibSearch(keyword: string): Promise<LyricCandidate[]> {
+  const api = bridge()
+  if (!api) {
+    try {
+      // LRCLIB ACAO:*，移动端直连
+      const rows = await httpRequest<RawLrclibSong[]>('https://lrclib.net/api/search', {
+        params: { q: keyword },
+        credentials: 'omit',
+      })
+      if (!Array.isArray(rows)) return []
+      return rows.map(normalizeLrclib).filter(Boolean) as LyricCandidate[]
+    } catch {
+      return []
+    }
+  }
+  try {
+    const rows = await api.searchLrclib(keyword)
+    return rows.map(normalizeLrclib).filter(Boolean) as LyricCandidate[]
+  } catch {
+    return []
+  }
+}
+
+async function neteaseGetLyric(id: string | number): Promise<string> {
+  const api = bridge()
+  if (!api) {
+    try {
+      const json = await httpRequest<{ lrc?: { lyric?: string } }>(NETEASE_LYRIC, {
+        params: { id: String(id), lv: -1, kv: -1, tv: -1 },
+        headers: NETEASE_REQ_HEADERS,
+        credentials: 'omit',
+      })
+      return json?.lrc?.lyric || ''
+    } catch {
+      return ''
+    }
+  }
+  try {
+    const data = await api.getNetease(id)
+    return data?.content || data?.conteng || ''
+  } catch {
+    return ''
+  }
+}
+
+async function lrclibGetLyric(id: string | number): Promise<string> {
+  const api = bridge()
+  if (!api) {
+    try {
+      const json = await httpRequest<{ syncedLyrics?: string | null; plainLyrics?: string | null }>(
+        `${LRCLIB_GET}/${encodeURIComponent(String(id))}`,
+        { credentials: 'omit' },
+      )
+      return (json?.syncedLyrics && json.syncedLyrics.trim()) ? json.syncedLyrics : (json?.plainLyrics || '')
+    } catch {
+      return ''
+    }
+  }
+  try {
+    const data = await api.getLrclib(id)
+    return data?.content || data?.conteng || ''
+  } catch {
+    return ''
+  }
+}
+
+/** 按候选来源分发到对应取词接口（v1.3.7 多源） */
+async function getLyricContent(candidate: LyricCandidate): Promise<string> {
+  if (candidate.source === 'netease') return neteaseGetLyric(candidate.songId)
+  if (candidate.source === 'lrclib') return lrclibGetLyric(candidate.songId)
+  return oiGetLyric(candidate.songId)
 }
 
 async function oiGetLyric(id: string | number): Promise<string> {
@@ -91,17 +215,51 @@ async function oiGetLyric(id: string | number): Promise<string> {
   }
 }
 
-function normalizeCandidate(item: RawOiapiSong): LyricCandidate | null {
+export function normalizeCandidate(item: RawOiapiSong): LyricCandidate | null {
   if (!item?.name || !item.id) return null
   return {
-    id: String(item.id),
+    id: `qq:${item.id}`,
     songId: item.id,
+    source: 'qq',
     mid: item.mid || '',
     trackName: item.name || '',
     artistName: Array.isArray(item.singer) ? item.singer.join(' / ') : '',
     albumName: item.album || '',
     duration: Number(item.duration) || 0,
     image: item.image || '',
+  }
+}
+
+/** 网易云 duration 为毫秒，统一折算成秒 */
+export function normalizeNetease(item: RawNeteaseSong): LyricCandidate | null {
+  if (!item?.name || item.id == null) return null
+  return {
+    id: `ne:${item.id}`,
+    songId: item.id,
+    source: 'netease',
+    mid: '',
+    trackName: item.name || '',
+    artistName: Array.isArray(item.artists)
+      ? item.artists.map(a => a?.name || '').filter(Boolean).join(' / ')
+      : '',
+    albumName: item.album?.name || '',
+    duration: Math.round((Number(item.duration) || 0) / 1000),
+    image: '',
+  }
+}
+
+export function normalizeLrclib(item: RawLrclibSong): LyricCandidate | null {
+  if (!item?.trackName || item.id == null) return null
+  return {
+    id: `lc:${item.id}`,
+    songId: item.id,
+    source: 'lrclib',
+    mid: '',
+    trackName: item.trackName || '',
+    artistName: item.artistName || '',
+    albumName: item.albumName || '',
+    duration: Math.round(Number(item.duration) || 0),
+    image: '',
   }
 }
 
@@ -437,14 +595,70 @@ export async function getLyricForTrack(track: Track): Promise<LyricResult | null
   return applyLyricOffset(result, track.id)
 }
 
-export async function searchLyricCandidates(query: string): Promise<LyricCandidate[]> {
+/** v1.3.7 多源分页状态：QQ 按页码，网易按 offset，LRCLIB 一次性 */
+export interface MultiSourceState {
+  qqPage: number
+  neteaseOffset: number
+  lrclibDone: boolean
+}
+
+export const MULTI_PAGE_SIZE = 20
+
+export function initialMultiSourceState(): MultiSourceState {
+  return { qqPage: 1, neteaseOffset: 0, lrclibDone: false }
+}
+
+/**
+ * 合并去重：按「歌名+歌手」归一化为键，先到先得。
+ * 传入顺序即优先级（QQ → 网易 → LRCLIB），existing 在前保证已展示项稳定。
+ */
+export function mergeDedup(existing: LyricCandidate[], incoming: LyricCandidate[]): LyricCandidate[] {
+  const out: LyricCandidate[] = []
+  const seen = new Set<string>()
+  for (const list of [existing, incoming]) {
+    for (const c of list) {
+      const key = `${norm(c.trackName)}|${norm(c.artistName)}`
+      if (seen.has(key) || seen.has(c.id)) continue
+      seen.add(key)
+      seen.add(c.id)
+      out.push(c)
+    }
+  }
+  return out
+}
+
+/**
+ * 多源搜索一轮（首搜或加载更多）。三源并发，任一源失败不影响其余。
+ * 返回去重后完整列表 + 下一页状态 + 是否还有更多。
+ */
+export async function searchMultiSourceRound(
+  query: string,
+  existing: LyricCandidate[],
+  state: MultiSourceState,
+  size = MULTI_PAGE_SIZE,
+): Promise<{ candidates: LyricCandidate[]; state: MultiSourceState; hasMore: boolean }> {
   const q = cleanTitle(query.trim())
-  if (!q) return []
-  return oiSearch(q, 20)
+  if (!q) return { candidates: existing, state, hasMore: false }
+
+  const [qqRows, neRows, lcRows] = await Promise.all([
+    oiSearch(q, size, state.qqPage),
+    neteaseSearch(q, state.neteaseOffset, size),
+    state.lrclibDone ? Promise.resolve([] as LyricCandidate[]) : lrclibSearch(q),
+  ])
+
+  const nextState: MultiSourceState = {
+    qqPage: state.qqPage + 1,
+    neteaseOffset: state.neteaseOffset + size,
+    lrclibDone: true,
+  }
+  const merged = mergeDedup(existing, [...qqRows, ...neRows, ...lcRows])
+  // 任一可翻页源返回满页则视为可能还有更多（LRCLIB 只一批）
+  const hasMore = qqRows.length >= size || neRows.length >= size
+  return { candidates: merged, state: nextState, hasMore }
 }
 
 export async function chooseLyricCandidate(trackId: string, record: LyricCandidate): Promise<LyricResult | null> {
-  const content = await oiGetLyric(record.songId)
+  const content = await getLyricContent(record)
   const result = lyricToResult(record, content)
   if (result) cacheOk(trackId, result)
   return result ? applyLyricOffset(result, trackId) : null

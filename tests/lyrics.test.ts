@@ -1,5 +1,93 @@
 import { describe, it, expect } from 'vitest'
-import { parseLrc, cleanTitle, dice } from '../src/services/lyrics'
+import {
+  parseLrc,
+  cleanTitle,
+  dice,
+  mergeDedup,
+  normalizeCandidate,
+  normalizeNetease,
+  normalizeLrclib,
+  type LyricCandidate,
+} from '../src/services/lyrics'
+
+// 构造一个完整的 LyricCandidate，用于 mergeDedup 测试
+function cand(over: Partial<LyricCandidate>): LyricCandidate {
+  return {
+    id: over.id || 'qq:0',
+    songId: over.songId ?? 0,
+    source: over.source || 'qq',
+    mid: over.mid || '',
+    trackName: over.trackName || '',
+    artistName: over.artistName || '',
+    albumName: over.albumName || '',
+    duration: over.duration || 0,
+    image: over.image || '',
+  }
+}
+
+describe('normalizeCandidate 源前缀 id', () => {
+  it('QQ 候选 id 带 qq: 前缀', () => {
+    const c = normalizeCandidate({ name: '告白', singer: ['沈以诚'], album: '告白', mid: 'abc', id: 123, album_mid: '', duration: 258, image: '' } as any)
+    expect(c).not.toBeNull()
+    expect(c!.id).toBe('qq:123')
+    expect(c!.songId).toBe(123)
+    expect(c!.source).toBe('qq')
+    expect(c!.artistName).toBe('沈以诚')
+  })
+
+  it('网易云候选 id 带 ne: 前缀且毫秒时长折算为秒', () => {
+    const c = normalizeNetease({ name: '告白', id: 1336856449, artists: [{ name: '沈以诚' }], album: { name: '告白' }, duration: 258000 } as any)
+    expect(c!.id).toBe('ne:1336856449')
+    expect(c!.source).toBe('netease')
+    expect(c!.duration).toBe(258)
+  })
+
+  it('LRCLIB 候选 id 带 lc: 前缀', () => {
+    const c = normalizeLrclib({ id: 34556231, trackName: '告白', artistName: '沈以诚', albumName: '告白', duration: 258 } as any)
+    expect(c!.id).toBe('lc:34556231')
+    expect(c!.source).toBe('lrclib')
+  })
+
+  it('缺字段的行返回 null', () => {
+    expect(normalizeCandidate({ name: '', id: 1 } as any)).toBeNull()
+    expect(normalizeNetease({ name: 'x', id: null } as any)).toBeNull()
+    expect(normalizeLrclib({ id: 1, trackName: '' } as any)).toBeNull()
+  })
+})
+
+describe('mergeDedup 跨源去重', () => {
+  it('同名同艺人的跨源候选只保留先到者（QQ 优先）', () => {
+    const qq = cand({ id: 'qq:1', source: 'qq', trackName: '告白', artistName: '沈以诚' })
+    const ne = cand({ id: 'ne:2', source: 'netease', trackName: '告白', artistName: '沈以诚' })
+    const merged = mergeDedup([qq], [ne])
+    expect(merged).toHaveLength(1)
+    expect(merged[0].id).toBe('qq:1')
+  })
+
+  it('同名不同艺人保留为两条', () => {
+    const a = cand({ id: 'qq:1', trackName: '告白', artistName: '沈以诚' })
+    const b = cand({ id: 'ne:2', source: 'netease', trackName: '告白', artistName: '吴雨霏' })
+    const merged = mergeDedup([a], [b])
+    expect(merged.map(m => m.id)).toEqual(['qq:1', 'ne:2'])
+  })
+
+  it('标点与大小写差异视为同一歌名（归一化去重）', () => {
+    const a = cand({ id: 'qq:1', trackName: '告白气球', artistName: '周杰伦' })
+    const b = cand({ id: 'ne:2', source: 'netease', trackName: '告白 气球', artistName: '周杰伦' })
+    const merged = mergeDedup([a], [b])
+    expect(merged).toHaveLength(1)
+  })
+
+  it('existing 已展示项在追加时保持稳定且不被新结果重复', () => {
+    const existing = [cand({ id: 'qq:1', trackName: 'A', artistName: 'X' })]
+    const incoming = [
+      cand({ id: 'qq:1', trackName: 'A', artistName: 'X' }), // 与已展示完全重复
+      cand({ id: 'ne:9', source: 'netease', trackName: 'B', artistName: 'Y' }),
+    ]
+    const merged = mergeDedup(existing, incoming)
+    expect(merged.map(m => m.id)).toEqual(['qq:1', 'ne:9'])
+  })
+})
 
 describe('parseLrc', () => {
   it('应解析标准 LRC 时间标签', () => {

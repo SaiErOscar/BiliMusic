@@ -14,7 +14,13 @@ import { useLyrics } from '@/hooks/useLyrics'
 import { useDesktopLyricVisible } from '@/hooks/useDesktopLyric'
 import PlayerSlider from '@/components/PlayerSlider'
 import LyricsView from '@/components/LyricsView'
-import type { LyricCandidate } from '@/services/lyrics'
+import {
+  searchMultiSourceRound,
+  initialMultiSourceState,
+  LYRIC_SOURCE_LABELS,
+  type LyricCandidate,
+  type MultiSourceState,
+} from '@/services/lyrics'
 import { getVideoComments, type VideoComment } from '@/services/api'
 
 const sliderTheme = {
@@ -567,12 +573,18 @@ function LyricsPanel({
   onSeek: (t: number) => void
   currentTime: number
 }) {
-  const { status, result, search, choose, retry, offset, adjustOffset, resetOffset } = lyrics
+  const { status, result, choose, retry, offset, adjustOffset, resetOffset } = lyrics
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<LyricCandidate[]>([])
   const [searching, setSearching] = useState(false)
   const [choosingId, setChoosingId] = useState<string | null>(null)
+  // v1.3.7：多源合并去重 + 加载更多（各源翻页游标）
+  const [pageState, setPageState] = useState<MultiSourceState>(initialMultiSourceState)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  // 搜索序号：防止快速连点/重开后过期请求回写
+  const searchSeqRef = useRef(0)
   const { visible: desktopLyricVisible, suppressed: desktopLyricSuppressed, toggle: toggleDesktopLyric } = useDesktopLyricVisible()
 
   // v1.3.1：播放页内切换桌面歌词的小提示（顶部悬浮 3 秒，不干扰体验）
@@ -598,19 +610,42 @@ function LyricsPanel({
     toggleDesktopLyric()
   }
 
-  const openSearch = () => {
-    setQuery(`${track.title} ${track.artist}`.trim())
-    setResults([])
-    setSearchOpen(true)
+  /** 跑一轮多源搜索（fresh=首搜重置游标；否则在已展示结果上追加下一页） */
+  const runRound = async (q: string, fresh: boolean) => {
+    if (!q.trim()) return
+    const seq = ++searchSeqRef.current
+    const baseState = fresh ? initialMultiSourceState() : pageState
+    const baseList = fresh ? [] : results
+    if (fresh) setSearching(true)
+    else setLoadingMore(true)
+    try {
+      const round = await searchMultiSourceRound(q, baseList, baseState)
+      if (seq !== searchSeqRef.current) return
+      setResults(round.candidates)
+      setPageState(round.state)
+      setHasMore(round.hasMore)
+    } finally {
+      if (seq === searchSeqRef.current) {
+        if (fresh) setSearching(false)
+        else setLoadingMore(false)
+      }
+    }
   }
 
-  const doSearch = async () => {
-    if (!query.trim()) return
-    setSearching(true)
-    const r = await search(query)
-    setResults(r)
-    setSearching(false)
+  const openSearch = () => {
+    const q = `${track.title} ${track.artist}`.trim()
+    setQuery(q)
+    setResults([])
+    setPageState(initialMultiSourceState())
+    setHasMore(false)
+    setSearchOpen(true)
+    // 打开即自动三源并发首搜，省去重复点搜索
+    runRound(q, true)
   }
+
+  const doSearch = () => runRound(query, true)
+
+  const loadMore = () => runRound(query, false)
 
   const pick = async (record: LyricCandidate) => {
     setChoosingId(record.id)
@@ -704,16 +739,31 @@ function LyricsPanel({
               </button>
             </div>
             <div className="lyrics-drawer__list">
-              {results.length === 0 && !searching && <div className="lyrics-drawer__empty">输入歌名或歌手后搜索</div>}
+              {results.length === 0 && !searching && (
+                <div className="lyrics-drawer__empty">{query.trim() ? '未找到相关歌曲，可换个关键词试试' : '输入歌名或歌手后搜索'}</div>
+              )}
               {results.map((r) => (
                 <button key={r.id} type="button" className="lyrics-candidate" onClick={() => pick(r)} disabled={choosingId === r.id}>
                   <span>
-                    <strong>{r.trackName}</strong>
-                    <small>{r.artistName} · {r.albumName || 'QQ Music'} · {formatTime(r.duration)}</small>
+                    <strong>
+                      {r.trackName}
+                      <em className={`lyrics-drawer__source is-${r.source}`}>{LYRIC_SOURCE_LABELS[r.source]}</em>
+                    </strong>
+                    <small>{r.artistName} · {r.albumName || '—'} · {formatTime(r.duration)}</small>
                   </span>
                   {choosingId === r.id ? <Loader2 size={16} className="spin" /> : <span>选择</span>}
                 </button>
               ))}
+              {results.length > 0 && (
+                hasMore ? (
+                  <button type="button" className="lyrics-drawer__more" onClick={loadMore} disabled={loadingMore || searching}>
+                    {loadingMore ? <Loader2 size={14} className="spin" /> : <ChevronDown size={14} />}
+                    {loadingMore ? '加载中...' : '加载更多'}
+                  </button>
+                ) : (
+                  <div className="lyrics-drawer__more is-end">没有更多结果了</div>
+                )
+              )}
             </div>
             <button type="button" className="lyrics-drawer__retry" onClick={() => { retry(); setSearchOpen(false) }}>
               重新自动匹配

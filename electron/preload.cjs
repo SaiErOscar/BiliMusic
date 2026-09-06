@@ -63,6 +63,18 @@ const lyricsApi = {
   // 获取指定歌曲的 LRC 歌词
   get: (id, format) =>
     ipcRenderer.invoke('lyrics:get', id, format),
+
+  // v1.3.7 手动匹配多源：网易云（offset 翻页）
+  searchNetease: (keyword, offset, limit) =>
+    ipcRenderer.invoke('lyrics:search-netease', keyword, offset, limit),
+  getNetease: (id) =>
+    ipcRenderer.invoke('lyrics:get-netease', id),
+
+  // v1.3.7 手动匹配多源：LRCLIB（不支持翻页）
+  searchLrclib: (keyword) =>
+    ipcRenderer.invoke('lyrics:search-lrclib', keyword),
+  getLrclib: (id) =>
+    ipcRenderer.invoke('lyrics:get-lrclib', id),
 }
 
 const persistentStorage = {

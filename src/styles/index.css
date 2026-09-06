@@ -2433,6 +2433,70 @@ body {
   font-weight: 850;
 }
 
+/* v1.3.7：候选来源小徽章（QQ/网易/LRCLIB），跟随主题色 */
+.lyrics-drawer__source {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  font-style: normal;
+  vertical-align: middle;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.lyrics-drawer__source.is-qq {
+  color: #3ec7a3;
+  background: rgba(62, 199, 163, 0.16);
+}
+
+.lyrics-drawer__source.is-netease {
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.16);
+}
+
+.lyrics-drawer__source.is-lrclib {
+  color: #6aa9ff;
+  background: rgba(106, 169, 255, 0.16);
+}
+
+/* v1.3.7：列表底部「加载更多」按钮 / 到底提示 */
+.lyrics-drawer__more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  margin-top: 4px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+
+.lyrics-drawer__more:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.lyrics-drawer__more:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.lyrics-drawer__more.is-end {
+  background: none;
+  color: rgba(255, 255, 255, 0.38);
+  font-weight: 600;
+  cursor: default;
+}
+
 .lyrics-drawer__retry {
   min-height: 36px;
   margin-top: 12px;

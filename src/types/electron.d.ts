@@ -67,9 +67,34 @@ export interface OiapiLyricData {
   cache?: boolean
 }
 
+/** v1.3.7 网易云搜索行（duration 为毫秒） */
+export interface NeteaseSong {
+  name: string
+  id: string | number
+  artists?: { name?: string }[]
+  album?: { name?: string }
+  duration?: number
+}
+
+/** v1.3.7 LRCLIB 搜索行（列表接口不带歌词正文） */
+export interface LrclibSong {
+  id: string | number
+  trackName: string
+  artistName?: string
+  albumName?: string
+  duration?: number
+  instrumental?: boolean
+}
+
 interface LyricsApi {
   search: (keyword: string, page?: number, limit?: number) => Promise<OiapiSong[]>
   get: (id: string | number, format?: 'lrc' | 'qrc' | 'ksc') => Promise<OiapiLyricData | null>
+  /** v1.3.7 手动匹配多源：网易云（offset 翻页） */
+  searchNetease: (keyword: string, offset?: number, limit?: number) => Promise<NeteaseSong[]>
+  getNetease: (id: string | number) => Promise<OiapiLyricData | null>
+  /** v1.3.7 手动匹配多源：LRCLIB（不支持翻页，失败返回空数组） */
+  searchLrclib: (keyword: string) => Promise<LrclibSong[]>
+  getLrclib: (id: string | number) => Promise<OiapiLyricData | null>
 }
 
 interface PersistentStorageApi {
