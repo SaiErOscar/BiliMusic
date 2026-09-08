@@ -177,6 +177,7 @@ export default function PlayerBar() {
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
+                    fontFamily: 'var(--app-title-font, inherit)',
                   }}
                 >
                   {player.currentTrack.title}
@@ -193,6 +194,7 @@ export default function PlayerBar() {
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
+                    fontFamily: 'var(--app-title-font, inherit)',
                   }}
                 >
                   {player.currentTrack.artist}

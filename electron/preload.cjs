@@ -134,6 +134,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   setNowPlayingOpen: (open) => ipcRenderer.send('mini:set-now-playing', Boolean(open)),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
+  // v1.3.8 枚举系统字体（主进程按平台分发）
+  listSystemFonts: () => ipcRenderer.invoke('system-fonts:list'),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   checkForUpdate: () => ipcRenderer.invoke('updater:check'),
   quitAndInstall: () => ipcRenderer.send('updater:quit-and-install'),

@@ -27,6 +27,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   lyricControlColor: '#ff375f',
   lyricFontSize: 30,
   lyricFontWeight: 820,
+  // v1.3.8 三面板字体默认 system-ui（与原样式一致）
+  lyricFontFamily: 'system-ui',
+  titleFontFamily: 'system-ui',
+  playerLyricFontFamily: 'system-ui',
 }
 
 function notifySettingsChanged() {

@@ -32,6 +32,7 @@ export interface MiniPlayerState {
   lyricControlColor: string
   lyricFontSize: number
   lyricFontWeight: number
+  lyricFontFamily: string
   repeatMode: 'none' | 'all' | 'one' | 'shuffle'
 }
 
@@ -46,7 +47,7 @@ export type MiniCommand =
   | { type: 'show-lyric-window' }
   | { type: 'close-lyric-window' }
   | { type: 'show-player' }
-  | { type: 'update-lyric-appearance'; lyricTextColor?: string; lyricControlColor?: string; lyricFontSize?: number; lyricFontWeight?: number }
+  | { type: 'update-lyric-appearance'; lyricTextColor?: string; lyricControlColor?: string; lyricFontSize?: number; lyricFontWeight?: number; lyricFontFamily?: string }
 
 const defaultState: MiniPlayerState = {
   hasTrack: false,
@@ -65,6 +66,7 @@ const defaultState: MiniPlayerState = {
   lyricControlColor: '#ff375f',
   lyricFontSize: 30,
   lyricFontWeight: 820,
+  lyricFontFamily: 'system-ui',
   repeatMode: 'none',
 }
 
@@ -204,7 +206,7 @@ function getLyricHtml() {
   body.light .close { background: rgba(0,0,0,.08); }
   body.light .close:hover { background: rgba(0,0,0,.16); }
   .lyric { flex: 1; display: grid; place-items: center; position: relative; }
-  .line { font-size: var(--lyric-font-size, 30px); font-weight: var(--lyric-font-weight, 820); text-align: center; line-height: 1.35; color: var(--lyric-color); text-shadow: 0 2px 20px rgba(0,0,0,.5); opacity: 0; transform: translateY(8px); transition: opacity .45s ease, transform .45s ease; max-width: 100%; }
+  .line { font-family: var(--lyric-font-family, -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif); font-size: var(--lyric-font-size, 30px); font-weight: var(--lyric-font-weight, 820); text-align: center; line-height: 1.35; color: var(--lyric-color); text-shadow: 0 2px 20px rgba(0,0,0,.5); opacity: 0; transform: translateY(8px); transition: opacity .45s ease, transform .45s ease; max-width: 100%; }
   .line.show { opacity: 1; transform: translateY(0); }
   .line.idle { opacity: .45; font-size: 22px; font-weight: 600; }
   .controls { display: flex; align-items: center; justify-content: center; gap: 14px; height: 44px; -webkit-app-region: no-drag; }
@@ -221,6 +223,8 @@ function getLyricHtml() {
   #repeat { position: relative; }
   /* v1.3.6 外观设置小面板：齿轮按钮 + 浮层面板（覆盖歌词区显示，不改窗口尺寸） */
   .btn.gear svg { width: 15px; height: 15px; }
+  /* v1.3.8 修复：齿轮与关闭按钮同处歌词层(.lyric)上方，需显式 z-index 否则被 .lyric 的 drag 区吞掉点击（close 已自带 z-index:10 故此前可点） */
+  #appearBtn { z-index: 11; cursor: pointer; }
   #appearPanel {
     display: none; position: absolute; left: 50%; transform: translateX(-50%); top: 6px;
     z-index: 10; padding: 10px 14px; border-radius: 12px;
@@ -234,6 +238,7 @@ function getLyricHtml() {
   #appearPanel .row label { opacity: .8; white-space: nowrap; }
   #appearPanel input[type="color"] { width: 32px; height: 22px; border: none; border-radius: 5px; background: none; cursor: pointer; padding: 0; }
   #appearPanel input[type="range"] { width: 110px; accent-color: var(--ctrl-color); cursor: pointer; }
+  #appearPanel select { width: 150px; max-width: 150px; font-size: 12px; padding: 2px 4px; border-radius: 6px; background: rgba(255,255,255,.1); color: inherit; border: 1px solid rgba(255,255,255,.18); cursor: pointer; }
   #appearPanel .val { width: 34px; text-align: right; opacity: .7; font-variant-numeric: tabular-nums; }
   #repeatBadge { position: absolute; top: -3px; right: -3px; min-width: 11px; height: 11px; border-radius: 6px; background: rgba(0,0,0,.75); color: #fff; font-size: 8px; font-weight: 700; line-height: 11px; text-align: center; padding: 0 2px; }
   .vol { display: flex; align-items: center; gap: 6px; color: var(--lyric-color); opacity: .75; }
@@ -250,6 +255,7 @@ function getLyricHtml() {
       <div class="row"><label>按钮颜色</label><input type="color" id="apCtrlColor" value="#ff375f" /></div>
       <div class="row"><label>字号 <span class="val" id="apFontSizeVal">30</span></label><input type="range" id="apFontSize" min="18" max="60" step="1" value="30" /></div>
       <div class="row"><label>粗细 <span class="val" id="apFontWeightVal">820</span></label><input type="range" id="apFontWeight" min="400" max="900" step="20" value="820" /></div>
+      <div class="row"><label>字体</label><select id="apFontFamily"><option value="system-ui">默认（跟随系统）</option></select></div>
     </div>
     <div class="lyric">
       <div id="line" class="line idle">未在播放</div>
@@ -268,7 +274,7 @@ function getLyricHtml() {
   </div>
   <script>
     const { onState, sendCommand } = window.miniAPI
-    let state = { hasTrack:false, title:'', artist:'', coverUrl:'', isPlaying:false, volume:80, isMuted:false, progress:0, duration:0, lyricLines:[], synced:false, theme:'dark', lyricTextColor:'#ffffff', lyricControlColor:'#ff375f', lyricFontSize:30, lyricFontWeight:820, repeatMode:'none' }
+    let state = { hasTrack:false, title:'', artist:'', coverUrl:'', isPlaying:false, volume:80, isMuted:false, progress:0, duration:0, lyricLines:[], synced:false, theme:'dark', lyricTextColor:'#ffffff', lyricControlColor:'#ff375f', lyricFontSize:30, lyricFontWeight:820, lyricFontFamily:'system-ui', repeatMode:'none' }
     const $ = (id) => document.getElementById(id)
     const volInput = $('volume')
     let lyricTimer = null
@@ -307,6 +313,7 @@ function getLyricHtml() {
         root.style.setProperty('--ctrl-color', state.lyricControlColor || '#ff375f')
         root.style.setProperty('--lyric-font-size', (state.lyricFontSize || 30) + 'px')
         root.style.setProperty('--lyric-font-weight', String(state.lyricFontWeight || 820))
+        if (state.lyricFontFamily) root.style.setProperty('--lyric-font-family', state.lyricFontFamily)
       }
       // 面板控件值跟随状态（用户未在拖动时才回写，避免输入中被重置）
       syncPanelInputs()
@@ -351,6 +358,7 @@ function getLyricHtml() {
     const apPanel = $('appearPanel')
     const apTextColor = $('apTextColor'), apCtrlColor = $('apCtrlColor')
     const apFontSize = $('apFontSize'), apFontWeight = $('apFontWeight')
+    const apFontFamily = $('apFontFamily')
     let apEditing = false  // 用户正在拖动面板控件时，状态回流不覆盖控件值
 
     function syncPanelInputs() {
@@ -361,6 +369,8 @@ function getLyricHtml() {
       if (Number(apFontWeight.value) !== (state.lyricFontWeight || 820)) apFontWeight.value = state.lyricFontWeight || 820
       $('apFontSizeVal').textContent = String(state.lyricFontSize || 30)
       $('apFontWeightVal').textContent = String(state.lyricFontWeight || 820)
+      const fam = state.lyricFontFamily || 'system-ui'
+      if (apFontFamily.value !== fam) apFontFamily.value = fam
     }
 
     // 即时预览：直接改 CSS var（不等主进程回流），同时节流发送持久化命令
@@ -370,7 +380,8 @@ function getLyricHtml() {
       apTimer = setTimeout(() => {
         sendCommand({ type: 'update-lyric-appearance',
           lyricTextColor: apTextColor.value, lyricControlColor: apCtrlColor.value,
-          lyricFontSize: Number(apFontSize.value), lyricFontWeight: Number(apFontWeight.value) })
+          lyricFontSize: Number(apFontSize.value), lyricFontWeight: Number(apFontWeight.value),
+          lyricFontFamily: apFontFamily.value })
       }, 300)
     }
     function applyAppearance() {
@@ -379,6 +390,7 @@ function getLyricHtml() {
       root.style.setProperty('--ctrl-color', apCtrlColor.value)
       root.style.setProperty('--lyric-font-size', apFontSize.value + 'px')
       root.style.setProperty('--lyric-font-weight', apFontWeight.value)
+      if (apFontFamily.value) root.style.setProperty('--lyric-font-family', apFontFamily.value)
       $('apFontSizeVal').textContent = apFontSize.value
       $('apFontWeightVal').textContent = apFontWeight.value
       pushAppearance()
@@ -392,6 +404,22 @@ function getLyricHtml() {
       el.addEventListener('input', applyAppearance)
       el.addEventListener('change', () => { apEditing = false })
     })
+    // v1.3.8 字体下拉：选中即时预览 + 持久化
+    apFontFamily.addEventListener('change', () => { applyAppearance() })
+    // 拉取系统字体填充下拉（仅一次；失败保留内置默认项）
+    if (window.miniAPI.getFonts) {
+      window.miniAPI.getFonts().then((list) => {
+        if (!Array.isArray(list) || !list.length) return
+        // 主进程已将内置保底字体合并并排序，这里直接采用
+        const want = state.lyricFontFamily || 'system-ui'
+        const items = list.includes(want) ? list : [want, ...list]
+        apFontFamily.innerHTML = items.map((f) => {
+          const label = f === 'system-ui' ? '默认（跟随系统）' : f
+          return '<option value="' + f + '">' + label + '</option>'
+        }).join('')
+        apFontFamily.value = want
+      }).catch(() => { /* 枚举失败保留默认项 */ })
+    }
     // 打开/关闭面板；面板内点击不冒泡到窗口拖拽层
     $('appearBtn').onclick = (e) => { e.stopPropagation(); apPanel.classList.toggle('open') }
     apPanel.onclick = (e) => e.stopPropagation()
@@ -498,6 +526,7 @@ export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserW
       lyricControlColor: typeof state.lyricControlColor === 'string' && state.lyricControlColor ? state.lyricControlColor : miniState.lyricControlColor,
       lyricFontSize: Number.isFinite(state.lyricFontSize) ? state.lyricFontSize : miniState.lyricFontSize,
       lyricFontWeight: Number.isFinite(state.lyricFontWeight) ? state.lyricFontWeight : miniState.lyricFontWeight,
+      lyricFontFamily: typeof state.lyricFontFamily === 'string' && state.lyricFontFamily ? state.lyricFontFamily : miniState.lyricFontFamily,
     repeatMode: state.repeatMode === 'all' || state.repeatMode === 'one' || state.repeatMode === 'shuffle' ? state.repeatMode : miniState.repeatMode,
     }
     broadcast()

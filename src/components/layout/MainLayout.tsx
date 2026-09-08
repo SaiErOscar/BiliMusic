@@ -5,11 +5,14 @@ import Sidebar from './Sidebar'
 import PlayerBar from './PlayerBar'
 import NowPlaying from '@/components/NowPlaying'
 import { useMiniWindowSync } from '@/hooks/useMiniWindowSync'
+import { useAppFonts } from '@/hooks/useAppFonts'
 import { useNowPlaying } from '@/contexts/NowPlayingContext'
 
 export default function MainLayout() {
   // 迷你窗口（桌面歌词/悬浮窗）状态同步：挂在主布局，随播放状态实时推送
   useMiniWindowSync()
+  // v1.3.8 主窗口字体 CSS 变量（标题栏+播放条 / 播放页歌词）
+  useAppFonts()
   const { expanded, open } = useNowPlaying()
 
   // v1.3.1：向主进程上报播放页开关状态，桌面歌词的隐藏/恢复

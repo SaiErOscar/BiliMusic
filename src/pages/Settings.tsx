@@ -22,6 +22,7 @@ import {
   UserRound,
 } from 'lucide-react'
 import { ActionButton, MusicHero, MusicPageShell, MusicSection } from '@/components/AppleMusicPage'
+import FontSelect from '@/components/FontSelect'
 import { useTheme } from '@/hooks/useTheme'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { selectDownloadFolder } from '@/services/api'
@@ -215,6 +216,12 @@ export default function Settings() {
                 onChange={(sidebarState) => setAppSettings({ sidebarState })}
               />
             </SettingsRow>
+            <SettingsRow label="标题栏与播放条字体" description="主窗口信息区（播放条歌曲名/歌手）使用的字体">
+              <FontSelect value={settings.titleFontFamily} onChange={(titleFontFamily) => setAppSettings({ titleFontFamily })} />
+            </SettingsRow>
+            <SettingsRow label="播放页歌词字体" description="播放页歌词使用的字体">
+              <FontSelect value={settings.playerLyricFontFamily} onChange={(playerLyricFontFamily) => setAppSettings({ playerLyricFontFamily })} />
+            </SettingsRow>
           </SettingsGroup>
 
           <SettingsGroup title="播放" icon={<Music2 size={20} />}>
@@ -244,6 +251,9 @@ export default function Settings() {
             <SettingsRow label="歌词粗细" description="桌面歌词的文字粗细（400-900，桌面歌词窗内也可调）">
               <input type="range" min={400} max={900} step={20} value={settings.lyricFontWeight} onChange={(e) => setAppSettings({ lyricFontWeight: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--accent, #ff375f)' }} />
               <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontWeight}</span>
+            </SettingsRow>
+            <SettingsRow label="歌词字体" description="桌面歌词使用的字体（桌面歌词窗内也可调）">
+              <FontSelect value={settings.lyricFontFamily} onChange={(lyricFontFamily) => setAppSettings({ lyricFontFamily })} />
             </SettingsRow>
           </SettingsGroup>
 

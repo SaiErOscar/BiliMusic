@@ -62,6 +62,10 @@ export interface AppSettings {
   // 桌面歌词字号/粗细（v1.3.6 外观小面板）
   lyricFontSize: number
   lyricFontWeight: number
+  // v1.3.8 字体选项（三面板独立）：桌面歌词 / 标题栏+播放条 / 播放页歌词
+  lyricFontFamily: string
+  titleFontFamily: string
+  playerLyricFontFamily: string
 }
 
 export type NavItem = {

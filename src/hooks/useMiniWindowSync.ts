@@ -84,6 +84,7 @@ export function useMiniWindowSync() {
     lyricControlColor: settings.lyricControlColor,
     lyricFontSize: settings.lyricFontSize,
     lyricFontWeight: settings.lyricFontWeight,
+    lyricFontFamily: settings.lyricFontFamily,
     repeatMode: player.repeatMode,
   }), [
     player.currentTrack,
@@ -99,6 +100,7 @@ export function useMiniWindowSync() {
     settings.lyricControlColor,
     settings.lyricFontSize,
     settings.lyricFontWeight,
+    settings.lyricFontFamily,
     player.repeatMode,
   ])
 
@@ -117,11 +119,12 @@ export function useMiniWindowSync() {
       if (cmd.type === 'update-lyric-appearance') {
         // v1.3.6 桌面歌词窗外观小面板：持久化到 AppSettings，
         // settings 变化经上方 miniState 推送回流歌词窗，形成即时生效闭环
-        const patch: { lyricTextColor?: string; lyricControlColor?: string; lyricFontSize?: number; lyricFontWeight?: number } = {}
+        const patch: { lyricTextColor?: string; lyricControlColor?: string; lyricFontSize?: number; lyricFontWeight?: number; lyricFontFamily?: string } = {}
         if (typeof cmd.lyricTextColor === 'string') patch.lyricTextColor = cmd.lyricTextColor
         if (typeof cmd.lyricControlColor === 'string') patch.lyricControlColor = cmd.lyricControlColor
         if (Number.isFinite(cmd.lyricFontSize)) patch.lyricFontSize = cmd.lyricFontSize
         if (Number.isFinite(cmd.lyricFontWeight)) patch.lyricFontWeight = cmd.lyricFontWeight
+        if (typeof cmd.lyricFontFamily === 'string') patch.lyricFontFamily = cmd.lyricFontFamily
         setAppSettings(patch)
       } else if (cmd.type === 'volume') player.setVolume(cmd.value)
       else if (cmd.type === 'seek') setProgress(cmd.value)

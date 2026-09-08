@@ -99,6 +99,7 @@ export default function LyricsView({ lines, currentTime, synced, onSeek }: Lyric
             style={{
               fontSize: 'clamp(1.2rem, 1.6vw, 1.7rem)',
               fontWeight: 720,
+              fontFamily: 'var(--app-lyric-font, inherit)',
               lineHeight: 1.7,
               color: 'rgba(255,255,255,0.72)',
               margin: '0 0 6px',
@@ -161,6 +162,7 @@ export default function LyricsView({ lines, currentTime, synced, onSeek }: Lyric
                 color: '#fff',
                 fontSize: 'clamp(1.46rem, 2.4vw, 2.42rem)',
                 fontWeight: 820,
+                fontFamily: 'var(--app-lyric-font, inherit)',
                 lineHeight: 1.38,
                 padding: '10px 8px',
                 margin: 0,

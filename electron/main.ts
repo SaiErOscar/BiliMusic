@@ -7,6 +7,7 @@ import { registerLyricsApiHandlers } from './lyricsApi'
 import { initUpdates, getActiveRendererRoot } from './updater'
 import { registerWebdavHandlers } from './webdav'
 import { registerMiniWindowHandlers, onMainWindowActivityChanged, destroyLyricWindow } from './miniWindows'
+import { registerSystemFontsHandlers } from './systemFonts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -656,6 +657,7 @@ app.whenReady().then(() => {
   registerBiliApiHandlers()
   registerLyricsApiHandlers()
   registerWebdavHandlers()
+  registerSystemFontsHandlers()
   registerMiniWindowHandlers({ getMainWindow: () => mainWindow })
   // 更新模块须在创建窗口前初始化：bootReconcile 先定下生效的渲染层根目录，供 app:// 加载
   initUpdates({

@@ -9,4 +9,6 @@ contextBridge.exposeInMainWorld('miniAPI', {
     return () => ipcRenderer.removeListener('mini:state', listener)
   },
   sendCommand: (command) => ipcRenderer.send('mini:command', command),
+  // v1.3.8 外观小面板字体下拉：从主进程枚举系统字体（system-fonts:list 为全局 handle）
+  getFonts: () => ipcRenderer.invoke('system-fonts:list'),
 })
