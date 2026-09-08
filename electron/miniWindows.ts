@@ -224,7 +224,9 @@ function getLyricHtml() {
   /* v1.3.6 外观设置小面板：齿轮按钮 + 浮层面板（覆盖歌词区显示，不改窗口尺寸） */
   .btn.gear svg { width: 15px; height: 15px; }
   /* v1.3.8 修复：齿轮与关闭按钮同处歌词层(.lyric)上方，需显式 z-index 否则被 .lyric 的 drag 区吞掉点击（close 已自带 z-index:10 故此前可点） */
-  #appearBtn { z-index: 11; cursor: pointer; }
+  /* v1.3.9-beta 真凶：z-index 只管视觉层叠，管不了 -webkit-app-region 命中。齿轮内是 <svg>，点击落在图标上时命中区仍按外层 .wrap 的 drag 计算，onclick 不触发（close 是纯文本故一直可点）。让 svg pointer-events:none 把命中交回 button，并给按钮自身显式 no-drag。 */
+  #appearBtn { z-index: 11; cursor: pointer; -webkit-app-region: no-drag; }
+  #appearBtn svg { pointer-events: none; }
   #appearPanel {
     display: none; position: absolute; left: 50%; transform: translateX(-50%); top: 6px;
     z-index: 10; padding: 10px 14px; border-radius: 12px;
