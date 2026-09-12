@@ -10,4 +10,5 @@ contextBridge.exposeInMainWorld('cpAPI', {
   pickPoint: (x, y, w, h) => ipcRenderer.send('color-picker:pick-point', x, y, w, h),
   pickCancel: () => ipcRenderer.send('color-picker:pick-cancel'),
   onPicked: (cb) => ipcRenderer.on('color-picker:apply-picked', (_e, hex) => cb(hex)),
+  onShot: (cb) => ipcRenderer.on('color-picker:shot', (_e, dataUrl) => cb(dataUrl)),
 })

@@ -40,14 +40,8 @@ function settle(hex: string | null) {
   if (resolve) resolve(hex)
 }
 
-// 点击瞬间抓 overlayDisplay 并按【窗口内比例】采样该点 RGB（覆盖层/面板此时已隐藏，不会截进自身）
-async function capturePointColor(
-  clientX: number,
-  clientY: number,
-  innerW: number,
-  innerH: number
-): Promise<string | null> {
-  const display = overlayDisplay || screen.getPrimaryDisplay()
+// 抓 overlayDisplay 的屏幕位图（BGRA），供取色采样与覆盖层预览共用
+async function captureScreenBitmap(display: Electron.Display) {
   const scale = display.scaleFactor || 1
   const sources = await desktopCapturer.getSources({
     types: ['screen'],
@@ -61,6 +55,20 @@ async function capturePointColor(
   const img = source.thumbnail
   const { width: bw, height: bh } = img.getSize()
   const data = img.toBitmap()
+  return { data, width: bw, height: bh }
+}
+
+// 点击瞬间抓 overlayDisplay 并按【窗口内比例】采样该点 RGB（覆盖层/面板此时已隐藏，不会截进自身）
+async function capturePointColor(
+  clientX: number,
+  clientY: number,
+  innerW: number,
+  innerH: number
+): Promise<string | null> {
+  const display = overlayDisplay || screen.getPrimaryDisplay()
+  const shot = await captureScreenBitmap(display)
+  if (!shot) return null
+  const { width: bw, height: bh, data } = shot
   // 纯比例：窗口内 CSS 坐标 / 窗口 CSS 尺寸 = 归一化比例，乘位图实际像素尺寸（不假设位图= size*scale）
   const nx = innerW > 0 ? clientX / innerW : 0
   const ny = innerH > 0 ? clientY / innerH : 0
@@ -86,20 +94,67 @@ function getOverlayHtml() {
     #cross .h { position:absolute; left:-120px; top:0; width:240px; height:1px; background:#ff375f; box-shadow:0 0 1px rgba(0,0,0,.85); }
     #cross .v { position:absolute; top:-120px; left:0; width:1px; height:240px; background:#ff375f; box-shadow:0 0 1px rgba(0,0,0,.85); }
     #cross .box { position:absolute; left:-6px; top:-6px; width:11px; height:11px; border:1px solid #fff; box-shadow:0 0 0 1px rgba(0,0,0,.6), inset 0 0 0 1px rgba(0,0,0,.4); }
+    #preview { position:fixed; display:none; pointer-events:none; z-index:11;
+      background:rgba(20,20,24,.92); border:1px solid rgba(255,255,255,.2); border-radius:8px;
+      padding:6px 10px; white-space:nowrap; }
+    #preview .swatch { display:inline-block; width:22px; height:22px; border-radius:4px; border:1px solid rgba(255,255,255,.3); vertical-align:middle; margin-right:8px; }
+    #preview .hex { color:#fff; font-size:12px; font-family:Consolas,monospace; vertical-align:middle; }
     #tip { position:fixed; left:50%; top:20px; transform:translateX(-50%); background:rgba(20,20,24,.9); color:#fff; padding:7px 14px; border-radius:18px; font-size:12.5px; border:1px solid rgba(255,255,255,.15); white-space:nowrap; pointer-events:none; z-index:10; }
   </style></head><body>
     <div id="tip">点击拾取该点颜色 · 右键 / Esc 返回调色板</div>
     <div id="cross"><div class="h"></div><div class="v"></div><div class="box"></div></div>
+    <div id="preview"><span class="swatch" id="pvSwatch"></span><span class="hex" id="pvHex"></span></div>
     <script>
       var cross = document.getElementById('cross');
+      var preview = document.getElementById('preview');
+      var pvSwatch = document.getElementById('pvSwatch');
+      var pvHex = document.getElementById('pvHex');
+      var shotCanvas = null, shotCtx = null, shotW = 0, shotH = 0;
+
+      // 主进程发来的屏幕截图（dataURL），解码到 canvas 用于鼠标旁实时预览
+      if (window.cpAPI.onShot) {
+        window.cpAPI.onShot(function(dataUrl) {
+          var im = new Image();
+          im.onload = function() {
+            shotCanvas = document.createElement('canvas');
+            shotCanvas.width = im.naturalWidth;
+            shotCanvas.height = im.naturalHeight;
+            shotW = im.naturalWidth;
+            shotH = im.naturalHeight;
+            shotCtx = shotCanvas.getContext('2d', { willReadFrequently: true });
+            shotCtx.drawImage(im, 0, 0);
+          };
+          im.src = dataUrl;
+        });
+      }
+
+      function samplePreview(cx, cy) {
+        if (!shotCtx) return null;
+        var px = Math.min(shotW - 1, Math.max(0, Math.floor(cx / window.innerWidth * shotW)));
+        var py = Math.min(shotH - 1, Math.max(0, Math.floor(cy / window.innerHeight * shotH)));
+        var d = shotCtx.getImageData(px, py, 1, 1).data;
+        return '#' + [d[0], d[1], d[2]].map(function(x){ return x.toString(16).padStart(2,'0'); }).join('');
+      }
+
       window.addEventListener('mousemove', function (e) {
         cross.style.display = 'block';
         cross.style.left = e.clientX + 'px';
         cross.style.top = e.clientY + 'px';
+        // 预览色块跟随鼠标（偏移 20px 右下，靠边翻转）
+        var hex = samplePreview(e.clientX, e.clientY);
+        if (hex) {
+          preview.style.display = 'block';
+          pvSwatch.style.background = hex;
+          pvHex.textContent = hex.toUpperCase();
+          var lx = e.clientX + 20, ly = e.clientY + 20;
+          if (lx + 120 > window.innerWidth) lx = e.clientX - 140;
+          if (ly + 40 > window.innerHeight) ly = e.clientY - 50;
+          preview.style.left = lx + 'px';
+          preview.style.top = ly + 'px';
+        }
       });
       window.addEventListener('mousedown', function (e) {
         if (e.button === 0) {
-          // 带窗口内坐标与窗口 CSS 尺寸，主进程按归一化比例映射到抓屏位图
           window.cpAPI.pickPoint(e.clientX, e.clientY, window.innerWidth, window.innerHeight);
         } else {
           window.cpAPI.pickCancel();
@@ -276,12 +331,38 @@ function createOverlay(display: Electron.Display) {
   })
 }
 
-// 面板点吸管 → 隐藏面板、弹全屏准星；此后再点屏幕即“点击瞬间抓屏”取色
+// 面板点吸管 → 隐藏面板、弹全屏准星；此后再点屏幕即“点击瞬间抓屏”取色。
+// 同时抓一次屏编码为 dataURL 发给覆盖层，供鼠标旁实时颜色预览（预览用打开时的快照，
+// 点击取色仍走 onOverlayPick 的“点击瞬间现抓屏”准路径，两者解耦互不影响）。
 function startScreenPick() {
   if (panelWin && !panelWin.isDestroyed()) panelWin.hide()
   const cur = screen.getCursorScreenPoint()
   overlayDisplay = screen.getDisplayNearestPoint(cur)
   createOverlay(overlayDisplay)
+  void (async () => {
+    try {
+      // 用 toDataURL 编码（RGBA 输出），覆盖层 canvas 解码后 getImageData 恒为 RGBA，无需 BGRA 换算
+      const dataUrl = overlayDisplay ? await shotToDataUrl(overlayDisplay) : null
+      if (dataUrl && overlayWin && !overlayWin.isDestroyed()) {
+        overlayWin.webContents.send('color-picker:shot', dataUrl)
+      }
+    } catch { /* 预览失败不影响取色主流程 */ }
+  })()
+}
+
+// 抓屏并编码为 dataURL（供覆盖层预览）
+async function shotToDataUrl(display: Electron.Display): Promise<string | null> {
+  const scale = display.scaleFactor || 1
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: {
+      width: Math.round(display.size.width * scale),
+      height: Math.round(display.size.height * scale),
+    },
+  })
+  const source = sources.find((s) => String(s.display_id) === String(display.id)) || sources[0]
+  if (!source || source.thumbnail.isEmpty()) return null
+  return source.thumbnail.toDataURL()
 }
 
 // 覆盖层左键：先隐藏覆盖层（避免把准星截进屏），稍等合成器去帧，再抓屏采样。
