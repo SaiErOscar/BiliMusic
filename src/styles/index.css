@@ -3731,6 +3731,21 @@ body {
 }
 .settings-color::-webkit-color-swatch-wrapper { padding: 0; }
 .settings-color::-webkit-color-swatch { border: none; border-radius: 6px; }
+.settings-color--pick {
+  position: relative;
+  width: 96px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 12px;
+  font-family: Consolas, monospace;
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.6);
+  transition: transform 0.1s ease, opacity 0.15s ease;
+}
+.settings-color--pick:hover { transform: scale(1.03); }
+.settings-color--pick:disabled { opacity: 0.6; cursor: progress; }
+.settings-color__hex { pointer-events: none; }
 
 .settings-path {
   display: inline-flex;

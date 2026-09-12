@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { ActionButton, MusicHero, MusicPageShell, MusicSection } from '@/components/AppleMusicPage'
 import FontSelect from '@/components/FontSelect'
+import ColorField from '@/components/ColorField'
 import { useTheme } from '@/hooks/useTheme'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { selectDownloadFolder } from '@/services/api'
@@ -239,10 +240,10 @@ export default function Settings() {
               <ToggleSwitch checked={settings.showLyrics} onChange={() => setAppSettings({ showLyrics: !settings.showLyrics })} />
             </SettingsRow>
             <SettingsRow label="歌词文字颜色" description="桌面歌词的文字颜色">
-              <input type="color" className="settings-color" value={settings.lyricTextColor} onChange={(e) => setAppSettings({ lyricTextColor: e.target.value })} />
+              <ColorField value={settings.lyricTextColor} onChange={(lyricTextColor) => setAppSettings({ lyricTextColor })} title="点击从屏幕拾取文字颜色" />
             </SettingsRow>
             <SettingsRow label="歌词按钮颜色" description="桌面歌词的播放/上一首等按钮颜色">
-              <input type="color" className="settings-color" value={settings.lyricControlColor} onChange={(e) => setAppSettings({ lyricControlColor: e.target.value })} />
+              <ColorField value={settings.lyricControlColor} onChange={(lyricControlColor) => setAppSettings({ lyricControlColor })} title="点击从屏幕拾取按钮颜色" />
             </SettingsRow>
             <SettingsRow label="歌词字号" description="桌面歌词的文字大小（18-60px，桌面歌词窗内也可调）">
               <input type="range" min={18} max={60} step={1} value={settings.lyricFontSize} onChange={(e) => setAppSettings({ lyricFontSize: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--accent, #ff375f)' }} />
