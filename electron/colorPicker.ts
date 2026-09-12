@@ -68,9 +68,11 @@ async function capturePointColor(
   const py = Math.min(bh - 1, Math.max(0, Math.floor(ny * bh)))
   const idx = (py * bw + px) * 4
   if (idx + 2 >= data.length) return null
-  const r = data[idx]
+  // NativeImage.toBitmap() 在 Windows 返回 BGRA（诊断实测：与 canvas getImageData 的 RGBA 逐点对比，
+  // 红蓝通道互换，matchBGRA 命中 5/7、matchRGBA 仅 2/7 且那 2 个是灰度点）。按 BGRA 读：[0]=B,[1]=G,[2]=R。
+  const b = data[idx]
   const g = data[idx + 1]
-  const b = data[idx + 2]
+  const r = data[idx + 2]
   return '#' + [r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('')
 }
 
