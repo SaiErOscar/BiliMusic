@@ -250,7 +250,7 @@ function createOverlay(display: Electron.Display) {
     maximizable: false,
     skipTaskbar: true,
     hasShadow: false,
-    fullscreenable: false,
+    fullscreenable: true,
     alwaysOnTop: true,
     show: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, preload: cpPreloadPath() },
@@ -258,18 +258,19 @@ function createOverlay(display: Electron.Display) {
   overlayWin.setAlwaysOnTop(true, 'screen-saver', 1)
   overlayWin.setVisibleOnAllWorkspaces(true)
   overlayWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getOverlayHtml())}`)
+  // v1.3.9-pre4 关键：必须真全屏。诊断实测——非全屏 topmost 窗会被 Windows 限制在 workArea 内
+  // （本机任务栏在顶部，bounds.height=1463 被压成 innerHeight=1380），既取不到底部、又让
+  // clientY/innerHeight 归一化比例错位（纵向整体偏）。setFullScreen 后 innerHeight=1464≈屏幕高，
+  // 覆盖层铺满整屏含任务栏区，归一化采样才准。
   overlayWin.once('ready-to-show', () => {
     if (overlayWin && !overlayWin.isDestroyed()) {
-      // 强制铺满整屏（含任务栏区域），规避 transparent 窗口底部/边缘被系统裁切导致“触不到屏幕底部”
-      overlayWin.setBounds({
-        x: display.bounds.x,
-        y: display.bounds.y,
-        width: display.bounds.width,
-        height: display.bounds.height,
-      })
       overlayWin.show()
+      overlayWin.setFullScreen(true)
       overlayWin.focus()
     }
+  })
+  overlayWin.once('enter-full-screen', () => {
+    if (overlayWin && !overlayWin.isDestroyed()) overlayWin.focus()
   })
 }
 
