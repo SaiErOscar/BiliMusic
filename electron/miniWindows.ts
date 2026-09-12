@@ -213,7 +213,9 @@ function getLyricHtml() {
   .lyric { flex: 1; display: grid; place-items: center; position: relative; }
   .line { font-family: var(--lyric-font-family, -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif); font-size: var(--lyric-font-size, 30px); font-weight: var(--lyric-font-weight, 820); text-align: center; line-height: 1.35; color: var(--lyric-color); text-shadow: 0 2px 20px rgba(0,0,0,.5); opacity: 0; transform: translateY(8px); transition: opacity .45s ease, transform .45s ease; max-width: 100%; }
   .line.show { opacity: 1; transform: translateY(0); }
-  .line.idle { opacity: .45; font-size: 22px; font-weight: 600; }
+  /* v1.3.9-beta9 修复：idle 原硬编码 font-size:22px/font-weight:600，会覆盖 CSS 变量，
+     导致无歌词(显示歌名)时调字号粗细毫无视觉变化，看起来像"改了没反应"。改为跟随变量，仅保留略小的视觉降级。 */
+  .line.idle { opacity: .45; font-size: calc(var(--lyric-font-size, 30px) * .72); font-weight: var(--lyric-font-weight, 820); }
   .controls { display: flex; align-items: center; justify-content: center; gap: 14px; height: 44px; -webkit-app-region: no-drag; }
   .btn {
     width: 34px; height: 34px; border-radius: 50%; border: none;
@@ -248,7 +250,8 @@ function getLyricHtml() {
     font-size: 11px; line-height: 1.3; min-width: 236px;
   }
   body.light #appearPanel { background: rgba(250, 250, 252, .95); border-color: rgba(0, 0, 0, .1); color: #333; }
-  body.light #appearPanel select { color-scheme: light; }
+  body.light #appearPanel select { color-scheme: light; background: #ffffff; color: #333; border-color: rgba(0,0,0,.15); }
+  body.light #appearPanel select option { background: #ffffff; color: #333; }
   #appearPanel.open { display: block; }
   #appearPanel .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 2px 0; }
   #appearPanel .row label { opacity: .8; white-space: nowrap; }
@@ -256,7 +259,11 @@ function getLyricHtml() {
   #appearPanel input[type="range"] { width: 96px; accent-color: var(--ctrl-color); cursor: pointer; }
   /* v1.3.9-beta8 修复：原生 select 展开的下拉列表配色由该元素的 color-scheme 决定，不跟 CSS 背景色，
      导致深色面板里弹出浅色列表。在 select 上显式指定，light 主题下再切回 light。 */
-  #appearPanel select { color-scheme: dark; width: 132px; max-width: 132px; font-size: 12px; padding: 2px 4px; border-radius: 6px; background: rgba(255,255,255,.1); color: inherit; border: 1px solid rgba(255,255,255,.18); cursor: pointer; }
+  /* v1.3.9-beta9 修复下拉浅底白字：Chromium 把 select 自身 background 用作展开列表底色，
+     beta8 的 rgba(255,255,255,.1) 半透明白混合后呈浅灰，而 color:inherit 是近白 #eee → 浅底白字看不见。
+     主窗口正常是因为它用不透明 --glass-bg-heavy。改为不透明深色底 + 显式 option 配色。 */
+  #appearPanel select { color-scheme: dark; width: 132px; max-width: 132px; font-size: 12px; padding: 2px 4px; border-radius: 6px; background: #2a2a2e; color: #eee; border: 1px solid rgba(255,255,255,.18); cursor: pointer; }
+  #appearPanel select option { background: #2a2a2e; color: #eee; }
   #appearPanel .val { width: 34px; text-align: right; opacity: .7; font-variant-numeric: tabular-nums; }
   #repeatBadge { position: absolute; top: -3px; right: -3px; min-width: 11px; height: 11px; border-radius: 6px; background: rgba(0,0,0,.75); color: #fff; font-size: 8px; font-weight: 700; line-height: 11px; text-align: center; padding: 0 2px; }
   .vol { display: flex; align-items: center; gap: 6px; color: var(--lyric-color); opacity: .75; }
@@ -305,12 +312,10 @@ function getLyricHtml() {
     function awaitingSettle() {
       if (apEditing) return true
       if (!apPending) return false
-      const settled = Number(state.lyricFontSize) === apPending.lyricFontSize
-        && Number(state.lyricFontWeight) === apPending.lyricFontWeight
-        && state.lyricTextColor === apPending.lyricTextColor
-        && state.lyricControlColor === apPending.lyricControlColor
-        && state.lyricFontFamily === apPending.lyricFontFamily
-      if (settled || Date.now() - apPending.at > 2000) { apPending = null; return false }
+      // v1.3.9-beta9 修正：不能在此用 state===apPending 判定"已达成"并解除保护——onState 里刚
+      // Object.assign(state, apPending) 使二者必然相等，保护会在下一次 render 被自己误解除，
+      // 紧随其后的第二条旧回流照样把滑块打回（真机实测复现）。释放只交给 onState 真值到达或 2s 超时。
+      if (Date.now() - apPending.at > 2000) { apPending = null; return false }
       return true
     }
 
@@ -381,7 +386,22 @@ function getLyricHtml() {
       $('repeat').title = m.title
     }
 
-    onState((next) => { state = next || state; render() })
+    onState((next) => {
+      state = next || state
+      // v1.3.9-beta9 回流合并：主窗口尚未持久化完成时推回的仍是旧外观值，直接赋值会把用户
+      // 刚改好的字号/粗细打回（滑块弹回根因）。期望值未达成前用 apPending 覆盖之；一旦主窗口
+      // 真值到达（与期望一致）或超过 2s 即释放，不影响设置页后续正常回流。
+      if (apPending) {
+        const same = Number(state.lyricFontSize) === apPending.lyricFontSize
+          && Number(state.lyricFontWeight) === apPending.lyricFontWeight
+          && state.lyricTextColor === apPending.lyricTextColor
+          && state.lyricControlColor === apPending.lyricControlColor
+          && state.lyricFontFamily === apPending.lyricFontFamily
+        if (same || Date.now() - apPending.at > 2000) apPending = null
+        else Object.assign(state, apPending)
+      }
+      render()
+    })
     $('play').onclick = () => sendCommand({ type: 'toggle' })
     $('next').onclick = () => sendCommand({ type: 'next' })
     $('prev').onclick = () => sendCommand({ type: 'prev' })
@@ -424,7 +444,11 @@ function getLyricHtml() {
         lyricFontSize: Number(apFontSize.value), lyricFontWeight: Number(apFontWeight.value),
         lyricFontFamily: apFontFamily.value,
       }
-      apPending = { ...snap, at: Date.now() }  // 记录期望值，state 追上后允许回流覆盖控件
+      // v1.3.9-beta9 本地乐观更新：beta8 的 apPending 要等命令绕回主窗口再推回来才算 settled，
+      // 命令一旦丢失或主窗口节流，2s 超时后回流仍用旧值覆盖 → 滑块照样弹回。
+      // 改为立即写进本地 state，控件与 CSS 天然一致；apPending 只用于在回流里挡住旧的覆盖值。
+      apPending = { ...snap, at: Date.now() }
+      Object.assign(state, snap)
       if (apTimer) clearTimeout(apTimer)
       apTimer = setTimeout(() => {
         sendCommand({ type: 'update-lyric-appearance', ...snap })
@@ -441,16 +465,24 @@ function getLyricHtml() {
       $('apFontWeightVal').textContent = apFontWeight.value
       pushAppearance()
     }
-    [apTextColor, apCtrlColor].forEach((el) => {
+    // v1.3.9-beta9 真因(ASI 陷阱)：上一行 "})" 无分号 + 行首 "[" 会被解析为成员访问
+    // forEach(...)[apFontSize, apFontWeight] → undefined[HTMLInputElement] 抛错，中断脚本后半段，
+    // 导致字号/粗细的 input/change 监听从 v1.3.5 起从未绑上（滑块靠原生行为可拖，松手后被回流
+    // 重置回 state 值 = 用户看到的"弹回、无反应"）。改用命名数组 + 显式分号，不再出现行首 "["。
+    const colorInputs = [apTextColor, apCtrlColor]
+    colorInputs.forEach((el) => {
       el.addEventListener('input', () => { apEditing = true; applyAppearance() })
       el.addEventListener('change', () => { apEditing = false; applyAppearance() })
     })
-    [apFontSize, apFontWeight].forEach((el) => {
+    const rangeInputs = [apFontSize, apFontWeight]
+    rangeInputs.forEach((el) => {
       el.addEventListener('pointerdown', () => { apEditing = true })
       el.addEventListener('input', applyAppearance)
-      // v1.3.9-beta8 松手即 flush 发送（不等 300ms 节流）缩短往返；apPending 继续保护直到 state 追上
+      // v1.3.9-beta9 松手：先 applyAppearance 用最终值刷新 apPending 与 CSS（否则 apPending 停在
+      // 最后一次 input 的中间值，真值回流到达时判不等、保护无法按时释放），再立即 flush 发送缩短往返。
       el.addEventListener('change', () => {
         apEditing = false
+        applyAppearance()
         if (apTimer) { clearTimeout(apTimer); apTimer = null }
         sendCommand({ type: 'update-lyric-appearance',
           lyricTextColor: apTextColor.value, lyricControlColor: apCtrlColor.value,
