@@ -332,12 +332,12 @@ function getLyricHtml() {
       }
       // 面板控件值跟随状态（用户未在拖动时才回写，避免输入中被重置）
       syncPanelInputs()
-      tryFillFonts()
       $('play').textContent = state.isPlaying ? '⏸' : '▶'
       $('play').disabled = $('prev').disabled = $('next').disabled = !state.hasTrack
       if (volInput.value !== String(state.volume)) volInput.value = state.volume
       renderRepeatBtn()
       renderLyric()
+      tryFillFonts()  // v1.3.9-beta7 移到歌词渲染之后：解耦，字体问题不再拖垮歌词
     }
 
     // 播放顺序按钮：四态循环切换 none → all → one → shuffle → none（v1.3.2 / v1.3.4 换 lucide 风格 SVG 跟随主题色）
@@ -379,6 +379,7 @@ function getLyricHtml() {
     const apTextColor = $('apTextColor'), apCtrlColor = $('apCtrlColor')
     const apFontSize = $('apFontSize'), apFontWeight = $('apFontWeight')
     const apFontFamily = $('apFontFamily')
+    let fontsFilled = false  // v1.3.9-beta7 提前声明：beta6 把它放在 forEach 之后，歌词窗脚本一旦在 forEach 处加载异常，fontsFilled 永不初始化，render→tryFillFonts 触发 TDZ 崩溃，拖垮整个 render（歌词卡在未在播放、颜色/字体全失效）
     let apEditing = false  // 用户正在拖动面板控件时，状态回流不覆盖控件值
 
     function syncPanelInputs() {
@@ -432,19 +433,20 @@ function getLyricHtml() {
     apFontFamily.addEventListener('change', () => { applyAppearance() })
     // v1.3.9-beta6 真因：字体走独立 request-fonts/mini:fonts 通道在 data: 窗里始终收不到；
     // 改随已验证通畅的 mini:state 通道下发 fontList，render 里一次性填充。
-    let fontsFilled = false
     function tryFillFonts() {
-      if (fontsFilled) return
-      const list = state.fontList
-      if (!Array.isArray(list) || !list.length) return
-      const want = state.lyricFontFamily || 'system-ui'
-      const items = list.includes(want) ? list : [want, ...list]
-      apFontFamily.innerHTML = items.map((f) => {
-        const label = f === 'system-ui' ? '默认（跟随系统）' : f
-        return '<option value="' + f + '">' + label + '</option>'
-      }).join('')
-      apFontFamily.value = want
-      fontsFilled = true
+      try {
+        if (fontsFilled) return
+        const list = state.fontList
+        if (!Array.isArray(list) || !list.length) return
+        const want = state.lyricFontFamily || 'system-ui'
+        const items = list.includes(want) ? list : [want, ...list]
+        apFontFamily.innerHTML = items.map((f) => {
+          const label = f === 'system-ui' ? '默认（跟随系统）' : f
+          return '<option value="' + f + '">' + label + '</option>'
+        }).join('')
+        apFontFamily.value = want
+        fontsFilled = true
+      } catch (e) { /* 字体填充失败不得影响歌词渲染主循环 */ }
     }
     // 面板内点击不冒泡到窗口拖拽层
     apPanel.onclick = (e) => e.stopPropagation()
