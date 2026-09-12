@@ -545,9 +545,18 @@ function getLyricHtml() {
 
 function createLyricWindow() {
   if (lyricWindow && !lyricWindow.isDestroyed()) return lyricWindow
+  // v1.3.9-pre6 初次显示位置：屏幕下方水平居中（此前未设 x/y，Electron 默认居中于屏幕）。用主屏
+  // workArea 而非 bounds 计算，避开任务栏；y 取底部上留一个边距，让歌词落在常见桌面歌词位置。
+  // 用户仍可拖动窗体改位置（本窗不持久化位置，每次新建回到此处）。
+  const { workArea } = screen.getPrimaryDisplay()
+  const WIN_W = 620
+  const WIN_H = 150
+  const BOTTOM_GAP = 60
   lyricWindow = new BrowserWindow({
-    width: 620,
-    height: 150,
+    width: WIN_W,
+    height: WIN_H,
+    x: workArea.x + Math.round((workArea.width - WIN_W) / 2),
+    y: workArea.y + workArea.height - WIN_H - BOTTOM_GAP,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
