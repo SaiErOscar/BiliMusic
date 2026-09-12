@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, app, screen } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { collectSystemFonts } from './systemFonts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -34,6 +35,7 @@ export interface MiniPlayerState {
   lyricFontWeight: number
   lyricFontFamily: string
   repeatMode: 'none' | 'all' | 'one' | 'shuffle'
+  fontList: string[]
 }
 
 export type MiniCommand =
@@ -68,9 +70,12 @@ const defaultState: MiniPlayerState = {
   lyricFontWeight: 820,
   lyricFontFamily: 'system-ui',
   repeatMode: 'none',
+  fontList: [],
 }
 
 let miniState: MiniPlayerState = { ...defaultState }
+// v1.3.9-beta6 系统字体缓存：枚举一次后随 mini:state 通道下发给歌词窗字体下拉
+let cachedFontList: string[] = []
 let lyricWindow: BrowserWindow | null = null
 let getMainWindow: (() => BrowserWindow | null) | null = null
 
@@ -112,7 +117,7 @@ function miniPreloadPath(): string {
 
 function broadcast() {
   if (lyricWindow && !lyricWindow.isDestroyed()) {
-    lyricWindow.webContents.send('mini:state', miniState)
+    lyricWindow.webContents.send('mini:state', { ...miniState, fontList: cachedFontList })
   }
 }
 
@@ -221,26 +226,34 @@ function getLyricHtml() {
   .btn.play { background: var(--ctrl-color); color: #fff; width: 40px; height: 40px; font-size: 17px; }
   .btn.play:hover { filter: brightness(1.08); }
   #repeat { position: relative; }
-  /* v1.3.6 外观设置小面板：齿轮按钮 + 浮层面板（覆盖歌词区显示，不改窗口尺寸） */
-  .btn.gear svg { width: 15px; height: 15px; }
-  /* v1.3.8 修复：齿轮与关闭按钮同处歌词层(.lyric)上方，需显式 z-index 否则被 .lyric 的 drag 区吞掉点击（close 已自带 z-index:10 故此前可点） */
-  /* v1.3.9-beta 真凶：z-index 只管视觉层叠，管不了 -webkit-app-region 命中。齿轮内是 <svg>，点击落在图标上时命中区仍按外层 .wrap 的 drag 计算，onclick 不触发（close 是纯文本故一直可点）。让 svg pointer-events:none 把命中交回 button，并给按钮自身显式 no-drag。 */
-  #appearBtn { z-index: 11; cursor: pointer; -webkit-app-region: no-drag; }
-  #appearBtn svg { pointer-events: none; }
+  /* v1.3.9-beta3 齿轮外观面板开关按钮：逐字段克隆可点的 .close（同一定位结构/同 z-index/同 no-drag），
+     仅改位置(right:34px 让开 close)与图标。之前 beta1/beta2 齿轮用 .btn+inline+id 三处样式混叠，热区与图标错位致点击失灵；
+     close 一直可点证明「单一独立 class 定位 + 纯文本 + onclick」在此 drag 窗可靠，齿轮照搬即可。 */
+  .gear {
+    position: absolute; top: 6px; right: 34px; z-index: 10;
+    width: 24px; height: 24px; border-radius: 50%;
+    border: none; background: rgba(255,255,255,.1); color: var(--lyric-color);
+    cursor: pointer; display: grid; place-items: center; font-size: 14px; line-height: 1;
+    -webkit-app-region: no-drag; transition: background .18s, transform .12s; opacity: .7;
+  }
+  .gear:hover { background: rgba(255,255,255,.22); opacity: 1; }
+  .gear:active { transform: scale(.9); }
+  body.light .gear { background: rgba(0,0,0,.08); }
+  body.light .gear:hover { background: rgba(0,0,0,.16); }
   #appearPanel {
-    display: none; position: absolute; left: 50%; transform: translateX(-50%); top: 6px;
-    z-index: 10; padding: 10px 14px; border-radius: 12px;
+    display: none; position: absolute; left: 50%; transform: translateX(-50%); top: 4px;
+    z-index: 20; padding: 5px 12px; border-radius: 12px;
     background: rgba(20, 20, 22, .92); backdrop-filter: blur(8px);
     border: 1px solid rgba(255, 255, 255, .12); color: #eee;
-    font-size: 12px; line-height: 1.4; min-width: 250px;
+    font-size: 11px; line-height: 1.3; min-width: 236px;
   }
   body.light #appearPanel { background: rgba(250, 250, 252, .95); border-color: rgba(0, 0, 0, .1); color: #333; }
   #appearPanel.open { display: block; }
-  #appearPanel .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 0; }
+  #appearPanel .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 2px 0; }
   #appearPanel .row label { opacity: .8; white-space: nowrap; }
   #appearPanel input[type="color"] { width: 32px; height: 22px; border: none; border-radius: 5px; background: none; cursor: pointer; padding: 0; }
-  #appearPanel input[type="range"] { width: 110px; accent-color: var(--ctrl-color); cursor: pointer; }
-  #appearPanel select { width: 150px; max-width: 150px; font-size: 12px; padding: 2px 4px; border-radius: 6px; background: rgba(255,255,255,.1); color: inherit; border: 1px solid rgba(255,255,255,.18); cursor: pointer; }
+  #appearPanel input[type="range"] { width: 96px; accent-color: var(--ctrl-color); cursor: pointer; }
+  #appearPanel select { width: 132px; max-width: 132px; font-size: 12px; padding: 2px 4px; border-radius: 6px; background: rgba(255,255,255,.1); color: inherit; border: 1px solid rgba(255,255,255,.18); cursor: pointer; }
   #appearPanel .val { width: 34px; text-align: right; opacity: .7; font-variant-numeric: tabular-nums; }
   #repeatBadge { position: absolute; top: -3px; right: -3px; min-width: 11px; height: 11px; border-radius: 6px; background: rgba(0,0,0,.75); color: #fff; font-size: 8px; font-weight: 700; line-height: 11px; text-align: center; padding: 0 2px; }
   .vol { display: flex; align-items: center; gap: 6px; color: var(--lyric-color); opacity: .75; }
@@ -251,7 +264,7 @@ function getLyricHtml() {
 <body>
   <div class="wrap">
     <button class="close" id="closeBtn" title="关闭桌面歌词">✕</button>
-    <button class="btn gear" id="appearBtn" title="外观设置" style="position:absolute;top:6px;right:34px;width:24px;height:24px;font-size:13px;border-radius:7px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.61.67 1.05 1.51 1H21a2 2 0 0 1 0 4h-.09c-.84-.05-1.37.39-1.51 1z"/></svg></button>
+    <button class="gear" id="appearBtn" title="外观设置">⚙</button>
     <div id="appearPanel">
       <div class="row"><label>文字颜色</label><input type="color" id="apTextColor" value="#ffffff" /></div>
       <div class="row"><label>按钮颜色</label><input type="color" id="apCtrlColor" value="#ff375f" /></div>
@@ -319,6 +332,7 @@ function getLyricHtml() {
       }
       // 面板控件值跟随状态（用户未在拖动时才回写，避免输入中被重置）
       syncPanelInputs()
+      tryFillFonts()
       $('play').textContent = state.isPlaying ? '⏸' : '▶'
       $('play').disabled = $('prev').disabled = $('next').disabled = !state.hasTrack
       if (volInput.value !== String(state.volume)) volInput.value = state.volume
@@ -352,6 +366,10 @@ function getLyricHtml() {
     $('next').onclick = () => sendCommand({ type: 'next' })
     $('prev').onclick = () => sendCommand({ type: 'prev' })
     $('closeBtn').onclick = () => sendCommand({ type: 'close-lyric-window' })
+    // v1.3.9-beta4 真因：beta3 gear handler 写在第437行(所有面板初始化之后)，若其间任一句运行时抛错则脚本中断、
+    // addEventListener 根本没注册→:active(CSS)有动画但无反应。close 在363行早于该段故正常。修复：handler 紧跟 close 注册，
+    // 用与 close 完全相同的 onclick，元素现取不依赖后置 apPanel 变量，彻底排除注册时机/抛错中断/作用域三因素。
+    $('appearBtn').onclick = () => { document.getElementById('appearPanel').classList.toggle('open') }
     $('repeat').onclick = () => sendCommand({ type: 'cycle-repeat-mode' })
     $('openPlayer').onclick = () => sendCommand({ type: 'show-player' })
     volInput.addEventListener('input', () => sendCommand({ type: 'volume', value: Number(volInput.value) }))
@@ -378,12 +396,16 @@ function getLyricHtml() {
     // 即时预览：直接改 CSS var（不等主进程回流），同时节流发送持久化命令
     let apTimer = null
     function pushAppearance() {
+      // v1.3.9-beta6 真因：原节流到点才读 DOM，但拖完松手后 250ms 进度回流会先把滑块重置回旧 state 值，
+      // 到点读到的是被重置的旧值→永远发旧值（字号/粗细改不动）。改为调用时捕获快照值。
+      const snap = {
+        lyricTextColor: apTextColor.value, lyricControlColor: apCtrlColor.value,
+        lyricFontSize: Number(apFontSize.value), lyricFontWeight: Number(apFontWeight.value),
+        lyricFontFamily: apFontFamily.value,
+      }
       if (apTimer) clearTimeout(apTimer)
       apTimer = setTimeout(() => {
-        sendCommand({ type: 'update-lyric-appearance',
-          lyricTextColor: apTextColor.value, lyricControlColor: apCtrlColor.value,
-          lyricFontSize: Number(apFontSize.value), lyricFontWeight: Number(apFontWeight.value),
-          lyricFontFamily: apFontFamily.value })
+        sendCommand({ type: 'update-lyric-appearance', ...snap })
       }, 300)
     }
     function applyAppearance() {
@@ -408,22 +430,23 @@ function getLyricHtml() {
     })
     // v1.3.8 字体下拉：选中即时预览 + 持久化
     apFontFamily.addEventListener('change', () => { applyAppearance() })
-    // 拉取系统字体填充下拉（仅一次；失败保留内置默认项）
-    if (window.miniAPI.getFonts) {
-      window.miniAPI.getFonts().then((list) => {
-        if (!Array.isArray(list) || !list.length) return
-        // 主进程已将内置保底字体合并并排序，这里直接采用
-        const want = state.lyricFontFamily || 'system-ui'
-        const items = list.includes(want) ? list : [want, ...list]
-        apFontFamily.innerHTML = items.map((f) => {
-          const label = f === 'system-ui' ? '默认（跟随系统）' : f
-          return '<option value="' + f + '">' + label + '</option>'
-        }).join('')
-        apFontFamily.value = want
-      }).catch(() => { /* 枚举失败保留默认项 */ })
+    // v1.3.9-beta6 真因：字体走独立 request-fonts/mini:fonts 通道在 data: 窗里始终收不到；
+    // 改随已验证通畅的 mini:state 通道下发 fontList，render 里一次性填充。
+    let fontsFilled = false
+    function tryFillFonts() {
+      if (fontsFilled) return
+      const list = state.fontList
+      if (!Array.isArray(list) || !list.length) return
+      const want = state.lyricFontFamily || 'system-ui'
+      const items = list.includes(want) ? list : [want, ...list]
+      apFontFamily.innerHTML = items.map((f) => {
+        const label = f === 'system-ui' ? '默认（跟随系统）' : f
+        return '<option value="' + f + '">' + label + '</option>'
+      }).join('')
+      apFontFamily.value = want
+      fontsFilled = true
     }
-    // 打开/关闭面板；面板内点击不冒泡到窗口拖拽层
-    $('appearBtn').onclick = (e) => { e.stopPropagation(); apPanel.classList.toggle('open') }
+    // 面板内点击不冒泡到窗口拖拽层
     apPanel.onclick = (e) => e.stopPropagation()
     render()
   </script>
@@ -460,6 +483,10 @@ export function showLyricWindow() {
   if (!win) return
   win.setAlwaysOnTop(true, 'screen-saver')
   win.showInactive()
+  // v1.3.9-beta6 枚举系统字体缓存后随 mini:state 下发给歌词窗字体下拉（data: 窗独立通道收不到，改走已验证通畅的 state 通道）
+  if (!cachedFontList.length) {
+    collectSystemFonts().then((list) => { cachedFontList = list; broadcast() }).catch(() => { /* 枚举失败保留默认项 */ })
+  }
   broadcast()
   notifyLyricVisible()
 }

@@ -3540,6 +3540,11 @@ body {
   min-width: 0;
 }
 
+/* v1.3.9-beta5 关于板块横跨两列，置于 grid 最下方 */
+.settings-span {
+  grid-column: 1 / -1;
+}
+
 .settings-panel {
   overflow: hidden;
   border-radius: 22px;
@@ -3576,6 +3581,8 @@ body {
 }
 
 .settings-row__text {
+  /* v1.3.9-beta1 fix: was only min-width:0 with no flex-grow, squeezed to min-content by the control in a space-between row, CJK label wrapped one glyph per line */
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -3598,6 +3605,7 @@ body {
 
 .settings-row__control {
   flex: 0 0 auto;
+  min-width: 0;
   max-width: min(390px, 46vw);
 }
 
@@ -3661,6 +3669,16 @@ body {
   transition:
     border-color var(--duration-fast) ease,
     box-shadow var(--duration-fast) ease;
+}
+
+.settings-select--font {
+  /* v1.3.9-beta2 治本：原生 select 默认宽度撑到最宽 option，字体列表含系统枚举的超长字体名会把框撑爆，
+     抢走整行宽度使左侧中文标签逐字竖排。固定宽 + 选中值省略号截断。 */
+  width: 220px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-select:focus {

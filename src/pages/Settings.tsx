@@ -257,76 +257,6 @@ export default function Settings() {
             </SettingsRow>
           </SettingsGroup>
 
-          <SettingsGroup title="歌单迁移" icon={<FileDown size={20} />}>
-            <div className="settings-actions settings-actions--stacked">
-              <button type="button" onClick={exportPlaylists}>
-                <FileDown size={14} />
-                导出歌单
-              </button>
-              <button type="button" onClick={() => importInputRef.current?.click()}>
-                <FileUp size={14} />
-                导入歌单
-              </button>
-              <input
-                ref={importInputRef}
-                type="file"
-                accept="application/json,.json"
-                hidden
-                onChange={(e) => importPlaylists(e.target.files?.[0])}
-              />
-              {playlistTransferMessage && <span>{playlistTransferMessage}</span>}
-            </div>
-          </SettingsGroup>
-
-          <SettingsGroup title="账号" icon={<UserRound size={20} />}>
-            <div className="settings-account">
-              <div className="settings-account__avatar">
-                {isLoggedIn && avatar ? <img src={avatar} alt="" /> : <UserRound size={22} />}
-              </div>
-              <div className="settings-account__body">
-                <span className={isLoggedIn ? 'is-online' : ''}>{isLoggedIn ? '已登录' : '未登录'}</span>
-                <strong>{isLoggedIn ? username : 'BiliBili 账号'}</strong>
-              </div>
-              <button type="button" onClick={isLoggedIn ? logout : () => setShowLogin(true)}>
-                {isLoggedIn ? <LogOut size={14} /> : <LogIn size={14} />}
-                {isLoggedIn ? '退出' : '登录'}
-              </button>
-            </div>
-          </SettingsGroup>
-
-          <SettingsGroup title="关于" icon={<Info size={20} />}>
-            <SettingsRow label="版本">
-              <span className="settings-version">BiliMusic v{appVersion}</span>
-            </SettingsRow>
-            <div className="settings-actions">
-              {!isHarmonyOS && (
-                <button type="button" onClick={checkUpdate}>
-                  <SettingsIcon size={14} />
-                  检查更新
-                </button>
-              )}
-              {!isHarmonyOS && updateAction && (
-                <button type="button" onClick={runUpdateAction}>
-                  <RefreshCw size={14} />
-                  {updateAction === 'restart' ? '重启并安装' : '立即重载'}
-                </button>
-              )}
-              <button type="button" onClick={() => window.electronAPI?.openExternal?.('https://github.com/SaiErOscar/BiliMusic')}>
-                <Github size={14} />
-                关于项目
-              </button>
-              <button type="button" onClick={() => {
-                const n = clearNonCriticalCache()
-                setCacheMsg(`已清除 ${n} 项歌词缓存`)
-                setTimeout(() => setCacheMsg(''), 3000)
-              }}>
-                <Trash2 size={14} />
-                清除缓存
-              </button>
-              {cacheMsg && <span className="settings-hint">{cacheMsg}</span>}
-              {updateStatus && <span>{updateStatus}</span>}
-            </div>
-          </SettingsGroup>
         </div>
 
         <div className="settings-column">
@@ -424,7 +354,78 @@ export default function Settings() {
               {lastSync && <span>上次同步：{new Date(lastSync).toLocaleString()}</span>}
             </div>
           </SettingsGroup>
+
+          <SettingsGroup title="歌单迁移" icon={<FileDown size={20} />}>
+            <div className="settings-actions settings-actions--stacked">
+              <button type="button" onClick={exportPlaylists}>
+                <FileDown size={14} />
+                导出歌单
+              </button>
+              <button type="button" onClick={() => importInputRef.current?.click()}>
+                <FileUp size={14} />
+                导入歌单
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json,.json"
+                hidden
+                onChange={(e) => importPlaylists(e.target.files?.[0])}
+              />
+              {playlistTransferMessage && <span>{playlistTransferMessage}</span>}
+            </div>
+          </SettingsGroup>
+
+          <SettingsGroup title="账号" icon={<UserRound size={20} />}>
+            <div className="settings-account">
+              <div className="settings-account__avatar">
+                {isLoggedIn && avatar ? <img src={avatar} alt="" /> : <UserRound size={22} />}
+              </div>
+              <div className="settings-account__body">
+                <span className={isLoggedIn ? 'is-online' : ''}>{isLoggedIn ? '已登录' : '未登录'}</span>
+                <strong>{isLoggedIn ? username : 'BiliBili 账号'}</strong>
+              </div>
+              <button type="button" onClick={isLoggedIn ? logout : () => setShowLogin(true)}>
+                {isLoggedIn ? <LogOut size={14} /> : <LogIn size={14} />}
+                {isLoggedIn ? '退出' : '登录'}
+              </button>
+            </div>
+          </SettingsGroup>
         </div>
+
+          <SettingsGroup title="关于" icon={<Info size={20} />} className="settings-span">
+            <SettingsRow label="版本">
+              <span className="settings-version">BiliMusic v{appVersion}</span>
+            </SettingsRow>
+            <div className="settings-actions">
+              {!isHarmonyOS && (
+                <button type="button" onClick={checkUpdate}>
+                  <SettingsIcon size={14} />
+                  检查更新
+                </button>
+              )}
+              {!isHarmonyOS && updateAction && (
+                <button type="button" onClick={runUpdateAction}>
+                  <RefreshCw size={14} />
+                  {updateAction === 'restart' ? '重启并安装' : '立即重载'}
+                </button>
+              )}
+              <button type="button" onClick={() => window.electronAPI?.openExternal?.('https://github.com/SaiErOscar/BiliMusic')}>
+                <Github size={14} />
+                关于项目
+              </button>
+              <button type="button" onClick={() => {
+                const n = clearNonCriticalCache()
+                setCacheMsg(`已清除 ${n} 项歌词缓存`)
+                setTimeout(() => setCacheMsg(''), 3000)
+              }}>
+                <Trash2 size={14} />
+                清除缓存
+              </button>
+              {cacheMsg && <span className="settings-hint">{cacheMsg}</span>}
+              {updateStatus && <span>{updateStatus}</span>}
+            </div>
+          </SettingsGroup>
       </div>
     </MusicPageShell>
   )
@@ -434,16 +435,19 @@ function SettingsGroup({
   title,
   icon,
   children,
+  className,
 }: {
   title: string
   icon: ReactNode
   children: ReactNode
+  className?: string
 }) {
-  return (
+  const inner = (
     <MusicSection title={title} icon={icon}>
       <div className="settings-panel">{children}</div>
     </MusicSection>
   )
+  return className ? <div className={className}>{inner}</div> : inner
 }
 
 function SettingsRow({
