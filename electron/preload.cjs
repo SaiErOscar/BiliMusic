@@ -137,7 +137,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // v1.3.8 枚举系统字体（主进程按平台分发）
   listSystemFonts: () => ipcRenderer.invoke('system-fonts:list'),
   // v1.3.9 全局放大镜取色器（desktopCapturer 抓屏 → 取色窗 → 回传 hex，取消返回 null）
-  openColorPicker: () => ipcRenderer.invoke('color-picker:open'),
+  openColorPicker: (initialHex) => ipcRenderer.invoke('color-picker:open', initialHex),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   checkForUpdate: () => ipcRenderer.invoke('updater:check'),
   quitAndInstall: () => ipcRenderer.send('updater:quit-and-install'),

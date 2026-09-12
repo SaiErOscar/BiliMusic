@@ -51,7 +51,7 @@ export type MiniCommand =
   | { type: 'close-lyric-window' }
   | { type: 'show-player' }
   | { type: 'update-lyric-appearance'; lyricTextColor?: string; lyricControlColor?: string; lyricFontSize?: number; lyricFontWeight?: number; lyricFontFamily?: string }
-  | { type: 'pick-color'; target: 'text' | 'ctrl' }
+  | { type: 'pick-color'; target: 'text' | 'ctrl'; current?: string }
 
 const defaultState: MiniPlayerState = {
   hasTrack: false,
@@ -168,10 +168,10 @@ function handleCommand(cmd: MiniCommand) {
       sendMainCommand(cmd)
       break
     case 'pick-color': {
-      // v1.3.9 桌面歌词面板取色：主进程弹全屏放大镜取色窗（data: 窗无法 invoke，改由主进程发起）。
-      // 选中色转成单字段 update-lyric-appearance 复用既有外观回流闭环，取消则不动。
+      // v1.3.9-pre3 桌面歌词面板取色：主进程弹自写取色面板窗（data: 窗无法 invoke，改由主进程发起），
+      // 携带当前色作初始值。面板确定后选中色转成单字段 update-lyric-appearance 复用既有外观回流闭环，取消则不动。
       const isCtrl = cmd.target === 'ctrl'
-      void openPicker().then((hex) => {
+      void openPicker(cmd.current).then((hex) => {
         if (!hex) return
         const patch = isCtrl
           ? { type: 'update-lyric-appearance' as const, lyricControlColor: hex }
@@ -271,10 +271,7 @@ function getLyricHtml() {
   #appearPanel .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 2px 0; }
   #appearPanel .row label { opacity: .8; white-space: nowrap; }
   #appearPanel input[type="color"] { width: 34px; height: 22px; border: none; border-radius: 5px; background: none; cursor: pointer; padding: 0; }
-  #appearPanel .apColorWrap { display: inline-flex; align-items: center; gap: 4px; }
-  #appearPanel .apPick { width: 22px; height: 22px; border: 1px solid rgba(255,255,255,.25); border-radius: 5px; background: rgba(255,255,255,.06); color: #fff; font-size: 12px; line-height: 1; cursor: pointer; padding: 0; display: none; }
-  #appearPanel .apPick:hover { border-color: #ff375f; }
-  #appearPanel .apPick:active { transform: scale(.94); }
+
   #appearPanel input[type="range"] { width: 96px; accent-color: var(--ctrl-color); cursor: pointer; }
   /* v1.3.9-beta8 修复：原生 select 展开的下拉列表配色由该元素的 color-scheme 决定，不跟 CSS 背景色，
      导致深色面板里弹出浅色列表。在 select 上显式指定，light 主题下再切回 light。 */
@@ -295,8 +292,8 @@ function getLyricHtml() {
     <button class="close" id="closeBtn" title="关闭桌面歌词">✕</button>
     <button class="gear" id="appearBtn" title="外观设置">⚙</button>
     <div id="appearPanel">
-      <div class="row"><label>文字颜色</label><span class="apColorWrap"><input type="color" id="apTextColor" value="#ffffff" /><button type="button" class="apPick" id="apTextPick" title="从屏幕取色">⌖</button></span></div>
-      <div class="row"><label>按钮颜色</label><span class="apColorWrap"><input type="color" id="apCtrlColor" value="#ff375f" /><button type="button" class="apPick" id="apCtrlPick" title="从屏幕取色">⌖</button></span></div>
+      <div class="row"><label>文字颜色</label><input type="color" id="apTextColor" value="#ffffff" /></div>
+      <div class="row"><label>按钮颜色</label><input type="color" id="apCtrlColor" value="#ff375f" /></div>
       <div class="row"><label>字号 <span class="val" id="apFontSizeVal">30</span></label><input type="range" id="apFontSize" min="18" max="60" step="1" value="30" /></div>
       <div class="row"><label>粗细 <span class="val" id="apFontWeightVal">820</span></label><input type="range" id="apFontWeight" min="400" max="900" step="20" value="820" /></div>
       <div class="row"><label>字体</label><select id="apFontFamily"><option value="system-ui">默认（跟随系统）</option></select></div>
@@ -488,21 +485,20 @@ function getLyricHtml() {
     // forEach(...)[apFontSize, apFontWeight] → undefined[HTMLInputElement] 抛错，中断脚本后半段，
     // 导致字号/粗细的 input/change 监听从 v1.3.5 起从未绑上（滑块靠原生行为可拖，松手后被回流
     // 重置回 state 值 = 用户看到的"弹回、无反应"）。改用命名数组 + 显式分号，不再出现行首 "["。
-    // v1.3.9-pre2 色块恢复为原生 input[type=color]（可直接输入十六进制、点色块弹系统调色板），保留即时预览 + 节流持久化
+    // v1.3.9-pre3 色块即取色入口（与设置页一致）：
+    // Windows → 拦截原生调色板，点色块弹自写取色面板窗（携带当前色作初始值），面板确定后主进程转
+    //   单字段 update-lyric-appearance 回流写 state→syncPanelInputs 回写色块 + applyAppearance 刷新 CSS 变量；
+    // 非 Windows → 保留原生 input[type=color]（即时预览 + 节流持久化）。
+    const isWin = /windows/i.test(navigator.userAgent)
     const colorInputs = [apTextColor, apCtrlColor]
-    colorInputs.forEach((el) => {
-      el.addEventListener('input', () => { apEditing = true; applyAppearance() })
-      el.addEventListener('change', () => { apEditing = false; applyAppearance() })
-    })
-    // v1.3.9-pre2 屏幕取色按钮：仅 Windows 显示（data: 窗无 electronAPI，用 UA 判断）。点击发 pick-color 命令，
-    // 主进程弹全屏透明十字准星无感取色（读打开时缓存的屏幕位图），选中色转单字段 update-lyric-appearance
-    // 回流写入 state→syncPanelInputs 回写色块。取色是原子操作，不置 apEditing。
-    if (/windows/i.test(navigator.userAgent)) {
-      const apTextPick = $('apTextPick'), apCtrlPick = $('apCtrlPick')
-      apTextPick.style.display = 'inline-block'
-      apCtrlPick.style.display = 'inline-block'
-      apTextPick.onclick = () => sendCommand({ type: 'pick-color', target: 'text' })
-      apCtrlPick.onclick = () => sendCommand({ type: 'pick-color', target: 'ctrl' })
+    if (isWin) {
+      apTextColor.addEventListener('click', (e) => { e.preventDefault(); sendCommand({ type: 'pick-color', target: 'text', current: apTextColor.value }) })
+      apCtrlColor.addEventListener('click', (e) => { e.preventDefault(); sendCommand({ type: 'pick-color', target: 'ctrl', current: apCtrlColor.value }) })
+    } else {
+      colorInputs.forEach((el) => {
+        el.addEventListener('input', () => { apEditing = true; applyAppearance() })
+        el.addEventListener('change', () => { apEditing = false; applyAppearance() })
+      })
     }
     const rangeInputs = [apFontSize, apFontWeight]
     rangeInputs.forEach((el) => {

@@ -1,8 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
-// v1.3.9-pre2 取色覆盖层专用 preload：点击时把"窗口内 CSS 坐标"发回主进程采样（主进程持打开时缓存的屏幕位图），
-// 取消则直接结束。透明覆盖层本身不回传任何截图，桌面画面保持不变。
+// v1.3.9-pre3 取色器 preload：面板窗与全屏准星覆盖层共用。
+// 面板窗：submit(hex) 确定回传、cancel() 取消、pick() 进入全屏准星；
+// 覆盖层：pickPoint() 点击瞬间抓屏取色、pickCancel() 返回面板。
 contextBridge.exposeInMainWorld('cpAPI', {
-  pick: (x, y) => ipcRenderer.send('color-picker:pick', x, y),
+  submit: (hex) => ipcRenderer.send('color-picker:submit', hex),
   cancel: () => ipcRenderer.send('color-picker:cancel'),
+  pick: () => ipcRenderer.send('color-picker:pick'),
+  pickPoint: () => ipcRenderer.send('color-picker:pick-point'),
+  pickCancel: () => ipcRenderer.send('color-picker:pick-cancel'),
 })

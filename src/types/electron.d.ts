@@ -219,7 +219,7 @@ declare global {
       onOpenNowPlaying?: (callback: () => void) => () => void
       openExternal: (url: string) => Promise<void>
       listSystemFonts: () => Promise<string[]>
-      openColorPicker?: () => Promise<string | null>
+      openColorPicker?: (initialHex?: string) => Promise<string | null>
       getAppVersion?: () => Promise<string>
       checkForUpdate?: () => Promise<void>
       quitAndInstall?: () => void
