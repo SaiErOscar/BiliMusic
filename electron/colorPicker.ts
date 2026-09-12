@@ -1,10 +1,12 @@
-// v1.3.9-pre3 全局取色器（Windows）：自写"取色面板窗"复刻原生 input[type=color] UI（SV 色板 + 色相条 +
+// v1.3.9-pre4 全局取色器（Windows）：自写"取色面板窗"复刻原生 input[type=color] UI（SV 色板 + 色相条 +
 // 吸管 + RGB/HEX 输入 + 预览 + 确定/取消），设置页与桌面歌词面板点色块都弹同一个面板窗（天然一致、入口收进色块）。
-// 面板里点"吸管"→ 隐藏面板、弹全屏透明十字准星覆盖层 → 用户在目标处点击 → 主进程"点击瞬间"抓该屏并按实测比例采样。
+// 面板里点"吸管"→ 隐藏面板、弹全屏透明十字准星覆盖层 → 用户在目标处点击 → 主进程"点击瞬间"抓该屏取色 →
+// 取到的色【回到面板显示预览】，不直接完成，用户在面板点"确定"才最终写入。
 //
-// 坐标修正（关键）：不再用 display.scaleFactor 估比例，改用 screen.getCursorScreenPoint()（虚拟 DIP，已含多屏原点）
-// 减去该屏 display.bounds 原点得屏内 DIP，再乘"实际返回位图宽 / 该屏逻辑宽"的真实比例映射到物理像素，
-// 规避 scaleFactor 与 desktopCapturer 实际尺寸不一致导致的整体偏移；覆盖层采样前先 hide，避免把准星截进去。
+// 坐标（pre4 关键修正）：改用【纯比例法】。覆盖层铺满某块屏，点击处 clientX/innerWidth 即该屏归一化比例，
+// 直接乘抓到的位图实际宽高得物理像素，绕开 DIP/scaleFactor/多屏原点的一切换算假设（pre3 用
+// getCursorScreenPoint-bounds 乘 scaleFactor，在缩放下参考系错位导致整体不准）。抓屏用创建覆盖层时锁定的
+// overlayDisplay，保证"窗口覆盖区域"与"位图区域"是同一块屏，比例才成立。
 import { BrowserWindow, ipcMain, screen, desktopCapturer } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -14,6 +16,7 @@ const __dirname = path.dirname(__filename)
 
 let panelWin: BrowserWindow | null = null
 let overlayWin: BrowserWindow | null = null
+let overlayDisplay: Electron.Display | null = null // 覆盖层锁定的屏，采样必须用同一块屏
 let pendingResolve: ((hex: string | null) => void) | null = null
 
 function cpPreloadPath() {
@@ -27,6 +30,7 @@ function closeWindows() {
   if (overlayWin && !overlayWin.isDestroyed()) overlayWin.close()
   panelWin = null
   overlayWin = null
+  overlayDisplay = null
 }
 
 function settle(hex: string | null) {
@@ -36,10 +40,14 @@ function settle(hex: string | null) {
   if (resolve) resolve(hex)
 }
 
-// 点击瞬间抓"光标所在屏"并按实测比例取该点 RGB（覆盖层/面板此时已隐藏，不会截进自身）
-async function capturePointColor(): Promise<string | null> {
-  const pt = screen.getCursorScreenPoint()
-  const display = screen.getDisplayNearestPoint(pt)
+// 点击瞬间抓 overlayDisplay 并按【窗口内比例】采样该点 RGB（覆盖层/面板此时已隐藏，不会截进自身）
+async function capturePointColor(
+  clientX: number,
+  clientY: number,
+  innerW: number,
+  innerH: number
+): Promise<string | null> {
+  const display = overlayDisplay || screen.getPrimaryDisplay()
   const scale = display.scaleFactor || 1
   const sources = await desktopCapturer.getSources({
     types: ['screen'],
@@ -53,13 +61,11 @@ async function capturePointColor(): Promise<string | null> {
   const img = source.thumbnail
   const { width: bw, height: bh } = img.getSize()
   const data = img.toBitmap()
-  // 光标虚拟 DIP → 屏内 DIP（减 bounds 原点，已含多屏/任务栏所在屏偏移）→ 物理像素（乘实测比例）
-  const localDipX = pt.x - display.bounds.x
-  const localDipY = pt.y - display.bounds.y
-  const ratioX = bw / display.size.width
-  const ratioY = bh / display.size.height
-  const px = Math.min(bw - 1, Math.max(0, Math.floor(localDipX * ratioX)))
-  const py = Math.min(bh - 1, Math.max(0, Math.floor(localDipY * ratioY)))
+  // 纯比例：窗口内 CSS 坐标 / 窗口 CSS 尺寸 = 归一化比例，乘位图实际像素尺寸（不假设位图= size*scale）
+  const nx = innerW > 0 ? clientX / innerW : 0
+  const ny = innerH > 0 ? clientY / innerH : 0
+  const px = Math.min(bw - 1, Math.max(0, Math.floor(nx * bw)))
+  const py = Math.min(bh - 1, Math.max(0, Math.floor(ny * bh)))
   const idx = (py * bw + px) * 4
   if (idx + 2 >= data.length) return null
   const r = data[idx]
@@ -90,8 +96,12 @@ function getOverlayHtml() {
         cross.style.top = e.clientY + 'px';
       });
       window.addEventListener('mousedown', function (e) {
-        if (e.button === 0) { window.cpAPI.pickPoint(); }
-        else { window.cpAPI.pickCancel(); }
+        if (e.button === 0) {
+          // 带窗口内坐标与窗口 CSS 尺寸，主进程按归一化比例映射到抓屏位图
+          window.cpAPI.pickPoint(e.clientX, e.clientY, window.innerWidth, window.innerHeight);
+        } else {
+          window.cpAPI.pickCancel();
+        }
       });
       window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
       window.addEventListener('keydown', function (e) { if (e.key === 'Escape') window.cpAPI.pickCancel(); });
@@ -100,7 +110,8 @@ function getOverlayHtml() {
   </body></html>`
 }
 
-// 取色面板窗：复刻原生 UI。initialHex 烘焙进 HTML，面板内维护 h/s/v，确定→submit(hex)，吸管→pick()
+// 取色面板窗：复刻原生 UI。initialHex 烘焙进 HTML，面板内维护 h/s/v，确定→submit(hex)，吸管→pick()，
+// 覆盖层取到的色经 onPicked 回填为预览（不自动确定），用户确认后才 submit。
 function getPanelHtml(initialHex: string) {
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     * { margin:0; padding:0; box-sizing:border-box; }
@@ -184,7 +195,7 @@ function getPanelHtml(initialHex: string) {
 
       function svFromEvent(e){ var r=sv.getBoundingClientRect(); S=clamp((e.clientX-r.left)/r.width,0,1); V=clamp(1-(e.clientY-r.top)/r.height,0,1); render({}); }
       function hueFromEvent(e){ var r=hue.getBoundingClientRect(); H=clamp((e.clientX-r.left)/r.width,0,1)*360; render({}); }
-      function drag(el,fn){ var down=false; el.addEventListener('pointerdown',function(e){ down=true; el.setPointerCapture(e.pointerId); fn(e); });
+      function drag(el,fn){ var down=false; el.addEventListener('pointerdown',function(e){ down=true; try{el.setPointerCapture(e.pointerId);}catch(_){ } fn(e); });
         el.addEventListener('pointermove',function(e){ if(down) fn(e); });
         el.addEventListener('pointerup',function(){ down=false; }); }
       drag(sv,svFromEvent); drag(hue,hueFromEvent);
@@ -198,6 +209,11 @@ function getPanelHtml(initialHex: string) {
       document.getElementById('cancel').onclick=function(){ window.cpAPI.cancel(); };
       document.getElementById('pip').onclick=function(){ window.cpAPI.pick(); };
       window.addEventListener('keydown',function(e){ if(e.key==='Enter'){ window.cpAPI.submit(currentHex()); } else if(e.key==='Escape'){ window.cpAPI.cancel(); } });
+
+      // v1.3.9-pre4 覆盖层取到的色回填为预览（更新色板/输入框/预览块），不自动确定，等用户点“确定”
+      if (window.cpAPI.onPicked) {
+        window.cpAPI.onPicked(function(hex){ var rgb=hexToRgb(hex); if(rgb){ setFromRgb(rgb[0],rgb[1],rgb[2],{}); } });
+      }
 
       var init=hexToRgb('${initialHex}') || [255,55,95];
       var hsv=rgbToHsv(init[0],init[1],init[2]); H=hsv[0]; S=hsv[1]; V=hsv[2]; render({});
@@ -230,6 +246,8 @@ function createOverlay(display: Electron.Display) {
     backgroundColor: '#00000000',
     resizable: false,
     movable: false,
+    minimizable: false,
+    maximizable: false,
     skipTaskbar: true,
     hasShadow: false,
     fullscreenable: false,
@@ -237,34 +255,50 @@ function createOverlay(display: Electron.Display) {
     show: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, preload: cpPreloadPath() },
   })
-  overlayWin.setAlwaysOnTop(true, 'screen-saver')
+  overlayWin.setAlwaysOnTop(true, 'screen-saver', 1)
   overlayWin.setVisibleOnAllWorkspaces(true)
   overlayWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getOverlayHtml())}`)
   overlayWin.once('ready-to-show', () => {
     if (overlayWin && !overlayWin.isDestroyed()) {
+      // 强制铺满整屏（含任务栏区域），规避 transparent 窗口底部/边缘被系统裁切导致“触不到屏幕底部”
+      overlayWin.setBounds({
+        x: display.bounds.x,
+        y: display.bounds.y,
+        width: display.bounds.width,
+        height: display.bounds.height,
+      })
       overlayWin.show()
       overlayWin.focus()
     }
   })
 }
 
-// 面板点吸管 → 隐藏面板、弹全屏准星；此后再点屏幕即"点击瞬间抓屏"取色
+// 面板点吸管 → 隐藏面板、弹全屏准星；此后再点屏幕即“点击瞬间抓屏”取色
 function startScreenPick() {
   if (panelWin && !panelWin.isDestroyed()) panelWin.hide()
   const cur = screen.getCursorScreenPoint()
-  createOverlay(screen.getDisplayNearestPoint(cur))
+  overlayDisplay = screen.getDisplayNearestPoint(cur)
+  createOverlay(overlayDisplay)
 }
 
-// 覆盖层左键：先隐藏覆盖层（避免把准星截进屏），稍等合成器去帧，再抓屏采样并直接返回最终色
-async function onOverlayPick() {
+// 覆盖层左键：先隐藏覆盖层（避免把准星截进屏），稍等合成器去帧，再抓屏采样。
+// 取到的色【不直接完成】：关覆盖层、回面板、把色 send 回面板作为预览，用户确认后才 submit。
+async function onOverlayPick(clientX: number, clientY: number, innerW: number, innerH: number) {
   if (overlayWin && !overlayWin.isDestroyed()) overlayWin.hide()
-  await new Promise((r) => setTimeout(r, 100))
-  const hex = await capturePointColor()
-  if (hex) settle(hex)
-  else backToPanel()
+  await new Promise((r) => setTimeout(r, 120))
+  const hex = await capturePointColor(clientX, clientY, innerW, innerH)
+  if (overlayWin && !overlayWin.isDestroyed()) overlayWin.close()
+  overlayWin = null
+  if (panelWin && !panelWin.isDestroyed()) {
+    if (hex) panelWin.webContents.send('color-picker:apply-picked', hex)
+    panelWin.show()
+    panelWin.focus()
+  } else {
+    settle(null)
+  }
 }
 
-// 覆盖层 Esc/右键：返回面板继续微调
+// 覆盖层 Esc/右键：返回面板继续微调（不回填颜色）
 function backToPanel() {
   if (overlayWin && !overlayWin.isDestroyed()) overlayWin.close()
   overlayWin = null
@@ -315,6 +349,7 @@ export async function openPicker(initialHex?: string): Promise<string | null> {
         pendingResolve = null
         if (overlayWin && !overlayWin.isDestroyed()) overlayWin.close()
         overlayWin = null
+        overlayDisplay = null
         r(null)
       }
     })
@@ -329,6 +364,10 @@ export function registerColorPickerHandlers() {
   })
   ipcMain.on('color-picker:cancel', () => settle(null))
   ipcMain.on('color-picker:pick', () => startScreenPick())
-  ipcMain.on('color-picker:pick-point', () => void onOverlayPick())
+  ipcMain.on('color-picker:pick-point', (_e, x: unknown, y: unknown, w: unknown, h: unknown) => {
+    if (typeof x === 'number' && typeof y === 'number' && typeof w === 'number' && typeof h === 'number') {
+      void onOverlayPick(x, y, w, h)
+    }
+  })
   ipcMain.on('color-picker:pick-cancel', () => backToPanel())
 }
