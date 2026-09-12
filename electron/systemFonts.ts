@@ -39,10 +39,20 @@ function listWindowsFonts(): Promise<string[]> {
     'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts',
     'HKCU\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts',
   ]
+  // v1.3.9-beta8 修复中文乱码：reg.exe 输出是系统 ANSI 代码页(简体中文 GBK/CP936)，
+  // 而 execFile 默认按 UTF-8 解码 stdout，中文字体名(隶书/幼圆/华文彩云…)全成乱码。
+  // 实测：同一输出 GBK 解出 14 行中文、UTF-8 解出 0 行。改为取 buffer 后按 GBK 解码。
+  const decodeAnsi = (buf: Buffer): string => {
+    try {
+      return new TextDecoder('gbk').decode(buf)
+    } catch {
+      return buf.toString('utf8')  // 极端环境不支持 gbk 时退回，至少英文字体名可用
+    }
+  }
   const one = (root: string) =>
     new Promise<void>((resolve) => {
-      execFile('reg', ['query', root], { windowsHide: true }, (err, stdout) => {
-        if (!err && stdout) parseRegFonts(stdout, set)
+      execFile('reg', ['query', root], { windowsHide: true, encoding: 'buffer' }, (err, stdout) => {
+        if (!err && stdout) parseRegFonts(decodeAnsi(stdout as unknown as Buffer), set)
         resolve()
       })
     })

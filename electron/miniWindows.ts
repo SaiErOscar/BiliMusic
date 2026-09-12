@@ -248,12 +248,15 @@ function getLyricHtml() {
     font-size: 11px; line-height: 1.3; min-width: 236px;
   }
   body.light #appearPanel { background: rgba(250, 250, 252, .95); border-color: rgba(0, 0, 0, .1); color: #333; }
+  body.light #appearPanel select { color-scheme: light; }
   #appearPanel.open { display: block; }
   #appearPanel .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 2px 0; }
   #appearPanel .row label { opacity: .8; white-space: nowrap; }
   #appearPanel input[type="color"] { width: 32px; height: 22px; border: none; border-radius: 5px; background: none; cursor: pointer; padding: 0; }
   #appearPanel input[type="range"] { width: 96px; accent-color: var(--ctrl-color); cursor: pointer; }
-  #appearPanel select { width: 132px; max-width: 132px; font-size: 12px; padding: 2px 4px; border-radius: 6px; background: rgba(255,255,255,.1); color: inherit; border: 1px solid rgba(255,255,255,.18); cursor: pointer; }
+  /* v1.3.9-beta8 修复：原生 select 展开的下拉列表配色由该元素的 color-scheme 决定，不跟 CSS 背景色，
+     导致深色面板里弹出浅色列表。在 select 上显式指定，light 主题下再切回 light。 */
+  #appearPanel select { color-scheme: dark; width: 132px; max-width: 132px; font-size: 12px; padding: 2px 4px; border-radius: 6px; background: rgba(255,255,255,.1); color: inherit; border: 1px solid rgba(255,255,255,.18); cursor: pointer; }
   #appearPanel .val { width: 34px; text-align: right; opacity: .7; font-variant-numeric: tabular-nums; }
   #repeatBadge { position: absolute; top: -3px; right: -3px; min-width: 11px; height: 11px; border-radius: 6px; background: rgba(0,0,0,.75); color: #fff; font-size: 8px; font-weight: 700; line-height: 11px; text-align: center; padding: 0 2px; }
   .vol { display: flex; align-items: center; gap: 6px; color: var(--lyric-color); opacity: .75; }
@@ -293,6 +296,23 @@ function getLyricHtml() {
     const $ = (id) => document.getElementById(id)
     const volInput = $('volume')
     let lyricTimer = null
+    // v1.3.9-beta8 外观面板「待回流保护」：松手后 250ms 进度回流会先于命令往返完成，用旧 state 值
+    // 覆盖 CSS 与控件，导致歌词闪回、滑块弹回、改动看似丢失。记录期望快照 apPending，state 未追上
+    // 前一律不覆盖（2s 超时兜底，防命令未绕回时永久失同步）。声明置于脚本最前：render 可能在任意
+    // 时刻被调用，若晚于 let 声明会触发 TDZ（v1.3.9-beta6 正是栽在这里，把整个歌词窗炸了）。
+    let apEditing = false
+    let apPending = null
+    function awaitingSettle() {
+      if (apEditing) return true
+      if (!apPending) return false
+      const settled = Number(state.lyricFontSize) === apPending.lyricFontSize
+        && Number(state.lyricFontWeight) === apPending.lyricFontWeight
+        && state.lyricTextColor === apPending.lyricTextColor
+        && state.lyricControlColor === apPending.lyricControlColor
+        && state.lyricFontFamily === apPending.lyricFontFamily
+      if (settled || Date.now() - apPending.at > 2000) { apPending = null; return false }
+      return true
+    }
 
     function activeIndex(t) {
       const lines = state.lyricLines || []
@@ -322,8 +342,8 @@ function getLyricHtml() {
       document.body.classList.toggle('light', (state.theme || 'dark') === 'light')
       // 应用用户自定义配色
       const root = document.documentElement
-      // 面板拖动预览期间跳过回流覆盖（progress 推送约 250ms 一次，避免预览闪烁）
-      if (typeof apEditing === 'undefined' || !apEditing) {
+      // v1.3.9-beta8 拖动预览 + 松手待回流期间都跳过 state 覆盖，避免歌词闪回旧样式
+      if (!awaitingSettle()) {
         root.style.setProperty('--lyric-color', state.lyricTextColor || '#ffffff')
         root.style.setProperty('--ctrl-color', state.lyricControlColor || '#ff375f')
         root.style.setProperty('--lyric-font-size', (state.lyricFontSize || 30) + 'px')
@@ -380,10 +400,10 @@ function getLyricHtml() {
     const apFontSize = $('apFontSize'), apFontWeight = $('apFontWeight')
     const apFontFamily = $('apFontFamily')
     let fontsFilled = false  // v1.3.9-beta7 提前声明：beta6 把它放在 forEach 之后，歌词窗脚本一旦在 forEach 处加载异常，fontsFilled 永不初始化，render→tryFillFonts 触发 TDZ 崩溃，拖垮整个 render（歌词卡在未在播放、颜色/字体全失效）
-    let apEditing = false  // 用户正在拖动面板控件时，状态回流不覆盖控件值
 
     function syncPanelInputs() {
       if (apEditing) return
+      if (awaitingSettle()) return
       if (apTextColor.value !== (state.lyricTextColor || '#ffffff')) apTextColor.value = state.lyricTextColor || '#ffffff'
       if (apCtrlColor.value !== (state.lyricControlColor || '#ff375f')) apCtrlColor.value = state.lyricControlColor || '#ff375f'
       if (Number(apFontSize.value) !== (state.lyricFontSize || 30)) apFontSize.value = state.lyricFontSize || 30
@@ -404,6 +424,7 @@ function getLyricHtml() {
         lyricFontSize: Number(apFontSize.value), lyricFontWeight: Number(apFontWeight.value),
         lyricFontFamily: apFontFamily.value,
       }
+      apPending = { ...snap, at: Date.now() }  // 记录期望值，state 追上后允许回流覆盖控件
       if (apTimer) clearTimeout(apTimer)
       apTimer = setTimeout(() => {
         sendCommand({ type: 'update-lyric-appearance', ...snap })
@@ -427,7 +448,15 @@ function getLyricHtml() {
     [apFontSize, apFontWeight].forEach((el) => {
       el.addEventListener('pointerdown', () => { apEditing = true })
       el.addEventListener('input', applyAppearance)
-      el.addEventListener('change', () => { apEditing = false })
+      // v1.3.9-beta8 松手即 flush 发送（不等 300ms 节流）缩短往返；apPending 继续保护直到 state 追上
+      el.addEventListener('change', () => {
+        apEditing = false
+        if (apTimer) { clearTimeout(apTimer); apTimer = null }
+        sendCommand({ type: 'update-lyric-appearance',
+          lyricTextColor: apTextColor.value, lyricControlColor: apCtrlColor.value,
+          lyricFontSize: Number(apFontSize.value), lyricFontWeight: Number(apFontWeight.value),
+          lyricFontFamily: apFontFamily.value })
+      })
     })
     // v1.3.8 字体下拉：选中即时预览 + 持久化
     apFontFamily.addEventListener('change', () => { applyAppearance() })
