@@ -18,11 +18,13 @@
 ;   故一并处理：安装时清掉旧卸载键跳过该路径，本版卸载器改用 RMDir /r 直删不再改名。
 ;
 ; 修复策略：
-; 1. customInit（安装器 onInit，运行于 initMultiUser 之后，目录预填不受影响）：
+; 1. customInit（安装器 onInit，运行于 initMultiUser 之后）：
 ;    a. 检测到 BiliMusic.exe 运行时先弹窗告知再关闭（替代 v1.3.4 的无提示强杀）；
-;    b. 清掉旧版卸载注册表键，使 uninstallOldVersion 找不到 UninstallString
-;       而直接跳过成因 B 的旧卸载器路径，升级退化为「覆盖安装 + 重写注册表」，
-;       不再依赖旧卸载器（本机 1.3.5 及更早的卸载器都有跨卷缺陷）。
+;    b. 只清掉旧版「卸载」注册表键(UNINSTALL_REGISTRY_KEY)，使 uninstallOldVersion
+;       找不到 UninstallString 而直接跳过成因 B 的旧卸载器路径，升级退化为
+;       「覆盖安装 + 重写注册表」，不再依赖旧卸载器（本机 1.3.5 及更早的
+;       卸载器都有跨卷缺陷）。注意：不能删 INSTALL_REGISTRY_KEY，否则安装目录页
+;       读不到历史 InstallLocation，会错误回落到默认路径（详见 customInit 注释）。
 ; 2. customCheckAppRunning：用 tasklist + taskkill 的简单循环替代内置的
 ;    PowerShell/CIM 进程检测（免疫执行策略与安全软件干扰）。
 ; 3. customRemoveFiles：本版卸载器删除文件改用 RMDir /r 直删，
@@ -70,12 +72,19 @@
     Sleep 800
   ${EndIf}
 
-  ; ---- 2. 清除旧版卸载注册表键，跳过有跨卷缺陷的旧卸载器 ----
-  ; initMultiUser 已在此之前读取 InstallLocation 完成目录预填，此处删键无副作用。
+  ; ---- 2. 清除旧版「卸载」注册表键，跳过有跨卷缺陷的旧卸载器 ----
+  ; uninstallOldVersion 仅以 UNINSTALL_REGISTRY_KEY\UninstallString 是否为空
+  ; 来决定是否运行旧卸载器（见 templates/nsis/include/installUtil.nsh），
+  ; 故只需删 UNINSTALL_REGISTRY_KEY 即可让旧卸载器被跳过。
+  ;
+  ; 关键修正：绝不能删 INSTALL_REGISTRY_KEY。安装目录页的 $INSTDIR 预填
+  ; 发生在 customInit/.onInit 之后的「安装模式页」里，由
+  ; setInstallModePerUser 宏实时 ReadRegStr INSTALL_REGISTRY_KEY InstallLocation
+  ; （见 templates/nsis/multiUser.nsh）。若在此删掉它，目录页读不到历史路径，
+  ; 会错误回落到默认安装目录——这正是旧版本「提示里是自定义地址、点下一步
+  ; 目录页却变默认地址」的根因。保留该键，目录页才能正确回填已安装地址。
   ; 覆盖安装由 7z 解包直接覆盖旧文件，安装完成后重写全新注册表键。
-  DeleteRegKey HKCU "${INSTALL_REGISTRY_KEY}"
   DeleteRegKey HKCU "${UNINSTALL_REGISTRY_KEY}"
-  DeleteRegKey HKLM "${INSTALL_REGISTRY_KEY}"
   DeleteRegKey HKLM "${UNINSTALL_REGISTRY_KEY}"
 !macroend
 
