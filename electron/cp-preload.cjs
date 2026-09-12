@@ -1,8 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
-// v1.3.9 取色器放大镜取色窗专用 preload：仅暴露"提交选中颜色"与"取消"两个出口，
-// 由取色页在用户点击/按 Esc/右键时调用，主进程据此 resolve 渲染层的 openColorPicker Promise。
+// v1.3.9-pre2 取色覆盖层专用 preload：点击时把"窗口内 CSS 坐标"发回主进程采样（主进程持打开时缓存的屏幕位图），
+// 取消则直接结束。透明覆盖层本身不回传任何截图，桌面画面保持不变。
 contextBridge.exposeInMainWorld('cpAPI', {
-  submit: (hex) => ipcRenderer.send('color-picker:submit', hex),
+  pick: (x, y) => ipcRenderer.send('color-picker:pick', x, y),
   cancel: () => ipcRenderer.send('color-picker:cancel'),
 })

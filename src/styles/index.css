@@ -3720,6 +3720,11 @@ body {
   transform: translateX(20px);
 }
 
+.settings-color-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .settings-color {
   width: 40px;
   height: 34px;
@@ -3731,21 +3736,21 @@ body {
 }
 .settings-color::-webkit-color-swatch-wrapper { padding: 0; }
 .settings-color::-webkit-color-swatch { border: none; border-radius: 6px; }
-.settings-color--pick {
-  position: relative;
-  width: 96px;
+.settings-color-pick {
+  width: 34px;
+  height: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: rgba(0, 0, 0, 0.65);
-  font-size: 12px;
-  font-family: Consolas, monospace;
-  text-shadow: 0 0 2px rgba(255, 255, 255, 0.6);
-  transition: transform 0.1s ease, opacity 0.15s ease;
+  border: 1px solid color-mix(in srgb, var(--text-secondary) 30%, transparent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: transform 0.1s ease, color 0.15s ease, border-color 0.15s ease;
 }
-.settings-color--pick:hover { transform: scale(1.03); }
-.settings-color--pick:disabled { opacity: 0.6; cursor: progress; }
-.settings-color__hex { pointer-events: none; }
+.settings-color-pick:hover { color: var(--accent, #ff375f); border-color: var(--accent, #ff375f); transform: scale(1.05); }
+.settings-color-pick:disabled { opacity: 0.6; cursor: progress; }
 
 .settings-path {
   display: inline-flex;

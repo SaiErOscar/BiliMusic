@@ -1,7 +1,8 @@
-// v1.3.9 全局取色器（Windows 优先）：desktopCapturer 截鼠标所在屏 → 全屏放大镜取色窗 → 回传 hex
-// 设计：openColorPicker() 在渲染层是一次 invoke，返回 Promise<string|null>。主进程抓屏后把截图与
-// 取色页 HTML 一起写进临时目录，用 loadFile 打开全屏取色窗（同源 file://，无需关 webSecurity）；
-// 用户在放大镜里点选颜色后，取色窗通过 preload send 'color-picker:submit'，主进程 resolve 并清理临时文件。
+// v1.3.9-pre2 全局取色器（Windows）：透明全屏"十字准星"覆盖层，桌面画面保持不变，点击处取色。
+// 关键：openPicker() 打开瞬间抓一次屏缓存为位图（RGBA Buffer），之后弹一个全透明的置顶无边框窗，
+// 窗里只画跟随鼠标的十字准星（纯 DOM），用户点哪 → 渲染层把点击坐标发回主进程 → 主进程从"打开时的缓存"
+// 里读出该点 RGB 回传。因为读的是预抓缓存而非重新截屏，取色窗本身（透明、只画准星）不会被截进去，
+// 用户看到的桌面画面从头到尾不变，只是多了一个可点到屏幕任意位置的十字标记。
 import { app, BrowserWindow, ipcMain, screen, desktopCapturer } from 'electron'
 import fs from 'fs'
 import path from 'path'
@@ -12,6 +13,8 @@ const __dirname = path.dirname(__filename)
 
 let pickerWindow: BrowserWindow | null = null
 let pendingResolve: ((hex: string | null) => void) | null = null
+// 打开时缓存的屏幕位图：RGBA 物理像素 buffer + 物理宽 + 该屏 DIP→物理 的缩放系数 + 屏原点
+let cachedShot: { data: Buffer; width: number; height: number; scale: number } | null = null
 
 function cpPreloadPath() {
   return process.env.VITE_DEV_SERVER_URL
@@ -24,111 +27,72 @@ function tempDir() {
 }
 
 function cleanupTemp(dir: string) {
-  try {
-    fs.rmSync(dir, { recursive: true, force: true })
-  } catch {
-    /* 临时文件清理失败不影响功能，OS 会回收 temp */
-  }
+  try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* OS 会回收 temp */ }
 }
 
 function settle(hex: string | null) {
   const resolve = pendingResolve
   pendingResolve = null
+  cachedShot = null
   if (pickerWindow && !pickerWindow.isDestroyed()) pickerWindow.close()
   pickerWindow = null
-  cleanupTemp(tempDir())
+  try { cleanupTemp(tempDir()) } catch { /* 忽略 */ }
   if (resolve) resolve(hex)
 }
 
-function getPickHtml(shotDataUrl: string) {
-  // 放大镜取色页：背景为整屏截图，跟随鼠标的放大镜，点击采样像素 RGB 回传
-  // 截图以 dataURL 内嵌（而非 file:// 图片）：file:// 图源画进 canvas 会被 Chromium 判跨源污染，
-  // getImageData 抛 SecurityError 致取色失效；dataURL 图源允许回读像素。
+// 从缓存位图按"窗口内 CSS 坐标"取色：CSS(DIP) × scale → 物理像素，边界钳制后读 RGBA
+function sampleAtWindowPoint(cssX: number, cssY: number): string | null {
+  const shot = cachedShot
+  if (!shot) return null
+  const px = Math.min(shot.width - 1, Math.max(0, Math.floor(cssX * shot.scale)))
+  const py = Math.min(shot.height - 1, Math.max(0, Math.floor(cssY * shot.scale)))
+  const idx = (py * shot.width + px) * 4
+  if (idx + 2 >= shot.data.length) return null
+  const r = shot.data[idx], g = shot.data[idx + 1], b = shot.data[idx + 2]
+  return '#' + [r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('')
+}
+
+// 取色覆盖层：body 全透明，唯一可见元素是跟随鼠标的十字准星 + 中心高亮框。点击/右键/Esc 通过 cpAPI 回主进程。
+function getPickHtml() {
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     * { margin:0; padding:0; box-sizing:border-box; }
-    html,body { width:100%; height:100%; overflow:hidden; cursor:crosshair; background:#000;
-      font-family:'Microsoft YaHei',system-ui,sans-serif; user-select:none; -webkit-user-select:none; }
-    #shot { position:fixed; inset:0; width:100%; height:100%; display:block; }
-    #tip { position:fixed; left:50%; top:24px; transform:translateX(-50%);
-      background:rgba(20,20,24,.9); color:#fff; padding:8px 16px; border-radius:20px; font-size:13px;
-      border:1px solid rgba(255,255,255,.15); white-space:nowrap; pointer-events:none; }
-    #lens { position:fixed; width:152px; height:152px; border:2px solid #ff375f; border-radius:8px;
-      background:#000; box-shadow:0 4px 20px rgba(0,0,0,.5); display:none; pointer-events:none; z-index:5; }
-    #lens canvas { width:100%; height:100%; image-rendering:pixelated; display:block; border-radius:6px; }
-    #hex { position:fixed; margin-top:8px; width:152px; text-align:center; background:rgba(20,20,24,.92);
-      color:#fff; font-size:13px; padding:5px 0; border-radius:6px; border:1px solid rgba(255,255,255,.15);
-      display:none; pointer-events:none; z-index:5; font-family:Consolas,monospace; }
+    html, body { width:100%; height:100%; overflow:hidden; background:transparent;
+      cursor:none; user-select:none; -webkit-user-select:none;
+      font-family:'Microsoft YaHei',system-ui,sans-serif; }
+    #cross { position:fixed; display:none; pointer-events:none; z-index:10; }
+    #cross .h { position:absolute; left:-120px; top:0; width:240px; height:1px;
+      background:#ff375f; box-shadow:0 0 1px rgba(0,0,0,.8); }
+    #cross .v { position:absolute; top:-120px; left:0; width:1px; height:240px;
+      background:#ff375f; box-shadow:0 0 1px rgba(0,0,0,.8); }
+    #cross .box { position:absolute; left:-6px; top:-6px; width:11px; height:11px;
+      border:1px solid #fff; box-shadow:0 0 0 1px rgba(0,0,0,.6), inset 0 0 0 1px rgba(0,0,0,.4); }
+    #tip { position:fixed; left:50%; top:20px; transform:translateX(-50%);
+      background:rgba(20,20,24,.9); color:#fff; padding:7px 14px; border-radius:18px; font-size:12.5px;
+      border:1px solid rgba(255,255,255,.15); white-space:nowrap; pointer-events:none; z-index:10; }
   </style></head><body>
-    <img id="shot" src="${shotDataUrl}" alt="">
-    <div id="tip">点击拾取颜色 · 按 Esc 或右键取消</div>
-    <div id="lens"><canvas id="lc" width="150" height="150"></canvas></div>
-    <div id="hex"></div>
+    <div id="tip">移动十字到目标颜色上，点击取色 · 右键 / Esc 取消</div>
+    <div id="cross"><div class="h"></div><div class="v"></div><div class="box"></div></div>
     <script>
-      const shot = document.getElementById('shot')
-      const lens = document.getElementById('lens')
-      const lc = document.getElementById('lc')
-      const lctx = lc.getContext('2d')
-      const hexEl = document.getElementById('hex')
-      let full = document.createElement('canvas')
-      let fctx = full.getContext('2d', { willReadFrequently: true })
-      let ready = false
-
-      function prepare() {
-        // 用截图原始像素尺寸建 1:1 采样画布；显示按视口 CSS 宽高缩放，采样需乘以 factor
-        full.width = shot.naturalWidth
-        full.height = shot.naturalHeight
-        fctx.drawImage(shot, 0, 0)
-        ready = true
-      }
-      if (shot.complete && shot.naturalWidth) prepare()
-      else shot.onload = prepare
-
-      function factor() { return ready ? shot.naturalWidth / window.innerWidth : 1 }
-      function sample(cx, cy) {
-        const f = factor()
-        const px = Math.min(full.width - 1, Math.max(0, Math.floor(cx * f)))
-        const py = Math.min(full.height - 1, Math.max(0, Math.floor(cy * f)))
-        return { px, py }
-      }
-      function rgbAt(px, py) {
-        const d = fctx.getImageData(px, py, 1, 1).data
-        return { r:d[0], g:d[1], b:d[2], hex:'#'+[d[0],d[1],d[2]].map(x=>x.toString(16).padStart(2,'0')).join('') }
-      }
-      function moveLens(cx, cy) {
-        if (!ready) return
-        const { px, py } = sample(cx, cy)
-        const z = 10, src = 15
-        lctx.imageSmoothingEnabled = false
-        lctx.clearRect(0,0,150,150)
-        lctx.drawImage(full, px - src/2, py - src/2, src, src, 0, 0, 150, 150)
-        let lx = cx + 20, ly = cy + 20
-        if (lx + 152 > window.innerWidth) lx = cx - 172
-        if (ly + 180 > window.innerHeight) ly = cy - 180
-        lens.style.left = lx + 'px'; lens.style.top = ly + 'px'
-        lens.style.display = 'block'
-        hexEl.style.left = lx + 'px'; hexEl.style.top = (ly + 152) + 'px'
-        hexEl.textContent = rgbAt(px, py).hex.toUpperCase()
-        hexEl.style.display = 'block'
-      }
-      window.addEventListener('mousemove', (e) => moveLens(e.clientX, e.clientY))
-      window.addEventListener('click', (e) => {
-        if (!ready) return
-        const { px, py } = sample(e.clientX, e.clientY)
-        window.cpAPI.submit(rgbAt(px, py).hex)
+      var cross = document.getElementById('cross')
+      window.addEventListener('mousemove', function (e) {
+        cross.style.display = 'block'
+        cross.style.left = e.clientX + 'px'
+        cross.style.top = e.clientY + 'px'
       })
-      window.addEventListener('contextmenu', (e) => { e.preventDefault(); window.cpAPI.cancel() })
-      window.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.cpAPI.cancel() })
+      window.addEventListener('mousedown', function (e) {
+        // 左键取色（坐标为窗口内 CSS 像素，主进程乘该屏 scale 映射到物理像素采样）
+        if (e.button === 0) window.cpAPI.pick(e.clientX, e.clientY)
+        else window.cpAPI.cancel() // 右键取消
+      })
+      window.addEventListener('contextmenu', function (e) { e.preventDefault() })
+      window.addEventListener('keydown', function (e) { if (e.key === 'Escape') window.cpAPI.cancel() })
+      window.focus()
     </script>
   </body></html>`
 }
 
-export async function openPicker(): Promise<string | null> {
-  if (pendingResolve) settle(null) // 上一次未结束则取消
-
-  const cursor = screen.getCursorScreenPoint()
-  const display = screen.getDisplayNearestPoint(cursor)
+async function grabScreen(display: Electron.Display) {
   const scale = display.scaleFactor || 1
-
   const sources = await desktopCapturer.getSources({
     types: ['screen'],
     thumbnailSize: {
@@ -136,16 +100,28 @@ export async function openPicker(): Promise<string | null> {
       height: Math.round(display.size.height * scale),
     },
   })
-  // 找到鼠标所在屏（display_id 匹配），兜底取第一个
-  const source =
-    sources.find((s) => String(s.display_id) === String(display.id)) || sources[0]
+  const source = sources.find((s) => String(s.display_id) === String(display.id)) || sources[0]
   if (!source || source.thumbnail.isEmpty()) return null
+  const bitmap = source.thumbnail.toBitmap() // RGBA Buffer，宽=bitmap/(4*height)
+  return {
+    data: bitmap,
+    width: source.thumbnail.getSize().width,
+    height: source.thumbnail.getSize().height,
+    scale,
+  }
+}
 
-  const dir = tempDir()
-  fs.mkdirSync(dir, { recursive: true })
-  const b64 = source.thumbnail.toPNG().toString('base64')
-  const htmlPath = path.join(dir, 'pick.html')
-  fs.writeFileSync(htmlPath, getPickHtml('data:image/png;base64,' + b64), 'utf8')
+export async function openPicker(): Promise<string | null> {
+  // Windows 独占：其他平台屏幕取色需额外权限/能力受限，渲染层也不会走到这里（按钮隐藏），此处双保险。
+  if (process.platform !== 'win32') return null
+  if (pendingResolve) settle(null)
+
+  const cursor = screen.getCursorScreenPoint()
+  const display = screen.getDisplayNearestPoint(cursor)
+
+  const shot = await grabScreen(display)
+  if (!shot) return null
+  cachedShot = shot
 
   return new Promise<string | null>((resolve) => {
     pendingResolve = resolve
@@ -155,12 +131,17 @@ export async function openPicker(): Promise<string | null> {
       width: display.bounds.width,
       height: display.bounds.height,
       frame: false,
+      transparent: true,
+      backgroundColor: '#00000000',
       resizable: false,
       movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
       alwaysOnTop: true,
       skipTaskbar: true,
       hasShadow: false,
-      backgroundColor: '#000000',
+      show: false,
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
@@ -168,14 +149,22 @@ export async function openPicker(): Promise<string | null> {
       },
     })
     pickerWindow.setAlwaysOnTop(true, 'screen-saver')
-    pickerWindow.loadFile(htmlPath)
+    pickerWindow.setVisibleOnAllWorkspaces(true)
+    pickerWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getPickHtml())}`)
+    pickerWindow.once('ready-to-show', () => {
+      if (pickerWindow && !pickerWindow.isDestroyed()) {
+        pickerWindow.show()
+        pickerWindow.focus()
+      }
+    })
     pickerWindow.on('closed', () => {
       pickerWindow = null
       if (pendingResolve) {
         const r = pendingResolve
         pendingResolve = null
-        cleanupTemp(dir)
-        r(null) // 用户直接关窗视为取消
+        cachedShot = null
+        cleanupTemp(tempDir())
+        r(null)
       }
     })
   })
@@ -183,8 +172,11 @@ export async function openPicker(): Promise<string | null> {
 
 export function registerColorPickerHandlers() {
   ipcMain.handle('color-picker:open', () => openPicker())
-  ipcMain.on('color-picker:submit', (_e, hex: unknown) => {
-    settle(typeof hex === 'string' && hex ? hex : null)
+  // 渲染层点击：坐标是窗口内 CSS 像素；主进程从打开时缓存的位图采样并回传 hex。
+  ipcMain.on('color-picker:pick', (_e, x: unknown, y: unknown) => {
+    const hex =
+      typeof x === 'number' && typeof y === 'number' ? sampleAtWindowPoint(x, y) : null
+    settle(hex)
   })
   ipcMain.on('color-picker:cancel', () => settle(null))
 }

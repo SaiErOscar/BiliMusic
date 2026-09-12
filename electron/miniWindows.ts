@@ -270,9 +270,11 @@ function getLyricHtml() {
   #appearPanel.open { display: block; }
   #appearPanel .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 2px 0; }
   #appearPanel .row label { opacity: .8; white-space: nowrap; }
-  #appearPanel .apColor { width: 60px; height: 22px; border: 1px solid rgba(255,255,255,.25); border-radius: 5px; cursor: pointer; padding: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.2); }
-  #appearPanel .apColor:hover { border-color: #ff375f; }
-  #appearPanel .apColor:active { transform: scale(.96); }
+  #appearPanel input[type="color"] { width: 34px; height: 22px; border: none; border-radius: 5px; background: none; cursor: pointer; padding: 0; }
+  #appearPanel .apColorWrap { display: inline-flex; align-items: center; gap: 4px; }
+  #appearPanel .apPick { width: 22px; height: 22px; border: 1px solid rgba(255,255,255,.25); border-radius: 5px; background: rgba(255,255,255,.06); color: #fff; font-size: 12px; line-height: 1; cursor: pointer; padding: 0; display: none; }
+  #appearPanel .apPick:hover { border-color: #ff375f; }
+  #appearPanel .apPick:active { transform: scale(.94); }
   #appearPanel input[type="range"] { width: 96px; accent-color: var(--ctrl-color); cursor: pointer; }
   /* v1.3.9-beta8 修复：原生 select 展开的下拉列表配色由该元素的 color-scheme 决定，不跟 CSS 背景色，
      导致深色面板里弹出浅色列表。在 select 上显式指定，light 主题下再切回 light。 */
@@ -293,8 +295,8 @@ function getLyricHtml() {
     <button class="close" id="closeBtn" title="关闭桌面歌词">✕</button>
     <button class="gear" id="appearBtn" title="外观设置">⚙</button>
     <div id="appearPanel">
-      <div class="row"><label>文字颜色</label><button type="button" class="apColor" id="apTextColor" title="点击从屏幕取色"></button></div>
-      <div class="row"><label>按钮颜色</label><button type="button" class="apColor" id="apCtrlColor" title="点击从屏幕取色"></button></div>
+      <div class="row"><label>文字颜色</label><span class="apColorWrap"><input type="color" id="apTextColor" value="#ffffff" /><button type="button" class="apPick" id="apTextPick" title="从屏幕取色">⌖</button></span></div>
+      <div class="row"><label>按钮颜色</label><span class="apColorWrap"><input type="color" id="apCtrlColor" value="#ff375f" /><button type="button" class="apPick" id="apCtrlPick" title="从屏幕取色">⌖</button></span></div>
       <div class="row"><label>字号 <span class="val" id="apFontSizeVal">30</span></label><input type="range" id="apFontSize" min="18" max="60" step="1" value="30" /></div>
       <div class="row"><label>粗细 <span class="val" id="apFontWeightVal">820</span></label><input type="range" id="apFontWeight" min="400" max="900" step="20" value="820" /></div>
       <div class="row"><label>字体</label><select id="apFontFamily"><option value="system-ui">默认（跟随系统）</option></select></div>
@@ -441,9 +443,8 @@ function getLyricHtml() {
     function syncPanelInputs() {
       if (apEditing) return
       if (awaitingSettle()) return
-      // v1.3.9 色块改为按钮（无 value），颜色以 state 为权威，色块背景仅做预览
-      apTextColor.style.background = state.lyricTextColor || '#ffffff'
-      apCtrlColor.style.background = state.lyricControlColor || '#ff375f'
+      if (apTextColor.value !== (state.lyricTextColor || '#ffffff')) apTextColor.value = state.lyricTextColor || '#ffffff'
+      if (apCtrlColor.value !== (state.lyricControlColor || '#ff375f')) apCtrlColor.value = state.lyricControlColor || '#ff375f'
       if (Number(apFontSize.value) !== (state.lyricFontSize || 30)) apFontSize.value = state.lyricFontSize || 30
       if (Number(apFontWeight.value) !== (state.lyricFontWeight || 820)) apFontWeight.value = state.lyricFontWeight || 820
       $('apFontSizeVal').textContent = String(state.lyricFontSize || 30)
@@ -458,7 +459,7 @@ function getLyricHtml() {
       // v1.3.9-beta6 真因：原节流到点才读 DOM，但拖完松手后 250ms 进度回流会先把滑块重置回旧 state 值，
       // 到点读到的是被重置的旧值→永远发旧值（字号/粗细改不动）。改为调用时捕获快照值。
       const snap = {
-        lyricTextColor: state.lyricTextColor || '#ffffff', lyricControlColor: state.lyricControlColor || '#ff375f',
+        lyricTextColor: apTextColor.value, lyricControlColor: apCtrlColor.value,
         lyricFontSize: Number(apFontSize.value), lyricFontWeight: Number(apFontWeight.value),
         lyricFontFamily: apFontFamily.value,
       }
@@ -474,8 +475,8 @@ function getLyricHtml() {
     }
     function applyAppearance() {
       const root = document.documentElement
-      root.style.setProperty('--lyric-color', state.lyricTextColor || '#ffffff')
-      root.style.setProperty('--ctrl-color', state.lyricControlColor || '#ff375f')
+      root.style.setProperty('--lyric-color', apTextColor.value)
+      root.style.setProperty('--ctrl-color', apCtrlColor.value)
       root.style.setProperty('--lyric-font-size', apFontSize.value + 'px')
       root.style.setProperty('--lyric-font-weight', apFontWeight.value)
       if (apFontFamily.value) root.style.setProperty('--lyric-font-family', apFontFamily.value)
@@ -487,11 +488,22 @@ function getLyricHtml() {
     // forEach(...)[apFontSize, apFontWeight] → undefined[HTMLInputElement] 抛错，中断脚本后半段，
     // 导致字号/粗细的 input/change 监听从 v1.3.5 起从未绑上（滑块靠原生行为可拖，松手后被回流
     // 重置回 state 值 = 用户看到的"弹回、无反应"）。改用命名数组 + 显式分号，不再出现行首 "["。
-    // v1.3.9 色块改为按钮：点击请求主进程弹全屏放大镜取色窗。取色是原子操作（openPicker 返回即最终值），
-    // 不置 apEditing：选中色转成 update-lyric-appearance 命令，经主窗口持久化回流写入 state，
-    // render→syncPanelInputs 读 state 刷新色块背景与 --lyric-color，复用 beta9 已验证的回流链路。
-    apTextColor.onclick = () => sendCommand({ type: 'pick-color', target: 'text' })
-    apCtrlColor.onclick = () => sendCommand({ type: 'pick-color', target: 'ctrl' })
+    // v1.3.9-pre2 色块恢复为原生 input[type=color]（可直接输入十六进制、点色块弹系统调色板），保留即时预览 + 节流持久化
+    const colorInputs = [apTextColor, apCtrlColor]
+    colorInputs.forEach((el) => {
+      el.addEventListener('input', () => { apEditing = true; applyAppearance() })
+      el.addEventListener('change', () => { apEditing = false; applyAppearance() })
+    })
+    // v1.3.9-pre2 屏幕取色按钮：仅 Windows 显示（data: 窗无 electronAPI，用 UA 判断）。点击发 pick-color 命令，
+    // 主进程弹全屏透明十字准星无感取色（读打开时缓存的屏幕位图），选中色转单字段 update-lyric-appearance
+    // 回流写入 state→syncPanelInputs 回写色块。取色是原子操作，不置 apEditing。
+    if (/windows/i.test(navigator.userAgent)) {
+      const apTextPick = $('apTextPick'), apCtrlPick = $('apCtrlPick')
+      apTextPick.style.display = 'inline-block'
+      apCtrlPick.style.display = 'inline-block'
+      apTextPick.onclick = () => sendCommand({ type: 'pick-color', target: 'text' })
+      apCtrlPick.onclick = () => sendCommand({ type: 'pick-color', target: 'ctrl' })
+    }
     const rangeInputs = [apFontSize, apFontWeight]
     rangeInputs.forEach((el) => {
       el.addEventListener('pointerdown', () => { apEditing = true })
@@ -503,7 +515,7 @@ function getLyricHtml() {
         applyAppearance()
         if (apTimer) { clearTimeout(apTimer); apTimer = null }
         sendCommand({ type: 'update-lyric-appearance',
-          lyricTextColor: state.lyricTextColor || '#ffffff', lyricControlColor: state.lyricControlColor || '#ff375f',
+          lyricTextColor: apTextColor.value, lyricControlColor: apCtrlColor.value,
           lyricFontSize: Number(apFontSize.value), lyricFontWeight: Number(apFontWeight.value),
           lyricFontFamily: apFontFamily.value })
       })
