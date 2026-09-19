@@ -41,6 +41,9 @@ export interface MiniPlayerState {
   /** v1.3.10 自动颜色开关：歌词文字色（封面提色）/ 控件色（窗周围背景采样） */
   autoTextColor: boolean
   autoControlColor: boolean
+  /** v1.3.10 自动色算出的实际颜色（与手动色分离；开关开且非空时歌词窗显示之） */
+  autoLyricTextColor: string
+  autoLyricControlColor: string
 }
 
 export type MiniCommand =
@@ -54,7 +57,7 @@ export type MiniCommand =
   | { type: 'show-lyric-window' }
   | { type: 'close-lyric-window' }
   | { type: 'show-player' }
-  | { type: 'update-lyric-appearance'; lyricTextColor?: string; lyricControlColor?: string; lyricFontSize?: number; lyricFontWeight?: number; lyricFontFamily?: string }
+  | { type: 'update-lyric-appearance'; lyricTextColor?: string; lyricControlColor?: string; lyricFontSize?: number; lyricFontWeight?: number; lyricFontFamily?: string; autoLyricTextColor?: string; autoLyricControlColor?: string; autoTextColor?: boolean; autoControlColor?: boolean }
   | { type: 'pick-color'; target: 'text' | 'ctrl'; current?: string }
 
 const defaultState: MiniPlayerState = {
@@ -79,6 +82,8 @@ const defaultState: MiniPlayerState = {
   fontList: [],
   autoTextColor: false,
   autoControlColor: false,
+  autoLyricTextColor: '',
+  autoLyricControlColor: '',
 }
 
 let miniState: MiniPlayerState = { ...defaultState }
@@ -91,9 +96,12 @@ let lastCoverKey = ''
 // 控件自动色定时器（每 5 秒采样窗周围背景取对比色）
 let controlColorTimer: NodeJS.Timeout | null = null
 
-/** 把自动算出的颜色经现有外观回流通道持久化到 AppSettings（单一数据源不变） */
-function pushAutoColor(patch: { lyricTextColor?: string; lyricControlColor?: string }) {
-  if (!patch.lyricTextColor && !patch.lyricControlColor) return
+/**
+ * 把自动算出的颜色经外观回流通道持久化到独立的 autoLyric* 字段（不覆盖手动色），
+ * 歌词窗按「开关开且自动色就绪」显示自动色、否则显示手动色。关闭开关天然回到开启前的手动色。
+ */
+function pushAutoColor(patch: { autoLyricTextColor?: string; autoLyricControlColor?: string }) {
+  if (!patch.autoLyricTextColor && !patch.autoLyricControlColor) return
   sendMainCommand({ type: 'update-lyric-appearance', ...patch })
 }
 
@@ -104,7 +112,7 @@ function maybeApplyCoverColor() {
   if (key === lastCoverKey) return
   lastCoverKey = key
   void extractCoverTextColor(miniState.coverUrl, miniState.theme).then((hex) => {
-    if (hex) pushAutoColor({ lyricTextColor: hex })
+    if (hex) pushAutoColor({ autoLyricTextColor: hex })
   })
 }
 
@@ -128,7 +136,7 @@ async function runControlColorSample() {
   try {
     const rect = lyricWindow.getBounds()
     const hex = await sampleControlColor(rect, 40)
-    if (hex) pushAutoColor({ lyricControlColor: hex })
+    if (hex) pushAutoColor({ autoLyricControlColor: hex })
   } catch {
     /* 抓屏失败静默降级，保持当前控件色 */
   }
@@ -332,9 +340,12 @@ function getLyricHtml() {
   #appearPanel.open { display: block; }
   #appearPanel .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 2px 0; }
   #appearPanel .row label { opacity: .8; white-space: nowrap; }
-  /* v1.3.10 自动颜色开启时对应行置灰（文字/按钮色不可手动改） */
-  #appearPanel .row.ap-dim { opacity: .4; }
-  #appearPanel .row.ap-dim input[type="color"] { cursor: not-allowed; pointer-events: none; }
+  /* v1.3.10 自动颜色：色块容器 + 行内「自动」开关；自动开启时色块置灰不可手动改，开关仍可关 */
+  #appearPanel .ap-right { display: flex; align-items: center; gap: 8px; }
+  #appearPanel .ap-auto { display: flex; align-items: center; gap: 3px; font-size: 11px; opacity: .75; cursor: pointer; white-space: nowrap; }
+  #appearPanel .ap-auto input { accent-color: var(--ctrl-color); cursor: pointer; width: 13px; height: 13px; }
+  #appearPanel .ap-right.dim { opacity: .45; }
+  #appearPanel .ap-right.dim input[type="color"] { cursor: not-allowed; pointer-events: none; }
   #appearPanel input[type="color"] { width: 34px; height: 22px; border: none; border-radius: 5px; background: none; cursor: pointer; padding: 0; }
 
   #appearPanel input[type="range"] { width: 96px; accent-color: var(--ctrl-color); cursor: pointer; }
@@ -357,8 +368,8 @@ function getLyricHtml() {
     <button class="close" id="closeBtn" title="关闭桌面歌词">✕</button>
     <button class="gear" id="appearBtn" title="外观设置">⚙</button>
     <div id="appearPanel">
-      <div class="row"><label>文字颜色</label><input type="color" id="apTextColor" value="#ffffff" /></div>
-      <div class="row"><label>按钮颜色</label><input type="color" id="apCtrlColor" value="#ff375f" /></div>
+      <div class="row"><label>文字颜色</label><span class="ap-right" id="apTextRight"><label class="ap-auto">自动<input type="checkbox" id="apAutoText" /></label><input type="color" id="apTextColor" value="#ffffff" /></span></div>
+      <div class="row"><label>按钮颜色</label><span class="ap-right" id="apCtrlRight"><label class="ap-auto">自动<input type="checkbox" id="apAutoCtrl" /></label><input type="color" id="apCtrlColor" value="#ff375f" /></span></div>
       <div class="row"><label>字号 <span class="val" id="apFontSizeVal">30</span></label><input type="range" id="apFontSize" min="18" max="60" step="1" value="30" /></div>
       <div class="row"><label>粗细 <span class="val" id="apFontWeightVal">820</span></label><input type="range" id="apFontWeight" min="400" max="900" step="20" value="820" /></div>
       <div class="row"><label>字体</label><select id="apFontFamily"><option value="system-ui">默认（跟随系统）</option></select></div>
@@ -380,10 +391,18 @@ function getLyricHtml() {
   </div>
   <script>
     const { onState, sendCommand } = window.miniAPI
-    let state = { hasTrack:false, title:'', artist:'', coverUrl:'', isPlaying:false, volume:80, isMuted:false, progress:0, duration:0, lyricLines:[], synced:false, theme:'dark', lyricTextColor:'#ffffff', lyricControlColor:'#ff375f', lyricFontSize:30, lyricFontWeight:820, lyricFontFamily:'system-ui', repeatMode:'none', autoTextColor:false, autoControlColor:false }
+    let state = { hasTrack:false, title:'', artist:'', coverUrl:'', isPlaying:false, volume:80, isMuted:false, progress:0, duration:0, lyricLines:[], synced:false, theme:'dark', lyricTextColor:'#ffffff', lyricControlColor:'#ff375f', lyricFontSize:30, lyricFontWeight:820, lyricFontFamily:'system-ui', repeatMode:'none', autoTextColor:false, autoControlColor:false, autoLyricTextColor:'', autoLyricControlColor:'' }
     const $ = (id) => document.getElementById(id)
     const volInput = $('volume')
     let lyricTimer = null
+    // v1.3.10 有效色：开关开且自动色就绪→显示自动色，否则回落到手动色（state.lyric*Color 永不被自动色覆盖，
+    // 所以关闭开关天然回到开启前的手动色）。手动色与自动色是两份数据，互不污染。
+    function effTextColor() {
+      return (state.autoTextColor && state.autoLyricTextColor) ? state.autoLyricTextColor : (state.lyricTextColor || '#ffffff')
+    }
+    function effCtrlColor() {
+      return (state.autoControlColor && state.autoLyricControlColor) ? state.autoLyricControlColor : (state.lyricControlColor || '#ff375f')
+    }
     // v1.3.9-beta8 外观面板「待回流保护」：松手后 250ms 进度回流会先于命令往返完成，用旧 state 值
     // 覆盖 CSS 与控件，导致歌词闪回、滑块弹回、改动看似丢失。记录期望快照 apPending，state 未追上
     // 前一律不覆盖（2s 超时兜底，防命令未绕回时永久失同步）。声明置于脚本最前：render 可能在任意
@@ -430,8 +449,8 @@ function getLyricHtml() {
       const root = document.documentElement
       // v1.3.9-beta8 拖动预览 + 松手待回流期间都跳过 state 覆盖，避免歌词闪回旧样式
       if (!awaitingSettle()) {
-        root.style.setProperty('--lyric-color', state.lyricTextColor || '#ffffff')
-        root.style.setProperty('--ctrl-color', state.lyricControlColor || '#ff375f')
+        root.style.setProperty('--lyric-color', effTextColor())
+        root.style.setProperty('--ctrl-color', effCtrlColor())
         root.style.setProperty('--lyric-font-size', (state.lyricFontSize || 30) + 'px')
         root.style.setProperty('--lyric-font-weight', String(state.lyricFontWeight || 820))
         if (state.lyricFontFamily) root.style.setProperty('--lyric-font-family', state.lyricFontFamily)
@@ -442,7 +461,6 @@ function getLyricHtml() {
       $('play').disabled = $('prev').disabled = $('next').disabled = !state.hasTrack
       if (volInput.value !== String(state.volume)) volInput.value = state.volume
       renderRepeatBtn()
-      syncColorAutoDisabled()
       renderLyric()
       tryFillFonts()  // v1.3.9-beta7 移到歌词渲染之后：解耦，字体问题不再拖垮歌词
     }
@@ -510,13 +528,23 @@ function getLyricHtml() {
     const apTextColor = $('apTextColor'), apCtrlColor = $('apCtrlColor')
     const apFontSize = $('apFontSize'), apFontWeight = $('apFontWeight')
     const apFontFamily = $('apFontFamily')
+    const apAutoText = $('apAutoText'), apAutoCtrl = $('apAutoCtrl')
+    const apTextRight = $('apTextRight'), apCtrlRight = $('apCtrlRight')
     let fontsFilled = false  // v1.3.9-beta7 提前声明：beta6 把它放在 forEach 之后，歌词窗脚本一旦在 forEach 处加载异常，fontsFilled 永不初始化，render→tryFillFonts 触发 TDZ 崩溃，拖垮整个 render（歌词卡在未在播放、颜色/字体全失效）
 
     function syncPanelInputs() {
+      // 自动开关：不受待回流保护约束，实时跟随 state（开关可即时点）
+      if (apAutoText.checked !== Boolean(state.autoTextColor)) apAutoText.checked = Boolean(state.autoTextColor)
+      if (apAutoCtrl.checked !== Boolean(state.autoControlColor)) apAutoCtrl.checked = Boolean(state.autoControlColor)
+      // 色块：自动开启时显示当前生效的自动色并置灰；关闭时显示手动色可编辑
+      apTextRight.classList.toggle('dim', Boolean(state.autoTextColor))
+      apCtrlRight.classList.toggle('dim', Boolean(state.autoControlColor))
       if (apEditing) return
       if (awaitingSettle()) return
-      if (apTextColor.value !== (state.lyricTextColor || '#ffffff')) apTextColor.value = state.lyricTextColor || '#ffffff'
-      if (apCtrlColor.value !== (state.lyricControlColor || '#ff375f')) apCtrlColor.value = state.lyricControlColor || '#ff375f'
+      const showText = effTextColor()
+      const showCtrl = effCtrlColor()
+      if (apTextColor.value !== showText) apTextColor.value = showText
+      if (apCtrlColor.value !== showCtrl) apCtrlColor.value = showCtrl
       if (Number(apFontSize.value) !== (state.lyricFontSize || 30)) apFontSize.value = state.lyricFontSize || 30
       if (Number(apFontWeight.value) !== (state.lyricFontWeight || 820)) apFontWeight.value = state.lyricFontWeight || 820
       $('apFontSizeVal').textContent = String(state.lyricFontSize || 30)
@@ -526,15 +554,21 @@ function getLyricHtml() {
     }
 
     // 即时预览：直接改 CSS var（不等主进程回流），同时节流发送持久化命令
+    // 统一构造外观快照：色块在自动模式下显示的是自动色（仅预览），绝不能当手动色发回。
+    // 故：自动开→沿用 state 手动色（不变）；自动关→读色块当前值作手动色。两处（节流+松手flush）共用，避免重复。
+    function buildAppearanceSnap() {
+      return {
+        lyricTextColor: apAutoText.checked ? (state.lyricTextColor || '#ffffff') : apTextColor.value,
+        lyricControlColor: apAutoCtrl.checked ? (state.lyricControlColor || '#ff375f') : apCtrlColor.value,
+        lyricFontSize: Number(apFontSize.value), lyricFontWeight: Number(apFontWeight.value),
+        lyricFontFamily: apFontFamily.value,
+      }
+    }
     let apTimer = null
     function pushAppearance() {
       // v1.3.9-beta6 真因：原节流到点才读 DOM，但拖完松手后 250ms 进度回流会先把滑块重置回旧 state 值，
       // 到点读到的是被重置的旧值→永远发旧值（字号/粗细改不动）。改为调用时捕获快照值。
-      const snap = {
-        lyricTextColor: apTextColor.value, lyricControlColor: apCtrlColor.value,
-        lyricFontSize: Number(apFontSize.value), lyricFontWeight: Number(apFontWeight.value),
-        lyricFontFamily: apFontFamily.value,
-      }
+      const snap = buildAppearanceSnap()
       // v1.3.9-beta9 本地乐观更新：beta8 的 apPending 要等命令绕回主窗口再推回来才算 settled，
       // 命令一旦丢失或主窗口节流，2s 超时后回流仍用旧值覆盖 → 滑块照样弹回。
       // 改为立即写进本地 state，控件与 CSS 天然一致；apPending 只用于在回流里挡住旧的覆盖值。
@@ -575,6 +609,20 @@ function getLyricHtml() {
         el.addEventListener('change', () => { apEditing = false; applyAppearance() })
       })
     }
+    // v1.3.10 自动开关：切换时本地乐观更新 state.auto*Color 标志 + 立即刷新生效色，
+    // 并只发开关字段（不动手动色）；回流持久化后主进程自动色链路据此启停。
+    apAutoText.addEventListener('change', () => {
+      state.autoTextColor = apAutoText.checked
+      document.documentElement.style.setProperty('--lyric-color', effTextColor())
+      apTextRight.classList.toggle('dim', state.autoTextColor)
+      sendCommand({ type: 'update-lyric-appearance', autoTextColor: state.autoTextColor })
+    })
+    apAutoCtrl.addEventListener('change', () => {
+      state.autoControlColor = apAutoCtrl.checked
+      document.documentElement.style.setProperty('--ctrl-color', effCtrlColor())
+      apCtrlRight.classList.toggle('dim', state.autoControlColor)
+      sendCommand({ type: 'update-lyric-appearance', autoControlColor: state.autoControlColor })
+    })
     const rangeInputs = [apFontSize, apFontWeight]
     rangeInputs.forEach((el) => {
       el.addEventListener('pointerdown', () => { apEditing = true })
@@ -585,10 +633,7 @@ function getLyricHtml() {
         apEditing = false
         applyAppearance()
         if (apTimer) { clearTimeout(apTimer); apTimer = null }
-        sendCommand({ type: 'update-lyric-appearance',
-          lyricTextColor: apTextColor.value, lyricControlColor: apCtrlColor.value,
-          lyricFontSize: Number(apFontSize.value), lyricFontWeight: Number(apFontWeight.value),
-          lyricFontFamily: apFontFamily.value })
+        sendCommand({ type: 'update-lyric-appearance', ...buildAppearanceSnap() })
       })
     })
     // v1.3.8 字体下拉：选中即时预览 + 持久化
@@ -732,6 +777,8 @@ export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserW
     repeatMode: state.repeatMode === 'all' || state.repeatMode === 'one' || state.repeatMode === 'shuffle' ? state.repeatMode : miniState.repeatMode,
       autoTextColor: Boolean(state.autoTextColor),
       autoControlColor: Boolean(state.autoControlColor),
+      autoLyricTextColor: typeof state.autoLyricTextColor === 'string' ? state.autoLyricTextColor : miniState.autoLyricTextColor,
+      autoLyricControlColor: typeof state.autoLyricControlColor === 'string' ? state.autoLyricControlColor : miniState.autoLyricControlColor,
     }
     broadcast()
     syncAutoColor()

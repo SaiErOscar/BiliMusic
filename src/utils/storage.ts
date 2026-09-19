@@ -34,6 +34,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   // v1.3.10 自动颜色默认关闭（手动取色保持原行为）
   autoTextColor: false,
   autoControlColor: false,
+  // 空串 = 尚未算出自动色，歌词窗兜底用手动色；避免初次开开关时闪一下默认色
+  autoLyricTextColor: '',
+  autoLyricControlColor: '',
 }
 
 function notifySettingsChanged() {

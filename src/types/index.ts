@@ -69,6 +69,10 @@ export interface AppSettings {
   // v1.3.10 自动颜色开关：歌词文字色（封面提色）/ 控件色（窗周围背景采样），独立生效
   autoTextColor: boolean
   autoControlColor: boolean
+  // v1.3.10 自动色算出的实际颜色（与手动色 lyricTextColor/lyricControlColor 分离）：
+  // 手动色永不被自动色覆盖，关闭开关即回到开启前的手动色；歌词窗按「开关开且自动色就绪」时显示自动色。
+  autoLyricTextColor: string
+  autoLyricControlColor: string
 }
 
 export type NavItem = {

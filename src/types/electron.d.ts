@@ -149,6 +149,9 @@ export interface MiniPlayerState {
   /** v1.3.10 自动颜色开关：歌词文字色（封面提色）/ 控件色（窗周围背景采样） */
   autoTextColor?: boolean
   autoControlColor?: boolean
+  /** v1.3.10 自动算出的实际颜色（与手动色分离，歌词窗据此显示） */
+  autoLyricTextColor?: string
+  autoLyricControlColor?: string
 }
 
 export type MiniCommand =
@@ -162,7 +165,7 @@ export type MiniCommand =
   | { type: 'show-lyric-window' }
   | { type: 'close-lyric-window' }
   | { type: 'show-player' }
-  | { type: 'update-lyric-appearance'; lyricTextColor?: string; lyricControlColor?: string; lyricFontSize?: number; lyricFontWeight?: number; lyricFontFamily?: string }
+  | { type: 'update-lyric-appearance'; lyricTextColor?: string; lyricControlColor?: string; lyricFontSize?: number; lyricFontWeight?: number; lyricFontFamily?: string; autoLyricTextColor?: string; autoLyricControlColor?: string; autoTextColor?: boolean; autoControlColor?: boolean }
 
 export interface WebdavConfigInput {
   url: string

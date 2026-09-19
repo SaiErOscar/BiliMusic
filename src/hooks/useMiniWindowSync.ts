@@ -3,6 +3,7 @@ import { usePlayer, usePlayerProgress } from '@/contexts/PlayerContext'
 import { getLyricForTrack, LYRIC_OFFSET_CHANGED_EVENT } from '@/services/lyrics'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import type { MiniPlayerState, MiniCommand } from '@/types/electron'
+import type { AppSettings } from '@/types'
 
 /**
  * 迷你窗口（桌面歌词窗）状态同步 hook。
@@ -88,6 +89,8 @@ export function useMiniWindowSync() {
     repeatMode: player.repeatMode,
     autoTextColor: settings.autoTextColor,
     autoControlColor: settings.autoControlColor,
+    autoLyricTextColor: settings.autoLyricTextColor,
+    autoLyricControlColor: settings.autoLyricControlColor,
   }), [
     player.currentTrack,
     player.isPlaying,
@@ -106,6 +109,8 @@ export function useMiniWindowSync() {
     player.repeatMode,
     settings.autoTextColor,
     settings.autoControlColor,
+    settings.autoLyricTextColor,
+    settings.autoLyricControlColor,
   ])
 
   // 实时推送：每次 miniState 变化（progress/播放状态/歌词/主题/配色等）即发送给主进程
@@ -123,12 +128,17 @@ export function useMiniWindowSync() {
       if (cmd.type === 'update-lyric-appearance') {
         // v1.3.6 桌面歌词窗外观小面板：持久化到 AppSettings，
         // settings 变化经上方 miniState 推送回流歌词窗，形成即时生效闭环
-        const patch: { lyricTextColor?: string; lyricControlColor?: string; lyricFontSize?: number; lyricFontWeight?: number; lyricFontFamily?: string } = {}
+        const patch: Partial<AppSettings> = {}
         if (typeof cmd.lyricTextColor === 'string') patch.lyricTextColor = cmd.lyricTextColor
         if (typeof cmd.lyricControlColor === 'string') patch.lyricControlColor = cmd.lyricControlColor
         if (Number.isFinite(cmd.lyricFontSize)) patch.lyricFontSize = cmd.lyricFontSize
         if (Number.isFinite(cmd.lyricFontWeight)) patch.lyricFontWeight = cmd.lyricFontWeight
         if (typeof cmd.lyricFontFamily === 'string') patch.lyricFontFamily = cmd.lyricFontFamily
+        // v1.3.10 自动颜色：开关（面板/设置页）+ 自动算出的实际色（主进程回流），均与手动色分离存储
+        if (typeof cmd.autoTextColor === 'boolean') patch.autoTextColor = cmd.autoTextColor
+        if (typeof cmd.autoControlColor === 'boolean') patch.autoControlColor = cmd.autoControlColor
+        if (typeof cmd.autoLyricTextColor === 'string') patch.autoLyricTextColor = cmd.autoLyricTextColor
+        if (typeof cmd.autoLyricControlColor === 'string') patch.autoLyricControlColor = cmd.autoLyricControlColor
         setAppSettings(patch)
       } else if (cmd.type === 'volume') player.setVolume(cmd.value)
       else if (cmd.type === 'seek') setProgress(cmd.value)
