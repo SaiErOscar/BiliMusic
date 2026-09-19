@@ -239,11 +239,19 @@ export default function Settings() {
             <SettingsRow label="歌词显示" description="播放页自动显示歌词">
               <ToggleSwitch checked={settings.showLyrics} onChange={() => setAppSettings({ showLyrics: !settings.showLyrics })} />
             </SettingsRow>
-            <SettingsRow label="歌词文字颜色" description="桌面歌词的文字颜色">
-              <ColorField value={settings.lyricTextColor} onChange={(lyricTextColor) => setAppSettings({ lyricTextColor })} title="点击从屏幕拾取文字颜色" />
+            <SettingsRow label="歌词文字颜色" description="桌面歌词的文字颜色（自动：从视频封面提主色）">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
+                <ToggleSwitch checked={settings.autoTextColor} onChange={() => setAppSettings({ autoTextColor: !settings.autoTextColor })} />
+                <ColorField value={settings.lyricTextColor} onChange={(lyricTextColor) => setAppSettings({ lyricTextColor })} title={settings.autoTextColor ? '已启用自动颜色（封面提色）' : '点击从屏幕拾取文字颜色'} disabled={settings.autoTextColor} />
+              </div>
             </SettingsRow>
-            <SettingsRow label="歌词按钮颜色" description="桌面歌词的播放/上一首等按钮颜色">
-              <ColorField value={settings.lyricControlColor} onChange={(lyricControlColor) => setAppSettings({ lyricControlColor })} title="点击从屏幕拾取按钮颜色" />
+            <SettingsRow label="歌词按钮颜色" description="桌面歌词的播放/上一首等按钮颜色（自动：每 5 秒采样窗周围背景取对比色）">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
+                <ToggleSwitch checked={settings.autoControlColor} onChange={() => setAppSettings({ autoControlColor: !settings.autoControlColor })} />
+                <ColorField value={settings.lyricControlColor} onChange={(lyricControlColor) => setAppSettings({ lyricControlColor })} title={settings.autoControlColor ? '已启用自动颜色（背景采样）' : '点击从屏幕拾取按钮颜色'} disabled={settings.autoControlColor} />
+              </div>
             </SettingsRow>
             <SettingsRow label="歌词字号" description="桌面歌词的文字大小（18-60px，桌面歌词窗内也可调）">
               <input type="range" min={18} max={60} step={1} value={settings.lyricFontSize} onChange={(e) => setAppSettings({ lyricFontSize: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--accent, #ff375f)' }} />

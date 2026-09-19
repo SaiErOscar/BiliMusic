@@ -86,6 +86,8 @@ export function useMiniWindowSync() {
     lyricFontWeight: settings.lyricFontWeight,
     lyricFontFamily: settings.lyricFontFamily,
     repeatMode: player.repeatMode,
+    autoTextColor: settings.autoTextColor,
+    autoControlColor: settings.autoControlColor,
   }), [
     player.currentTrack,
     player.isPlaying,
@@ -102,6 +104,8 @@ export function useMiniWindowSync() {
     settings.lyricFontWeight,
     settings.lyricFontFamily,
     player.repeatMode,
+    settings.autoTextColor,
+    settings.autoControlColor,
   ])
 
   // 实时推送：每次 miniState 变化（progress/播放状态/歌词/主题/配色等）即发送给主进程

@@ -66,6 +66,9 @@ export interface AppSettings {
   lyricFontFamily: string
   titleFontFamily: string
   playerLyricFontFamily: string
+  // v1.3.10 自动颜色开关：歌词文字色（封面提色）/ 控件色（窗周围背景采样），独立生效
+  autoTextColor: boolean
+  autoControlColor: boolean
 }
 
 export type NavItem = {

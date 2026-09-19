@@ -31,6 +31,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   lyricFontFamily: 'system-ui',
   titleFontFamily: 'system-ui',
   playerLyricFontFamily: 'system-ui',
+  // v1.3.10 自动颜色默认关闭（手动取色保持原行为）
+  autoTextColor: false,
+  autoControlColor: false,
 }
 
 function notifySettingsChanged() {

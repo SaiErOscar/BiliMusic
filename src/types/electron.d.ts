@@ -146,6 +146,9 @@ export interface MiniPlayerState {
   lyricFontFamily: string
   /** 播放顺序（v1.3.2）：供桌面歌词窗播放顺序按钮展示当前模式 */
   repeatMode: 'none' | 'all' | 'one' | 'shuffle'
+  /** v1.3.10 自动颜色开关：歌词文字色（封面提色）/ 控件色（窗周围背景采样） */
+  autoTextColor?: boolean
+  autoControlColor?: boolean
 }
 
 export type MiniCommand =

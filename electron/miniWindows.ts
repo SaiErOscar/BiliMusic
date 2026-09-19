@@ -3,6 +3,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { collectSystemFonts } from './systemFonts'
 import { openPicker } from './colorPicker'
+import { extractCoverTextColor, sampleControlColor } from './autoColor'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -37,6 +38,9 @@ export interface MiniPlayerState {
   lyricFontFamily: string
   repeatMode: 'none' | 'all' | 'one' | 'shuffle'
   fontList: string[]
+  /** v1.3.10 自动颜色开关：歌词文字色（封面提色）/ 控件色（窗周围背景采样） */
+  autoTextColor: boolean
+  autoControlColor: boolean
 }
 
 export type MiniCommand =
@@ -73,11 +77,69 @@ const defaultState: MiniPlayerState = {
   lyricFontFamily: 'system-ui',
   repeatMode: 'none',
   fontList: [],
+  autoTextColor: false,
+  autoControlColor: false,
 }
 
 let miniState: MiniPlayerState = { ...defaultState }
 // v1.3.9-beta6 系统字体缓存：枚举一次后随 mini:state 通道下发给歌词窗字体下拉
 let cachedFontList: string[] = []
+
+// ===== v1.3.10 自动颜色 =====
+// 上次已触发封面提色的 key（coverUrl|theme），用于去重：同一封面同一主题不重复下载。
+let lastCoverKey = ''
+// 控件自动色定时器（每 5 秒采样窗周围背景取对比色）
+let controlColorTimer: NodeJS.Timeout | null = null
+
+/** 把自动算出的颜色经现有外观回流通道持久化到 AppSettings（单一数据源不变） */
+function pushAutoColor(patch: { lyricTextColor?: string; lyricControlColor?: string }) {
+  if (!patch.lyricTextColor && !patch.lyricControlColor) return
+  sendMainCommand({ type: 'update-lyric-appearance', ...patch })
+}
+
+/** 封面提色 → 文字色：coverUrl/theme 变化且开关开启时异步提取并回流 */
+function maybeApplyCoverColor() {
+  if (!miniState.autoTextColor || !miniState.hasTrack || !miniState.coverUrl) return
+  const key = miniState.coverUrl + '|' + miniState.theme
+  if (key === lastCoverKey) return
+  lastCoverKey = key
+  void extractCoverTextColor(miniState.coverUrl, miniState.theme).then((hex) => {
+    if (hex) pushAutoColor({ lyricTextColor: hex })
+  })
+}
+
+function startControlColorTimer() {
+  if (controlColorTimer) return
+  // 先立即采一次，避免勾选后 5 秒无变化
+  void runControlColorSample()
+  controlColorTimer = setInterval(() => void runControlColorSample(), 5000)
+}
+
+function stopControlColorTimer() {
+  if (controlColorTimer) {
+    clearInterval(controlColorTimer)
+    controlColorTimer = null
+  }
+}
+
+async function runControlColorSample() {
+  // 仅当开关开启且歌词窗实际可见时采样（隐藏/关闭时停表，省资源也避免抓到桌面无关区域）
+  if (!miniState.autoControlColor || !isLyricVisible() || !lyricWindow) return
+  try {
+    const rect = lyricWindow.getBounds()
+    const hex = await sampleControlColor(rect, 40)
+    if (hex) pushAutoColor({ lyricControlColor: hex })
+  } catch {
+    /* 抓屏失败静默降级，保持当前控件色 */
+  }
+}
+
+/** mini:state 更新后统一调度：封面提色触发 + 控件色定时器启停 */
+function syncAutoColor() {
+  maybeApplyCoverColor()
+  if (miniState.autoControlColor) startControlColorTimer()
+  else stopControlColorTimer()
+}
 let lyricWindow: BrowserWindow | null = null
 let getMainWindow: (() => BrowserWindow | null) | null = null
 
@@ -270,6 +332,9 @@ function getLyricHtml() {
   #appearPanel.open { display: block; }
   #appearPanel .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 2px 0; }
   #appearPanel .row label { opacity: .8; white-space: nowrap; }
+  /* v1.3.10 自动颜色开启时对应行置灰（文字/按钮色不可手动改） */
+  #appearPanel .row.ap-dim { opacity: .4; }
+  #appearPanel .row.ap-dim input[type="color"] { cursor: not-allowed; pointer-events: none; }
   #appearPanel input[type="color"] { width: 34px; height: 22px; border: none; border-radius: 5px; background: none; cursor: pointer; padding: 0; }
 
   #appearPanel input[type="range"] { width: 96px; accent-color: var(--ctrl-color); cursor: pointer; }
@@ -315,7 +380,7 @@ function getLyricHtml() {
   </div>
   <script>
     const { onState, sendCommand } = window.miniAPI
-    let state = { hasTrack:false, title:'', artist:'', coverUrl:'', isPlaying:false, volume:80, isMuted:false, progress:0, duration:0, lyricLines:[], synced:false, theme:'dark', lyricTextColor:'#ffffff', lyricControlColor:'#ff375f', lyricFontSize:30, lyricFontWeight:820, lyricFontFamily:'system-ui', repeatMode:'none' }
+    let state = { hasTrack:false, title:'', artist:'', coverUrl:'', isPlaying:false, volume:80, isMuted:false, progress:0, duration:0, lyricLines:[], synced:false, theme:'dark', lyricTextColor:'#ffffff', lyricControlColor:'#ff375f', lyricFontSize:30, lyricFontWeight:820, lyricFontFamily:'system-ui', repeatMode:'none', autoTextColor:false, autoControlColor:false }
     const $ = (id) => document.getElementById(id)
     const volInput = $('volume')
     let lyricTimer = null
@@ -377,6 +442,7 @@ function getLyricHtml() {
       $('play').disabled = $('prev').disabled = $('next').disabled = !state.hasTrack
       if (volInput.value !== String(state.volume)) volInput.value = state.volume
       renderRepeatBtn()
+      syncColorAutoDisabled()
       renderLyric()
       tryFillFonts()  // v1.3.9-beta7 移到歌词渲染之后：解耦，字体问题不再拖垮歌词
     }
@@ -428,6 +494,15 @@ function getLyricHtml() {
     $('appearBtn').onclick = () => { document.getElementById('appearPanel').classList.toggle('open') }
     $('repeat').onclick = () => sendCommand({ type: 'cycle-repeat-mode' })
     $('openPlayer').onclick = () => sendCommand({ type: 'show-player' })
+    // v1.3.10 自动颜色开启时，对应手动取色块置灰禁用（文字色←封面提色，按钮色←背景采样）
+    function syncColorAutoDisabled() {
+      const tOn = Boolean(state.autoTextColor)
+      const cOn = Boolean(state.autoControlColor)
+      apTextColor.disabled = tOn
+      apCtrlColor.disabled = cOn
+      apTextColor.parentNode && apTextColor.parentNode.classList.toggle('ap-dim', tOn)
+      apCtrlColor.parentNode && apCtrlColor.parentNode.classList.toggle('ap-dim', cOn)
+    }
     volInput.addEventListener('input', () => sendCommand({ type: 'volume', value: Number(volInput.value) }))
 
     // ===== v1.3.6 外观设置小面板 =====
@@ -655,8 +730,11 @@ export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserW
       lyricFontWeight: Number.isFinite(state.lyricFontWeight) ? state.lyricFontWeight : miniState.lyricFontWeight,
       lyricFontFamily: typeof state.lyricFontFamily === 'string' && state.lyricFontFamily ? state.lyricFontFamily : miniState.lyricFontFamily,
     repeatMode: state.repeatMode === 'all' || state.repeatMode === 'one' || state.repeatMode === 'shuffle' ? state.repeatMode : miniState.repeatMode,
+      autoTextColor: Boolean(state.autoTextColor),
+      autoControlColor: Boolean(state.autoControlColor),
     }
     broadcast()
+    syncAutoColor()
   })
 
   // 小窗 → 主进程：播放命令 / 音量 / 进度 / 显示控制

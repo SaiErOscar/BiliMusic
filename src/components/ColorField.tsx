@@ -8,10 +8,13 @@ export default function ColorField({
   value,
   onChange,
   title,
+  disabled,
 }: {
   value: string
   onChange: (v: string) => void
   title?: string
+  /** v1.3.10 自动颜色开启时置灰禁用手动取色 */
+  disabled?: boolean
 }) {
   const [busy, setBusy] = useState(false)
   const canPick =
@@ -25,6 +28,8 @@ export default function ColorField({
         className="settings-color"
         value={value}
         title={title || '选择颜色'}
+        disabled={disabled}
+        style={disabled ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
         onChange={(e) => onChange(e.target.value)}
       />
     )
@@ -45,9 +50,9 @@ export default function ColorField({
     <button
       type="button"
       className="settings-color settings-color--swatch"
-      style={{ background: value }}
-      title={title || '点击打开取色面板'}
-      disabled={busy}
+      style={{ background: value, ...(disabled ? { opacity: 0.4, cursor: 'not-allowed' } : null) }}
+      title={disabled ? '已启用自动颜色' : title || '点击打开取色面板'}
+      disabled={busy || disabled}
       onClick={pick}
     >
       <span className="settings-color__hex">{value.toUpperCase()}</span>
