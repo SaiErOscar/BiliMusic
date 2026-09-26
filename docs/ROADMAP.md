@@ -9,7 +9,7 @@
 | 子版本 | 主题 | 阶段 | 状态 | 依赖 |
 |---|---|---|---|---|
 | 1.4.1 | 发现页聚合卡片改造（废弃排行榜 → 最近播放/我喜欢/B站收藏夹/本地下载四张横向小卡片聚合入口页，Windows+Mac） | 桌面体验 | 进行中 | 无（纯渲染层） |
-| 1.4.2 | 业务逻辑平台无关化（新建 src/platform 适配层，service 层 electronAPI 调用收口） | 逻辑解耦 | 待开发 | 无 |
+| 1.4.2 | 业务逻辑平台无关化（新建 src/platform 适配层，service 层 electronAPI 调用收口）+ 桌面歌词窗两处 bug 修复（播放顺序按钮 UI 显示不对、字体无法切回系统默认） | 逻辑解耦 | 待开发 | 无 |
 | 1.4.3 | 鸿蒙无账号构建验证（统一双副本 + 模拟器/预览器 + 离线自签验逻辑层与 ESM 主进程） | 鸿蒙续命 | 待排 | 1.4.2（解耦后逻辑层共享） |
 | 1.4.4 | 鸿蒙真机 + 签名剥离（监护人账号；换自生成证书，路径与明文密码从仓库剥离） | 鸿蒙续命 | 待排 | 1.4.3 |
 | 1.4.5 | 鸿蒙追版回归（v1.3.3~1.3.11 渲染层改动逐项验收：桌面歌词状态机、全局取色器、自动颜色、滑条 ASI 修复） | 鸿蒙续命 | 待排 | 1.4.4 |
@@ -36,6 +36,9 @@
 
 - v1.4.1 发现页聚合卡片改造：方案详见项目记忆「bilimusic-发现页聚合卡片改造」。
 - v1.4.2 业务逻辑平台无关化：src/platform 适配层按 capability 分组（download / auth / biliRequest / favorites / lyrics / fonts / runtime），Electron 实现包装 electronAPI、native/鸿蒙实现复用现有 http.ts 兜底分支；service 层只依赖接口。详见项目记忆「bilimusic-v1.4版本规划」。
+- v1.4.2 顺带修复桌面歌词窗两处 bug（已定位根因）：
+  - **字体无法切回「系统默认」**：歌词窗 `tryFillFonts()`（electron/miniWindows.ts 内联脚本）字体下拉直接用主进程枚举的 `state.fontList`，Windows 枚举结果不含 `system-ui` 别名，列表里没有独立「默认」选项，故无法从自定义字体切回。主程序 `FontSelect` 可以切回是因为它有 `FALLBACK_FONTS` 显式含 `system-ui` 并 normalize 合并。修复：歌词窗字体填充同样注入含 `system-ui` 的保底集合。
+  - **播放顺序按钮图标/UI 显示不对**：`REPEAT_META` 四态 SVG 映射与循环/回流路径（cycle-repeat-mode → setRepeatMode → miniState.repeatMode）静态检查均正确；需在 dev 里点一遍坐实是哪一态、错在图标还是 title/badge，确认后再改，不凭猜动代码。
 - 多端功能差异与可移植性裁剪：详见项目记忆「bilimusic-多端功能差异矩阵」。
 
 ## 变更记录
