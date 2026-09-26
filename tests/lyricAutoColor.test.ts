@@ -7,7 +7,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { JSDOM } from 'jsdom'
 
 // 从源文件截取 getLyricHtml 返回的模板字符串（模板内无 ${} 插值，可安全截取）
-const src = readFileSync(path.resolve(__dirname, '../electron/miniWindows.ts'), 'utf8')
+// 归一化行尾符：CI 的 windows-latest 按 autocrlf 检出为 CRLF，会使下面硬编码的 LF 标记（如 `\n}）匹配不到，故统一转成 LF
+const src = readFileSync(path.resolve(__dirname, '../electron/miniWindows.ts'), 'utf8').replace(/\r\n/g, '\n')
 const startMarker = 'return `<!doctype html>'
 const si = src.indexOf(startMarker)
 expect(si).toBeGreaterThan(-1)
