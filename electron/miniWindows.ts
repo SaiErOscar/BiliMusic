@@ -312,7 +312,7 @@ function getLyricHtml() {
   .btn:active { transform: scale(.92); }
   .btn.play { background: var(--ctrl-color); color: #fff; width: 40px; height: 40px; font-size: 17px; }
   .btn.play:hover { filter: brightness(1.08); }
-  #repeat { position: relative; }
+  #repeat { position: relative; } #repeat.off { opacity: .5; background: transparent; }
   /* v1.3.9-beta3 齿轮外观面板开关按钮：逐字段克隆可点的 .close（同一定位结构/同 z-index/同 no-drag），
      仅改位置(right:34px 让开 close)与图标。之前 beta1/beta2 齿轮用 .btn+inline+id 三处样式混叠，热区与图标错位致点击失灵；
      close 一直可点证明「单一独立 class 定位 + 纯文本 + onclick」在此 drag 窗可靠，齿轮照搬即可。 */
@@ -381,7 +381,7 @@ function getLyricHtml() {
       <button class="btn" id="prev" title="上一首">⏮</button>
       <button class="btn play" id="play" title="播放/暂停">▶</button>
       <button class="btn" id="next" title="下一首">⏭</button>
-      <button class="btn" id="repeat" title="播放顺序：顺序播放"><svg id="repeatIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg><span id="repeatBadge" style="display:none">1</span></button>
+      <button class="btn off" id="repeat" title="播放顺序：顺序播放"><svg id="repeatIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg><span id="repeatBadge" style="display:none">1</span></button>
       <button class="btn" id="openPlayer" title="打开播放器">⤢</button>
       <span class="vol">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
@@ -472,7 +472,7 @@ function getLyricHtml() {
     const SVG_REPEAT1 = SVG_REPEAT + '<path d="M11 10h1v4"/>'
     const SVG_SHUFFLE = '<path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.8-1.1 2-1.7 3.3-1.7H22"/><path d="m18 2 4 4-4 4"/><path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2"/><path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8"/><path d="m18 14 4 4-4 4"/>'
     const REPEAT_META = {
-      none:    { icon: SVG_ARROW_RIGHT, badge: false, title: '播放顺序：顺序播放（点击切换为列表循环）' },
+      none:    { icon: SVG_REPEAT, badge: false, title: '播放顺序：顺序播放（点击切换为列表循环）' },
       all:     { icon: SVG_REPEAT, badge: false, title: '播放顺序：列表循环（点击切换为单曲循环）' },
       one:     { icon: SVG_REPEAT1, badge: true, title: '播放顺序：单曲循环（点击切换为随机播放）' },
       shuffle: { icon: SVG_SHUFFLE, badge: false, title: '播放顺序：随机播放（点击切换为顺序播放）' },
@@ -483,7 +483,7 @@ function getLyricHtml() {
       const badge = $('repeatBadge')
       icon.innerHTML = m.icon
       badge.style.display = m.badge ? 'block' : 'none'
-      $('repeat').title = m.title
+      $('repeat').title = m.title; $('repeat').classList.toggle('off', state.repeatMode === 'none')
     }
 
     onState((next) => {
@@ -646,7 +646,7 @@ function getLyricHtml() {
         const list = state.fontList
         if (!Array.isArray(list) || !list.length) return
         const want = state.lyricFontFamily || 'system-ui'
-        const items = list.includes(want) ? list : [want, ...list]
+        const items = ['system-ui', ...list.filter((f) => f !== 'system-ui')]; if (want !== 'system-ui' && items.indexOf(want) < 0) items.push(want)
         apFontFamily.innerHTML = items.map((f) => {
           const label = f === 'system-ui' ? '默认（跟随系统）' : f
           return '<option value="' + f + '">' + label + '</option>'

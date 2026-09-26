@@ -1,7 +1,7 @@
 {
   "name": "bilimusic",
   "private": true,
-  "version": "1.4.1",
+  "version": "1.4.2-pre1",
   "description": "BiliMusic - 基于 Bilibili 的桌面音乐播放器",
   "author": "SaiErOscar",
   "type": "module",

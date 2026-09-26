@@ -38,9 +38,10 @@
 - v1.4.2 业务逻辑平台无关化：src/platform 适配层按 capability 分组（download / auth / biliRequest / favorites / lyrics / fonts / runtime），Electron 实现包装 electronAPI、native/鸿蒙实现复用现有 http.ts 兜底分支；service 层只依赖接口。详见项目记忆「bilimusic-v1.4版本规划」。
 - v1.4.2 顺带修复桌面歌词窗两处 bug（已定位根因）：
   - **字体无法切回「系统默认」**：歌词窗 `tryFillFonts()`（electron/miniWindows.ts 内联脚本）字体下拉直接用主进程枚举的 `state.fontList`，Windows 枚举结果不含 `system-ui` 别名，列表里没有独立「默认」选项，故无法从自定义字体切回。主程序 `FontSelect` 可以切回是因为它有 `FALLBACK_FONTS` 显式含 `system-ui` 并 normalize 合并。修复：歌词窗字体填充同样注入含 `system-ui` 的保底集合。
-  - **播放顺序按钮图标/UI 显示不对**：`REPEAT_META` 四态 SVG 映射与循环/回流路径（cycle-repeat-mode → setRepeatMode → miniState.repeatMode）静态检查均正确；需在 dev 里点一遍坐实是哪一态、错在图标还是 title/badge，确认后再改，不凭猜动代码。
+  - **播放顺序按钮图标/UI 显示不对**：`REPEAT_META` 给 none 态配了右箭头 `SVG_ARROW_RIGHT`（语义错，看着像「下一首」），且四态全用同一 `--ctrl-color`、无点亮区分，导致 none/all 显示不对。状态流转（cycle-repeat-mode → setRepeatMode → miniState.repeatMode）与四态回流静态检查均正确，问题在视觉映射。修复对齐主窗口 `PlayerBar`：none/all/one 共用 `Repeat` 图标、shuffle 用 `Shuffle`，none 态加 `.off`（opacity .5、无背景）作为「循环关闭」低亮标识，并消除首帧箭头闪烁。
 - 多端功能差异与可移植性裁剪：详见项目记忆「bilimusic-多端功能差异矩阵」。
 
 ## 变更记录
 
 - 2026-09-26 建立本页。发现页聚合卡片改造提为 v1.4.1；业务逻辑解耦及后续功能链整体 +1 顺延（解耦 → v1.4.2）。
+- 2026-09-26 两处桌面歌词窗 bug 根因坐实（字体列表缺 system-ui 保底、播放顺序 none 态图标语义错+无高亮区分）。按用户要求 **v1.4.2-pre1 范围锁定为这两处歌词窗修复**，src/platform 解耦主体后置到 v1.4.2 后续 pre/正式版，不进 pre1。
