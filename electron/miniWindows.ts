@@ -774,7 +774,7 @@ export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserW
       lyricFontSize: Number.isFinite(state.lyricFontSize) ? state.lyricFontSize : miniState.lyricFontSize,
       lyricFontWeight: Number.isFinite(state.lyricFontWeight) ? state.lyricFontWeight : miniState.lyricFontWeight,
       lyricFontFamily: typeof state.lyricFontFamily === 'string' && state.lyricFontFamily ? state.lyricFontFamily : miniState.lyricFontFamily,
-    repeatMode: state.repeatMode === 'all' || state.repeatMode === 'one' || state.repeatMode === 'shuffle' ? state.repeatMode : miniState.repeatMode,
+    repeatMode: (state.repeatMode === 'none' || state.repeatMode === 'all' || state.repeatMode === 'one' || state.repeatMode === 'shuffle') ? state.repeatMode : miniState.repeatMode,
       autoTextColor: Boolean(state.autoTextColor),
       autoControlColor: Boolean(state.autoControlColor),
       autoLyricTextColor: typeof state.autoLyricTextColor === 'string' ? state.autoLyricTextColor : miniState.autoLyricTextColor,
