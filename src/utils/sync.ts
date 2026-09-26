@@ -1,4 +1,5 @@
 import type { Playlist, Tombstone, Track } from '@/types'
+import { platform } from '@/platform'
 import {
   loadFavoriteTombstones,
   loadFavoriteTracks,
@@ -140,7 +141,7 @@ let syncing = false
 
 // 双向同步：拉远端 → 与本地合并 → 写本地 → 推回远端（ETag 乐观并发，412 冲突重拉重并）
 export async function runSync(): Promise<SyncResult> {
-  const api = window.electronAPI
+  const api = platform.storage
   if (!api?.webdavGet || !api?.webdavPut) return { ok: false, message: '当前环境不支持同步' }
   if (syncing) return { ok: false, message: '同步进行中' }
   syncing = true
@@ -196,7 +197,7 @@ export async function runSync(): Promise<SyncResult> {
 
 // 强制上传：本地覆盖远端（首台设备初始化 / 以本地为准）
 export async function forceUpload(): Promise<SyncResult> {
-  const api = window.electronAPI
+  const api = platform.storage
   if (!api?.webdavPut) return { ok: false, message: '当前环境不支持同步' }
   try {
     const payload = buildPayload(
@@ -217,7 +218,7 @@ export async function forceUpload(): Promise<SyncResult> {
 
 // 强制下载：远端覆盖本地（新设备 / 以云端为准）
 export async function forceDownload(): Promise<SyncResult> {
-  const api = window.electronAPI
+  const api = platform.storage
   if (!api?.webdavGet) return { ok: false, message: '当前环境不支持同步' }
   try {
     const res = await api.webdavGet(SYNC_FILE)

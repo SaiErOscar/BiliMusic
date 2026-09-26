@@ -5,6 +5,7 @@
  */
 
 import { httpRequest, setBilibiliAuthCookies, getNativeCookie } from './http'
+import { platform } from '@/platform'
 
 const BILI_API = 'https://api.bilibili.com'
 
@@ -664,8 +665,8 @@ export async function getFavoriteFolderContent(
 ): Promise<FavoriteFolderContent> {
   // 优先走主进程 net.fetch：桌面端渲染层 fetch 跨域且无法携带完整 B站 Cookie，
   // 该接口在无 Cookie 时会被风控返回 HTTP 412 + HTML（非 JSON）导致解析失败
-  if (window.electronAPI?.biliApi?.fetchBiliJson) {
-    const data = await window.electronAPI.biliApi.fetchBiliJson('/x/v3/fav/resource/list', {
+  if (platform.biliRequest) {
+    const data = await platform.biliRequest.fetchBiliJson('/x/v3/fav/resource/list', {
       media_id: folderId,
       pn: page,
       ps: pageSize,
@@ -727,8 +728,8 @@ export async function dealFavorite(
   delMediaIds: number[] = [],
 ): Promise<{ code: number; message: string }> {
   // 优先走主进程 net.fetch（自动携带 Cookie 且无 CORS 限制），收藏更可靠
-  if (window.electronAPI?.biliApi?.dealFavorite) {
-    return window.electronAPI.biliApi.dealFavorite(rid, addMediaIds, delMediaIds)
+  if (platform.favorites) {
+    return platform.favorites.dealFavorite(rid, addMediaIds, delMediaIds)
   }
   // 浏览器回退：渲染层 fetch（带 Cookie）
   const cookies = await getCookiesForRequest()
@@ -757,8 +758,8 @@ export async function dealFavorite(
 async function getCookiesForRequest(): Promise<{ biliJct: string }> {
   // 渲染层通过 credentials: 'include' 自动带上 Cookie
   // 但 bili_jct 需要从主进程获取
-  if (window.electronAPI?.biliApi) {
-    const cookies = await window.electronAPI.biliApi.getCookies()
+  if (platform.auth) {
+    const cookies = await platform.auth.getCookies()
     return { biliJct: cookies.biliJct }
   }
   // 移动端：从 WebView CookieManager 读取 bili_jct（登录成功后已写入）

@@ -36,6 +36,7 @@
 
 - v1.4.1 发现页聚合卡片改造：方案详见项目记忆「bilimusic-发现页聚合卡片改造」。
 - v1.4.2 业务逻辑平台无关化：src/platform 适配层按 capability 分组（download / auth / biliRequest / favorites / lyrics / fonts / runtime），Electron 实现包装 electronAPI、native/鸿蒙实现复用现有 http.ts 兜底分支；service 层只依赖接口。详见项目记忆「bilimusic-v1.4版本规划」。
+- **pre3 初步解耦（搭骨架+收口，行为零变化）**：已建 `src/platform/{types,electron,index}.ts`，capability 接口用 `Pick<BiliApi/LyricsApi,...>` 复用 electron.d.ts 签名防漂移；electronPlatform 用 getter 动态读 window.electronAPI 保证能力探测等价。**本轮收口 services/utils 业务层 6 文件**（api / bilibiliApi / lyrics / batchDownloadStore / sync / persistentStorage）的 electronAPI 直调。**本轮未纳入**：fonts capability（`listSystemFonts` 属 UI 层）与 UI 层桌面壳能力（窗口/托盘/迷你窗/取色器/更新/WebDAV 配置），留待后续。
 - v1.4.2 顺带修复桌面歌词窗若干 bug（按 pre 分轮，均已定位根因）：
   - **pre1：播放顺序按钮图标/UI 显示不对**：`REPEAT_META` 给 none 态配了右箭头 `SVG_ARROW_RIGHT`（语义错，看着像「下一首」），且四态全用同一 `--ctrl-color`、无点亮区分。修复对齐主窗口 `PlayerBar`：none/all/one 共用 `Repeat` 图标、shuffle 用 `Shuffle`，none 态加 `.off` 低亮标识，消除首帧箭头闪烁。
   - **pre1：字体无法切回系统默认**：`tryFillFonts` 仅补当前选中项，列表无 `system-ui`。修复为无条件保底注入含 `system-ui` 的集合。
@@ -47,3 +48,5 @@
 - 2026-09-26 建立本页。发现页聚合卡片改造提为 v1.4.1；业务逻辑解耦及后续功能链整体 +1 顺延（解耦 → v1.4.2）。
 - 2026-09-26 两处桌面歌词窗 bug 根因坐实（字体列表缺 system-ui 保底、播放顺序 none 态图标语义错+无高亮区分）。按用户要求 **v1.4.2-pre1 范围锁定为这两处歌词窗修复**，src/platform 解耦主体后置到 v1.4.2 后续 pre/正式版，不进 pre1。
 - 2026-09-26 pre1 实测发现新 bug：随机→顺序播放需点两下，根因为主进程合并吞掉 `none` 态。**v1.4.2-pre2 修复此项**；用户另指示 **pre3 启动 src/platform 解耦主体**。
+- 2026-09-26 修复长期失败的 CI Android job：`android-actions/setup-android@v3` 默认锁旧版 cmdline-tools（11076708/v16.0），与 ubuntu-latest runner 预装的 22.0 不匹配，触发重新下载+刷新 SDK 仓库索引超时（日志 "Fetching remote repository..."）。修复：显式传 `cmdline-tools-version: '15859902'`（即预装 22.0）跳过下载。时间线吻合：v1.3.9(run39) 绿、v1.3.10(run42) 起持续红，期间 android job 未改，纯属 runner 镜像漂移。
+- 2026-09-26 **v1.4.2-pre3 = CI 修复 + src/platform 解耦骨架与 services 层收口**（见详细设计指针 pre3 条）。

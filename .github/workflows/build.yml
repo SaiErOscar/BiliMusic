@@ -102,6 +102,9 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # runner 镜像预装 cmdline-tools 已升到 22.0；action 默认锁旧版 11076708 会触发重新下载+刷新 SDK 仓库索引超时。显式指定预装版本跳过下载
+          cmdline-tools-version: '15859902'
 
       - name: Install SDK Platform 36
         run: sdkmanager "platforms;android-36"

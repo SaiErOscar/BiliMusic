@@ -10,6 +10,8 @@
 
 import type { Track } from '@/types'
 import { httpRequest } from './http'
+import { platform } from '@/platform'
+import type { LyricsApi } from '@/types/electron'
 
 export interface LyricLine {
   time: number
@@ -49,12 +51,12 @@ export interface LyricCandidate {
   image: string
 }
 
-type RawOiapiSong = Awaited<ReturnType<NonNullable<typeof window.electronAPI>['lyricsApi']['search']>>[number]
-type RawNeteaseSong = Awaited<ReturnType<NonNullable<typeof window.electronAPI>['lyricsApi']['searchNetease']>>[number]
-type RawLrclibSong = Awaited<ReturnType<NonNullable<typeof window.electronAPI>['lyricsApi']['searchLrclib']>>[number]
+type RawOiapiSong = Awaited<ReturnType<LyricsApi['search']>>[number]
+type RawNeteaseSong = Awaited<ReturnType<LyricsApi['searchNetease']>>[number]
+type RawLrclibSong = Awaited<ReturnType<LyricsApi['searchLrclib']>>[number]
 
 function bridge() {
-  return typeof window !== 'undefined' ? window.electronAPI?.lyricsApi : undefined
+  return platform.lyrics
 }
 
 // 各源接口地址（与主进程 electron/lyricsApi.ts 保持一致）

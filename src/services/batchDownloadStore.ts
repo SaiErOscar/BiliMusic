@@ -4,6 +4,7 @@
 // - 重新打开对话框时恢复显示进度
 // - 支持取消（当前文件下载完成后停止后续）
 import { downloadTrack } from '@/services/api'
+import { platform } from '@/platform'
 import { cleanTitle, getLyricForTrack, formatLrc } from '@/services/lyrics'
 import { saveDownloadRecord } from '@/utils/storage'
 import type { Track, DownloadFormat } from '@/types'
@@ -126,7 +127,7 @@ async function run() {
   const qualityPref = 'lossless'
 
   // 订阅主进程单文件下载字节进度（audio 格式有实时回调），写回当前 progress
-  const unsubProgress = window.electronAPI?.biliApi?.onDownloadProgress?.(
+  const unsubProgress = platform.download?.onDownloadProgress?.(
     ({ received, total, percent }) => {
       if (!state.running || !state.progress) return
       setState({

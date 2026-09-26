@@ -1,3 +1,5 @@
+import { platform } from '@/platform'
+
 const HARMONY_PLATFORM = 'openharmony'
 
 type PersistentStorageApi = {
@@ -7,9 +9,9 @@ type PersistentStorageApi = {
 }
 
 function getPersistentApi(): PersistentStorageApi | null {
-  const api = window.electronAPI
-  if (api?.platform !== HARMONY_PLATFORM) return null
-  return api.persistentStorage ?? null
+  const rt = platform.runtime
+  if (rt?.platform !== HARMONY_PLATFORM) return null
+  return rt.persistentStorage ?? null
 }
 
 /**

@@ -26,6 +26,7 @@ import {
   type TrackSource,
 } from '@/services/bilibiliApi'
 import { clearBilibiliAuthCookies } from '@/services/http'
+import { platform } from '@/platform'
 
 // ===== 搜索 =====
 
@@ -175,8 +176,8 @@ export async function downloadAudio(
   customDir?: string,
   options?: { artist?: string; title?: string; lyricContent?: string },
 ): Promise<{ filePath: string; size: number }> {
-  if (window.electronAPI?.biliApi) {
-    return window.electronAPI.biliApi.downloadAudio(audioUrl, filename, customDir, options)
+  if (platform.download) {
+    return platform.download.downloadAudio(audioUrl, filename, customDir, options)
   }
 
   throw new Error('Audio download requires Electron environment')
@@ -189,29 +190,29 @@ export async function downloadVideo(
   customDir?: string,
   options?: { artist?: string; title?: string; lyricContent?: string },
 ): Promise<{ filePath: string; size: number }> {
-  if (window.electronAPI?.biliApi) {
-    return window.electronAPI.biliApi.downloadVideo(videoUrl, audioUrl, filename, customDir, options)
+  if (platform.download) {
+    return platform.download.downloadVideo(videoUrl, audioUrl, filename, customDir, options)
   }
 
   throw new Error('Video download requires Electron environment')
 }
 
 export async function openDownloadDir(dirPath?: string): Promise<void> {
-  if (window.electronAPI?.biliApi) {
-    await window.electronAPI.biliApi.openDownloadDir(dirPath)
+  if (platform.download) {
+    await platform.download.openDownloadDir(dirPath)
   }
 }
 
 export async function selectDownloadFolder(): Promise<string | null> {
-  if (window.electronAPI?.biliApi) {
-    return window.electronAPI.biliApi.selectDownloadFolder()
+  if (platform.download) {
+    return platform.download.selectDownloadFolder()
   }
   return null
 }
 
 export async function saveLyricFile(content: string, filePath: string): Promise<void> {
-  if (window.electronAPI?.biliApi) {
-    await window.electronAPI.biliApi.saveLyricFile(content, filePath)
+  if (platform.download) {
+    await platform.download.saveLyricFile(content, filePath)
   }
 }
 
@@ -461,23 +462,23 @@ export interface QrPollResult {
 }
 
 export async function generateQrCode(): Promise<QrCodeData> {
-  if (window.electronAPI?.biliApi) {
-    const data = await window.electronAPI.biliApi.qrGenerate()
+  if (platform.auth) {
+    const data = await platform.auth.qrGenerate()
     return { url: data.url, qrcodeKey: data.qrcodeKey }
   }
   return rendererGen()
 }
 
 export async function pollQrCode(qrcodeKey: string): Promise<QrPollResult> {
-  if (window.electronAPI?.biliApi) {
-    return window.electronAPI.biliApi.qrPoll(qrcodeKey)
+  if (platform.auth) {
+    return platform.auth.qrPoll(qrcodeKey)
   }
   return rendererPoll(qrcodeKey)
 }
 
 export async function getLoginStatus(): Promise<{ isLoggedIn: boolean; sessdata?: string }> {
-  if (window.electronAPI?.biliApi) {
-    const cookies = await window.electronAPI.biliApi.getCookies()
+  if (platform.auth) {
+    const cookies = await platform.auth.getCookies()
     return { isLoggedIn: cookies.isLoggedIn, sessdata: cookies.sessdata }
   }
 
@@ -487,8 +488,8 @@ export async function getLoginStatus(): Promise<{ isLoggedIn: boolean; sessdata?
 }
 
 export async function logout(): Promise<void> {
-  if (window.electronAPI?.biliApi) {
-    await window.electronAPI.biliApi.logout()
+  if (platform.auth) {
+    await platform.auth.logout()
     return
   }
 

@@ -13,7 +13,7 @@ export interface DownloadOptions {
   lyricContent?: string
 }
 
-interface BiliApi {
+export interface BiliApi {
   downloadAudio: (audioUrl: string, filename: string, customDir?: string, options?: DownloadOptions) => Promise<{
     filePath: string
     size: number
@@ -86,7 +86,7 @@ export interface LrclibSong {
   instrumental?: boolean
 }
 
-interface LyricsApi {
+export interface LyricsApi {
   search: (keyword: string, page?: number, limit?: number) => Promise<OiapiSong[]>
   get: (id: string | number, format?: 'lrc' | 'qrc' | 'ksc') => Promise<OiapiLyricData | null>
   /** v1.3.7 手动匹配多源：网易云（offset 翻页） */
@@ -97,7 +97,7 @@ interface LyricsApi {
   getLrclib: (id: string | number) => Promise<OiapiLyricData | null>
 }
 
-interface PersistentStorageApi {
+export interface PersistentStorageApi {
   getItem: (key: string) => Promise<string | null>
   setItem: (key: string, value: string) => Promise<void>
   removeItem: (key: string) => Promise<void>
