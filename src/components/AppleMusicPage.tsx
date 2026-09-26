@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Clock, Heart, Music, Play, Trash2 } from 'lucide-react'
+import { ChevronRight, Clock, Heart, Music, Play, Trash2 } from 'lucide-react'
 import TrackActions from '@/components/TrackActions'
 import type { Track } from '@/types'
 
@@ -175,6 +175,93 @@ export function TrackListRow({
         {extra || <TrackActions track={track} size={15} />}
       </div>
     </motion.div>
+  )
+}
+
+export interface LibraryItem {
+  id: string
+  title: string
+  subtitle?: string
+  coverUrl?: string
+}
+
+/**
+ * 发现页聚合入口小卡片（v1.4.1）：头部「图标 + 标题 · 数量」+ 右侧「更多」，
+ * 主体横向前 N 条精简单元（封面 + 标题），空态显示轻量占位不隐藏整卡。
+ */
+export function LibraryCard({
+  icon,
+  title,
+  count,
+  unit = '首',
+  items,
+  emptyText,
+  action,
+  onMore,
+  onItemPlay,
+  loading = false,
+}: {
+  icon: React.ReactNode
+  title: string
+  count: number
+  unit?: string
+  items: LibraryItem[]
+  emptyText: string
+  action?: React.ReactNode
+  onMore: () => void
+  onItemPlay: (item: LibraryItem) => void
+  loading?: boolean
+}) {
+  return (
+    <section className="am-library-card">
+      <div className="am-library-card__head">
+        <span className="am-library-card__icon">{icon}</span>
+        <h2 className="am-library-card__title">
+          {title}
+          <em>· {count} {unit}</em>
+        </h2>
+        <div className="am-library-card__head-right">
+          {action}
+          <button type="button" className="am-library-card__more" onClick={onMore}>
+            更多
+            <ChevronRight size={15} />
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="am-library-loading">
+          {[0, 1, 2, 3].map((i) => <span key={i} className="am-library-skeleton" />)}
+        </div>
+      ) : items.length === 0 ? (
+        <div className="am-library-empty">{emptyText}</div>
+      ) : (
+        <div className="am-library-strip">
+          {items.map((item) => (
+            <motion.button
+              type="button"
+              key={item.id}
+              className="am-library-item"
+              onClick={() => onItemPlay(item)}
+              whileHover={{ y: -3 }}
+              whileTap={{ scale: 0.97 }}
+              transition={{ duration: 0.18 }}
+            >
+              <span className="am-library-item__cover">
+                {item.coverUrl ? (
+                  <img src={item.coverUrl} alt="" loading="lazy" />
+                ) : (
+                  <Music size={20} />
+                )}
+                <span className="am-library-item__play"><Play size={16} fill="currentColor" /></span>
+              </span>
+              <span className="am-library-item__title" title={item.title}>{item.title}</span>
+              {item.subtitle && <span className="am-library-item__sub">{item.subtitle}</span>}
+            </motion.button>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 

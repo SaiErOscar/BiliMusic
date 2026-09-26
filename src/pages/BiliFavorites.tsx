@@ -16,7 +16,7 @@ import type { Track } from '@/types'
 import type { FavoriteFolder, FavoriteItem } from '@/services/bilibiliApi'
 import BatchDownloadDialog from '@/components/BatchDownloadDialog'
 import { showBatchDialog } from '@/services/batchDownloadStore'
-import { createPlaylist, addTrackToPlaylist, PLAYLISTS_CHANGED_EVENT, loadBiliFolderCache, saveBiliFolderCache } from '@/utils/storage'
+import { createPlaylist, addTrackToPlaylist, PLAYLISTS_CHANGED_EVENT, loadBiliFolderCache, saveBiliFolderCache, SYNCED_FOLDER_KEY } from '@/utils/storage'
 import { listBiliFavoriteFolders } from '@/services/biliFavorites'
 import {
   getFavoriteFolderContent,
@@ -24,7 +24,7 @@ import {
   dealFavorite,
 } from '@/services/bilibiliApi'
 
-const SYNCED_FOLDER_KEY = 'bilimusic_synced_folder'
+
 
 function favoriteItemToTrack(item: FavoriteItem): Track {
   return {

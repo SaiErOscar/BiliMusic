@@ -1,135 +1,221 @@
-import { useEffect, useState, useCallback } from 'react'
-import { useLocation } from 'react-router-dom'
-import { Disc3, Loader2, Play, RefreshCw, TrendingUp } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { Clock, Download, FolderHeart, Heart } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
-import { getMusicRanking, type VideoInfo } from '@/services/api'
-import type { Track } from '@/types'
+import { useAuth } from '@/contexts/AuthContext'
 import {
-  ActionButton,
-  EmptyLibrary,
-  FeaturedGrid,
-  FeaturedTrackCard,
-  MusicHero,
-  MusicPageShell,
-  MusicSection,
-  TrackList,
-  TrackListRow,
-} from '@/components/AppleMusicPage'
+  getFavoriteFolderContent,
+  toHttpsUrl,
+  type FavoriteItem,
+} from '@/services/bilibiliApi'
+import {
+  DOWNLOADS_CHANGED_EVENT,
+  FAVORITES_CHANGED_EVENT,
+  loadBiliFolderCache,
+  loadDownloadRecords,
+  loadFavoriteTracks,
+  loadRecentTracks,
+  getSyncedBiliFolderId,
+  saveBiliFolderCache,
+} from '@/utils/storage'
+import { MusicHero, MusicPageShell, LibraryCard, type LibraryItem } from '@/components/AppleMusicPage'
+import type { DownloadRecord, Track } from '@/types'
 
-function videoToTrack(video: VideoInfo): Track {
+/** 每张卡片横向展示的最大条数 */
+const PREVIEW_COUNT = 6
+
+/** 最近播放 / 我喜欢条目已是 Track，直接映射为卡片单元 */
+function trackToItem(track: Track): LibraryItem {
   return {
-    id: video.bvid,
-    title: video.title,
-    artist: video.ownerName,
-    coverUrl: video.pic,
-    duration: video.duration,
-    videoUrl: `https://www.bilibili.com/video/${video.bvid}`,
-    bvid: video.bvid,
-    playCount: video.stat?.view || 0,
+    id: track.id,
+    title: track.title,
+    subtitle: track.artist,
+    coverUrl: track.coverUrl,
+  }
+}
+
+/** 下载记录无封面，映射为卡片单元（封面位显示占位图标） */
+function downloadToItem(record: DownloadRecord): LibraryItem {
+  return {
+    id: record.id,
+    title: record.title,
+    subtitle: record.artist || (record.format === 'video' ? '视频' : '音频'),
+  }
+}
+
+/** B 站收藏夹条目转 Track（与 BiliFavorites 页保持一致的清洗规则） */
+function favoriteToTrack(item: FavoriteItem): Track {
+  return {
+    id: item.bvid,
+    title: item.title?.replace(/<[^>]+>/g, '') || item.bvid,
+    artist: item.upper?.name || '未知UP主',
+    coverUrl: toHttpsUrl(item.cover || item.pic),
+    duration: item.duration || 0,
+    videoUrl: `https://www.bilibili.com/video/${item.bvid}`,
+    bvid: item.bvid,
+    aid: item.aid || item.id,
+    cid: item.cid,
+    playCount: item.cnt_info?.play || 0,
     isLiked: false,
   }
 }
 
 export default function Discover() {
-  const [tracks, setTracks] = useState<VideoInfo[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const player = usePlayer()
+  const { isLoggedIn, setShowLogin } = useAuth()
   const location = useLocation()
+  const navigate = useNavigate()
 
-  // 首次挂载 + 每次切回本页时重新拉取（route 变化触发），保证内容始终最新
-  useEffect(() => {
-    void loadMusicRanking()
-  }, [location.pathname])
+  const [recent, setRecent] = useState<Track[]>([])
+  const [favorites, setFavorites] = useState<Track[]>([])
+  const [downloads, setDownloads] = useState<DownloadRecord[]>([])
+  const [biliFolderTracks, setBiliFolderTracks] = useState<Track[]>([])
+  const [biliFolderId, setBiliFolderId] = useState<number | null>(null)
+  const [biliLoading, setBiliLoading] = useState(false)
 
-  async function loadMusicRanking() {
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await getMusicRanking()
-      setTracks(data)
-    } catch (e: any) {
-      setError(e.message || '加载失败')
-    } finally {
-      setLoading(false)
+  // 读取本地三张卡片数据（同步，无网络）
+  const refreshLocal = useCallback(() => {
+    setRecent(loadRecentTracks())
+    setFavorites(loadFavoriteTracks())
+    setDownloads(loadDownloadRecords())
+  }, [])
+
+  // 读取 B 站收藏夹卡片：跟随「当前打开的夹」，优先本地缓存，无缓存异步拉取
+  const refreshBiliFolder = useCallback(async () => {
+    const folderId = getSyncedBiliFolderId()
+    setBiliFolderId(folderId)
+    if (!folderId || !isLoggedIn) {
+      setBiliFolderTracks(folderId ? loadBiliFolderCache(folderId) : [])
+      return
     }
-  }
+    const cached = loadBiliFolderCache(folderId)
+    if (cached.length > 0) {
+      setBiliFolderTracks(cached)
+      // 有缓存先展示，后台静默刷新最新
+    } else {
+      setBiliLoading(true)
+    }
+    try {
+      const all: Track[] = []
+      let page = 1
+      while (true) {
+        const data = await getFavoriteFolderContent(folderId, page, 20)
+        if (data.medias?.length) all.push(...data.medias.map(favoriteToTrack))
+        if (!data.has_more) break
+        page++
+        if (page > 50) break
+      }
+      all.sort((a, b) => {
+        const at = a.likedAt ? new Date(a.likedAt).getTime() : 0
+        const bt = b.likedAt ? new Date(b.likedAt).getTime() : 0
+        return bt - at
+      })
+      setBiliFolderTracks(all)
+      saveBiliFolderCache(folderId, all)
+    } catch {
+      // 拉取失败：保留已有缓存展示（无缓存则维持空态），不报错
+      if (cached.length === 0) setBiliFolderTracks([])
+    } finally {
+      setBiliLoading(false)
+    }
+  }, [isLoggedIn])
 
-  const handlePlayAll = useCallback(() => {
-    const playlist = tracks.slice(0, 12).map(videoToTrack)
-    if (playlist.length > 0) player.playAll(playlist)
-  }, [tracks, player])
+  // 首次挂载 + 每次切回本页时重新拉取，保证四卡内容跟随最新
+  useEffect(() => {
+    refreshLocal()
+    void refreshBiliFolder()
+  }, [location.pathname, refreshLocal, refreshBiliFolder])
 
-  const handlePlayOne = useCallback((video: VideoInfo) => {
-    player.playNow(videoToTrack(video))
+  // 本地数据变更事件驱动刷新（收藏 / 最近播放 / 下载）
+  useEffect(() => {
+    const onFav = () => refreshLocal()
+    const onRecent = () => refreshLocal()
+    const onDownload = () => refreshLocal()
+    window.addEventListener(FAVORITES_CHANGED_EVENT, onFav)
+    window.addEventListener('bilimusic:recent-changed', onRecent)
+    window.addEventListener(DOWNLOADS_CHANGED_EVENT, onDownload)
+    return () => {
+      window.removeEventListener(FAVORITES_CHANGED_EVENT, onFav)
+      window.removeEventListener('bilimusic:recent-changed', onRecent)
+      window.removeEventListener(DOWNLOADS_CHANGED_EVENT, onDownload)
+    }
+  }, [refreshLocal])
+
+  // 条目播放：三张曲目型卡片按 id 回查 Track 后 playNow
+  const playItemByTrack = useCallback((items: Track[]) => (item: LibraryItem) => {
+    const track = items.find((t) => t.id === item.id)
+    if (track) player.playNow(track)
   }, [player])
 
-  const featured = tracks.slice(0, 3)
-  const list = tracks.slice(3)
-  const heroImage = featured[0]?.pic
+  // 下载条目：与下载页一致，用系统默认浏览器打开原链接（无本地文件播放能力）
+  const openDownload = useCallback((item: LibraryItem) => {
+    const record = downloads.find((d) => d.id === item.id)
+    if (record) window.electronAPI?.openExternal?.(`https://www.bilibili.com/video/${record.bvid}`)
+  }, [downloads])
+
+  const biliItems = biliFolderTracks.map(trackToItem)
 
   return (
     <MusicPageShell>
       <MusicHero
-        eyebrow="B站音乐区排行榜"
-        title="发现新声音"
-        subtitle="精选热门音乐投稿，用 Apple Music 式的节奏探索今天值得播放的内容。"
-        image={heroImage}
+        eyebrow="你的音乐库"
+        title="发现页"
+        subtitle="最近播放、收藏、B 站收藏夹和本地下载，都收在一处，点开即可继续听。"
         tone="pink"
-        action={(
-          <ActionButton onClick={handlePlayAll} disabled={loading || tracks.length === 0}>
-            <Play size={17} fill="currentColor" />
-            播放全部
-          </ActionButton>
-        )}
       />
 
-      {loading ? (
-        <div className="am-loading"><Loader2 size={30} className="spin" /></div>
-      ) : error ? (
-        <EmptyLibrary
-          icon={<RefreshCw size={38} />}
-          title="加载失败"
-          subtitle={error}
-        />
-      ) : (
-        <>
-          <MusicSection title="精选推荐" icon={<TrendingUp size={22} />}>
-            <FeaturedGrid>
-              {featured.map((video, index) => {
-                const track = videoToTrack(video)
-                return (
-                  <FeaturedTrackCard
-                    key={video.bvid}
-                    track={track}
-                    index={index + 1}
-                    isCurrent={player.currentTrack?.id === video.bvid}
-                    onPlay={() => handlePlayOne(video)}
-                  />
-                )
-              })}
-            </FeaturedGrid>
-          </MusicSection>
+      <LibraryCard
+        icon={<Clock size={20} />}
+        title="最近播放"
+        count={recent.length}
+        items={recent.slice(0, PREVIEW_COUNT).map(trackToItem)}
+        emptyText="还没有播放记录，随便听一首就会出现在这里。"
+        onMore={() => navigate('/recent')}
+        onItemPlay={playItemByTrack(recent)}
+      />
 
-          <MusicSection title="热门排行榜" icon={<Disc3 size={22} />}>
-            <TrackList>
-              {list.map((video, index) => {
-                const track = videoToTrack(video)
-                return (
-                  <TrackListRow
-                    key={video.bvid}
-                    track={track}
-                    index={featured.length + index + 1}
-                    isCurrent={player.currentTrack?.id === video.bvid}
-                    isPlaying={player.isPlaying}
-                    onPlay={() => handlePlayOne(video)}
-                  />
-                )
-              })}
-            </TrackList>
-          </MusicSection>
-        </>
-      )}
+      <LibraryCard
+        icon={<Heart size={20} />}
+        title="我喜欢"
+        count={favorites.length}
+        items={favorites.slice(0, PREVIEW_COUNT).map(trackToItem)}
+        emptyText="还没有收藏，在播放页或列表点❤即可收藏。"
+        onMore={() => navigate('/favorites')}
+        onItemPlay={playItemByTrack(favorites)}
+      />
+
+      <LibraryCard
+        icon={<FolderHeart size={20} />}
+        title="B 站收藏夹"
+        count={biliFolderTracks.length}
+        loading={biliLoading}
+        items={biliItems.slice(0, PREVIEW_COUNT)}
+        emptyText={
+          isLoggedIn
+            ? (biliFolderId ? '这个收藏夹暂时是空的，去收藏夹页添加一些内容吧。' : '还没有选择过收藏夹，先去收藏夹页打开一个。')
+            : '登录后可同步你的收藏夹。'
+        }
+        action={
+          !isLoggedIn ? (
+            <button type="button" className="am-library-login" onClick={() => setShowLogin(true)}>
+              登录
+            </button>
+          ) : undefined
+        }
+        onMore={() => navigate('/bili-favorites')}
+        onItemPlay={playItemByTrack(biliFolderTracks)}
+      />
+
+      <LibraryCard
+        icon={<Download size={20} />}
+        title="本地下载"
+        count={downloads.length}
+        unit="个"
+        items={downloads.slice(0, PREVIEW_COUNT).map(downloadToItem)}
+        emptyText="还没有下载，在播放页或控制栏点击下载按钮。"
+        onMore={() => navigate('/downloads')}
+        onItemPlay={openDownload}
+      />
     </MusicPageShell>
   )
 }

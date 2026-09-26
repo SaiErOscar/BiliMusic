@@ -128,6 +128,31 @@ export function saveBiliFolderCache(folderId: number | string, tracks: Track[]):
   } catch { /* ignore */ }
 }
 
+/**
+ * 「当前打开的收藏夹」持久化键（v1.4.1 从 BiliFavorites 提取到此处，
+ * 供发现页等跨页面读取选中夹，避免键名漂移）。
+ */
+export const SYNCED_FOLDER_KEY = 'bilimusic_synced_folder'
+
+/** 读取当前选中的收藏夹 ID；未选中/非法返回 null。 */
+export function getSyncedBiliFolderId(): number | null {
+  try {
+    const raw = localStorage.getItem(SYNCED_FOLDER_KEY)
+    if (!raw) return null
+    const id = Number(raw)
+    return Number.isFinite(id) && id > 0 ? id : null
+  } catch {
+    return null
+  }
+}
+
+/** 写入当前选中的收藏夹 ID。 */
+export function setSyncedBiliFolderId(folderId: number | string): void {
+  try {
+    localStorage.setItem(SYNCED_FOLDER_KEY, String(folderId))
+  } catch { /* ignore */ }
+}
+
 export function toggleFavoriteTrack(track: Track): Track[] {
   const favs = loadFavoriteTracks()
   const idx = favs.findIndex(t => t.id === track.id)
