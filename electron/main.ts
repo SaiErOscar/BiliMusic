@@ -6,7 +6,7 @@ import { registerBiliApiHandlers, killAllChildren } from './biliApi'
 import { registerLyricsApiHandlers } from './lyricsApi'
 import { initUpdates, getActiveRendererRoot } from './updater'
 import { registerWebdavHandlers } from './webdav'
-import { registerMiniWindowHandlers, onMainWindowActivityChanged, destroyLyricWindow } from './miniWindows'
+import { registerMiniWindowHandlers, onMainWindowActivityChanged, destroyLyricWindow, isLyricVisible, toggleLyricWindow } from './miniWindows'
 import { registerSystemFontsHandlers } from './systemFonts'
 import { registerColorPickerHandlers } from './colorPicker'
 
@@ -93,7 +93,7 @@ let isQuitting = false
 let quitCleaned = false
 let forceExitTimer: ReturnType<typeof setTimeout> | null = null
 
-type TrayCommand = 'toggle-play' | 'next' | 'prev' | 'show-window' | 'quit'
+type TrayCommand = 'toggle-play' | 'next' | 'prev' | 'show-window' | 'quit' | 'toggle-lyric'
 
 interface TrayPlayerState {
   hasTrack: boolean
@@ -103,6 +103,8 @@ interface TrayPlayerState {
   isPlaying: boolean
   queueLength: number
   theme: 'light' | 'dark'
+  /** 桌面歌词窗当前是否实际可见（驱动托盘按钮文案/高亮） */
+  lyricVisible: boolean
 }
 
 let trayPlayerState: TrayPlayerState = {
@@ -113,6 +115,7 @@ let trayPlayerState: TrayPlayerState = {
   isPlaying: false,
   queueLength: 0,
   theme: 'dark',
+  lyricVisible: false,
 }
 
 // 应用图标：dev 时从 electron 源目录加载，打包后从 dist-electron 同级加载（由 copy 脚本随构建复制）
@@ -218,7 +221,7 @@ function getTrayHtml() {
     * { box-sizing: border-box; user-select: none; }
     body {
       width: 330px;
-      height: 292px;
+      height: 342px;
       margin: 0;
       overflow: hidden;
       color: var(--tray-text);
@@ -325,6 +328,7 @@ function getTrayHtml() {
     }
     .row:hover { background: var(--tray-row-hover); }
     .row.danger { color: #ff6961; }
+    .row.is-active { color: #ff375f; font-weight: 800; }
     .count { color: var(--tray-count); font-size: 12px; }
   </style>
 </head>
@@ -345,13 +349,14 @@ function getTrayHtml() {
     </div>
     <div class="actions">
       <button class="row" id="show"><span>显示 BiliMusic</span><span class="count" id="queue">0 首</span></button>
+      <button class="row" id="lyric"><span id="lyricLabel">打开桌面歌词</span><span class="count" id="lyricState">已关闭</span></button>
       <button class="row danger" id="quit"><span>退出应用</span><span>⌘Q</span></button>
     </div>
   </div>
   <script>
     const { onState, getState, sendCommand } = window.trayAPI
     const $ = (id) => document.getElementById(id)
-    let state = { hasTrack: false, title: '未在播放', artist: '搜索并播放音乐', coverUrl: '', isPlaying: false, queueLength: 0, theme: 'dark' }
+    let state = { hasTrack: false, title: '未在播放', artist: '搜索并播放音乐', coverUrl: '', isPlaying: false, queueLength: 0, theme: 'dark', lyricVisible: false }
     function render(next) {
       state = next || state
       document.body.classList.toggle('light', (state.theme || 'dark') === 'light')
@@ -361,6 +366,9 @@ function getTrayHtml() {
       $('statusText').textContent = state.hasTrack ? (state.isPlaying ? '正在播放' : '已暂停') : '空闲'
       $('play').textContent = state.isPlaying ? '⏸' : '▶'
       $('queue').textContent = (state.queueLength || 0) + ' 首'
+      $('lyricLabel').textContent = state.lyricVisible ? '关闭桌面歌词' : '打开桌面歌词'
+      $('lyricState').textContent = state.lyricVisible ? '显示中' : '已关闭'
+      $('lyric').classList.toggle('is-active', Boolean(state.lyricVisible))
       $('prev').disabled = $('play').disabled = $('next').disabled = !state.hasTrack
       if (state.coverUrl) {
         $('cover').src = state.coverUrl
@@ -378,6 +386,7 @@ function getTrayHtml() {
     $('play').onclick = () => sendCommand('toggle-play')
     $('next').onclick = () => sendCommand('next')
     $('show').onclick = () => sendCommand('show-window')
+    $('lyric').onclick = () => sendCommand('toggle-lyric')
     $('quit').onclick = () => sendCommand('quit')
   </script>
 </body>
@@ -390,7 +399,7 @@ function createTrayWindow() {
   trayWindowReady = false
   trayWindow = new BrowserWindow({
     width: 330,
-    height: 292,
+    height: 342,
     show: false,
     frame: false,
     resizable: false,
@@ -461,7 +470,7 @@ function toggleTrayWindow() {
   const bounds = tray.getBounds()
   const { workArea } = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y })
   const width = 330
-  const height = 292
+  const height = 342
   const x = Math.round(Math.min(Math.max(bounds.x + bounds.width / 2 - width / 2, workArea.x + 8), workArea.x + workArea.width - width - 8))
   const aboveY = bounds.y - height - 10
   const belowY = bounds.y + bounds.height + 10
@@ -488,6 +497,12 @@ function hideToTray() {
 }
 
 function sendTrayCommand(command: TrayCommand) {
+  if (command === 'toggle-lyric') {
+    // 直接走主进程切换桌面歌词意图（不转发渲染层，避免多余往返）
+    toggleLyricWindow()
+    trayWindow?.hide()
+    return
+  }
   if (command === 'show-window') {
     showMainWindow()
     trayWindow?.hide()
@@ -610,6 +625,8 @@ ipcMain.on('tray:player-state', (_event, state: TrayPlayerState) => {
     isPlaying: Boolean(state?.isPlaying),
     queueLength: Number(state?.queueLength || 0),
     theme: state?.theme === 'light' ? 'light' : 'dark',
+    // lyricVisible 由主进程回调维护，不信任渲染层推送
+    lyricVisible: trayPlayerState.lyricVisible,
   }
   updateTrayState()
 })
@@ -660,7 +677,16 @@ app.whenReady().then(() => {
   registerWebdavHandlers()
   registerSystemFontsHandlers()
   registerColorPickerHandlers()
-  registerMiniWindowHandlers({ getMainWindow: () => mainWindow })
+  registerMiniWindowHandlers({
+    getMainWindow: () => mainWindow,
+    // 歌词可见性变化 → 刷新托盘状态的 lyricVisible 并回推托盘窗口
+    onLyricVisibleChange: () => {
+      const visible = isLyricVisible()
+      if (trayPlayerState.lyricVisible === visible) return
+      trayPlayerState = { ...trayPlayerState, lyricVisible: visible }
+      trayWindow?.webContents.send('tray:state', trayPlayerState)
+    },
+  })
   // 更新模块须在创建窗口前初始化：bootReconcile 先定下生效的渲染层根目录，供 app:// 加载
   initUpdates({
     window: () => mainWindow,

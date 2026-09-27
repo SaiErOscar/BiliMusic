@@ -159,6 +159,8 @@ let getMainWindow: (() => BrowserWindow | null) | null = null
 // 实际可见 = lyricIntent && !抑制
 let lyricIntent = false
 let nowPlayingOpen = false
+// 歌词可见性变化时回推主进程（用于刷新托盘菜单按钮态）
+let onLyricVisibleChanged: (() => void) | null = null
 
 /** 主窗口是否处于“正在看播放页”的活动状态（可见、未最小化、有焦点） */
 function isMainWindowActive(): boolean {
@@ -719,6 +721,8 @@ export function isLyricVisible() {
 }
 
 function notifyLyricVisible() {
+  // 先刷新托盘按钮可见状态（不依赖主窗口是否存在）
+  onLyricVisibleChanged?.()
   const main = getMainWindow?.()
   if (!main || main.isDestroyed()) return
   // 同时下发意图与抑制状态：渲染层按钮文字跟随“用户意图”，
@@ -750,8 +754,9 @@ export function onMainWindowActivityChanged() {
   applyLyricVisibility()
 }
 
-export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserWindow | null }) {
+export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserWindow | null; onLyricVisibleChange?: () => void }) {
   getMainWindow = opts.getMainWindow
+  onLyricVisibleChanged = opts.onLyricVisibleChange ?? null
 
   // 主窗口渲染层 → 主进程：推送完整播放状态
   ipcMain.on('mini:state', (_event, state: MiniPlayerState) => {

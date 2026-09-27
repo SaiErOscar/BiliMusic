@@ -45,6 +45,8 @@
 
 ## 变更记录
 
+- 2026-09-27 按用户「推进下一步更新」指示，实际发布 **v1.4.3 = 两项桌面体验新增**：①设置→关于新增「使用说明」按钮，内置本地化上手指南（文案按语言对象组织，当前仅中文，预留多语言结构）；②任务栏托盘新增「打开/关闭桌面歌词」按钮，实时跟随歌词窗实际可见态（主进程经 notifyLyricVisible 回调驱动 trayPlayerState.lyricVisible 刷新）。「关于」弹窗与说明文案位于 src/utils/helpContent.ts、src/components/HelpModal.tsx；托盘逻辑在 electron/main.ts getTrayHtml/sendTrayCommand 与 miniWindows.ts registerMiniWindowHandlers({onLyricVisibleChange})。本项不占原鸿蒙/移动端计划槽位，下方表格计划编号仅表示相对顺序，实际发布版本号以每次发布记录为准；原计划 1.4.3 鸿蒙无账号构建验证及以后相应顺延。
+
 - 2026-09-26 建立本页。发现页聚合卡片改造提为 v1.4.1；业务逻辑解耦及后续功能链整体 +1 顺延（解耦 → v1.4.2）。
 - 2026-09-26 两处桌面歌词窗 bug 根因坐实（字体列表缺 system-ui 保底、播放顺序 none 态图标语义错+无高亮区分）。按用户要求 **v1.4.2-pre1 范围锁定为这两处歌词窗修复**，src/platform 解耦主体后置到 v1.4.2 后续 pre/正式版，不进 pre1。
 - 2026-09-26 pre1 实测发现新 bug：随机→顺序播放需点两下，根因为主进程合并吞掉 `none` 态。**v1.4.2-pre2 修复此项**；用户另指示 **pre3 启动 src/platform 解耦主体**。

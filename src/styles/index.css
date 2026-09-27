@@ -445,6 +445,274 @@ body {
   cursor: not-allowed;
 }
 
+/* ===== Help Modal ===== */
+
+.help-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.help-modal {
+  width: min(560px, calc(100vw - 40px));
+  max-height: min(76vh, 640px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 22px;
+  padding: 20px;
+  background: color-mix(in srgb, var(--color-card) 92%, transparent);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 28px 90px rgba(24, 25, 28, 0.18), inset 0 1px rgba(255, 255, 255, 0.36);
+  color: var(--color-foreground);
+}
+
+[data-theme="dark"] .help-modal {
+  background: rgba(28, 28, 31, 0.92);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.46), inset 0 1px rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.help-modal__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.help-modal__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #ff375f;
+  font-size: 12px;
+  font-weight: 850;
+  margin-bottom: 4px;
+}
+
+.help-modal__head h2 {
+  font-size: 17px;
+  line-height: 1.35;
+  font-weight: 720;
+  color: var(--color-muted-foreground);
+}
+
+[data-theme="dark"] .help-modal__head h2 {
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.help-modal__head button {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-border) 48%, transparent);
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+}
+
+.help-modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.help-modal__section h3 {
+  font-size: 14px;
+  font-weight: 820;
+  margin-bottom: 7px;
+}
+
+.help-modal__section ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.help-modal__section li {
+  position: relative;
+  padding-left: 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-muted-foreground);
+}
+
+[data-theme="dark"] .help-modal__section li {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.help-modal__section li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 8px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #ff375f;
+}
+
+.help-modal__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.help-modal__foot span {
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+}
+
+.help-modal__foot button {
+  min-height: 36px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: #ff375f;
+  color: #fff;
+  cursor: pointer;
+  font: 800 13px/1 var(--font-body);
+}
+
+/* ===== Help Modal (使用说明) ===== */
+.help-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.help-modal {
+  width: min(560px, calc(100vw - 40px));
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 22px;
+  padding: 20px;
+  background: color-mix(in srgb, var(--color-card) 92%, transparent);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 28px 90px rgba(24, 25, 28, 0.18), inset 0 1px rgba(255, 255, 255, 0.36);
+  color: var(--color-foreground);
+}
+
+[data-theme="dark"] .help-modal {
+  background: rgba(28, 28, 31, 0.92);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.46), inset 0 1px rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.help-modal__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.help-modal__title p {
+  color: var(--color-muted-foreground);
+  font-size: 12px;
+  font-weight: 720;
+  margin-bottom: 6px;
+}
+
+.help-modal__title h2 {
+  font-size: 22px;
+  line-height: 1.15;
+  font-weight: 860;
+  letter-spacing: 0;
+}
+
+.help-modal__head button {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-border) 48%, transparent);
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+}
+
+.help-modal__body {
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.help-modal__section {
+  margin-bottom: 16px;
+}
+
+.help-modal__section h3 {
+  font-size: 14px;
+  font-weight: 820;
+  margin-bottom: 8px;
+  color: #ff375f;
+}
+
+.help-modal__section ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.help-modal__section li {
+  position: relative;
+  padding-left: 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-foreground);
+}
+
+.help-modal__section li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 8px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-muted-foreground);
+}
+
+.help-modal__footer {
+  margin: 18px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--glass-border);
+  font-size: 12px;
+  font-weight: 720;
+  color: var(--color-muted-foreground);
+  text-align: center;
+}
+
 /* ===== Glass Utilities ===== */
 
 .glass-panel {
