@@ -7,6 +7,7 @@ import {
   FileUp,
   Download,
   FolderOpen,
+  HardDrive,
   Github,
   Info,
   LogIn,
@@ -24,6 +25,7 @@ import {
 } from 'lucide-react'
 import { ActionButton, MusicHero, MusicPageShell, MusicSection } from '@/components/AppleMusicPage'
 import HelpModal from '@/components/HelpModal'
+import BackupModal from '@/components/BackupModal'
 import FontSelect from '@/components/FontSelect'
 import ColorField from '@/components/ColorField'
 import { useTheme } from '@/hooks/useTheme'
@@ -46,6 +48,7 @@ export default function Settings() {
   const [updateAction, setUpdateAction] = useState<'restart' | 'reload' | null>(null)
   const [cacheMsg, setCacheMsg] = useState('')
   const [showHelp, setShowHelp] = useState(false)
+  const [showBackup, setShowBackup] = useState(false)
   // 鸿蒙端不提供更新能力，仅展示版本号
   const isHarmonyOS = window.electronAPI?.platform === 'openharmony'
 
@@ -427,6 +430,12 @@ export default function Settings() {
                 <BookOpen size={14} />
                 使用说明
               </button>
+              {!isHarmonyOS && (
+                <button type="button" onClick={() => setShowBackup(true)}>
+                  <HardDrive size={14} />
+                  备份数据
+                </button>
+              )}
               <button type="button" onClick={() => window.electronAPI?.openExternal?.('https://github.com/SaiErOscar/BiliMusic')}>
                 <Github size={14} />
                 关于项目
@@ -446,6 +455,7 @@ export default function Settings() {
       </div>
     </MusicPageShell>
     {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+    {showBackup && <BackupModal onClose={() => setShowBackup(false)} webdavConfigured={davConfigured} />}
     </>
   )
 }

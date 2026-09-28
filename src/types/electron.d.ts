@@ -44,6 +44,7 @@ export interface BiliApi {
     dedeUserId: string
   }>
   logout: () => Promise<{ success: boolean }>
+  setCookies?: (payload: { sessdata: string; biliJct: string; dedeUserId: string }) => Promise<{ success: boolean; message?: string }>
   dealFavorite: (rid: number | string, addMediaIds: number[], delMediaIds?: number[]) => Promise<{ code: number; message: string }>
   fetchBiliJson: (path: string, params?: Record<string, string | number | boolean>) => Promise<unknown>
   openLoginWindow: () => Promise<{ success: boolean }>
@@ -238,6 +239,8 @@ declare global {
       webdavGet?: (relPath: string) => Promise<WebdavResult>
       webdavPut?: (relPath: string, content: string, etag?: string) => Promise<WebdavResult>
       clearWebdav?: () => Promise<{ ok: boolean }>
+      saveBackupFile?: (content: string) => Promise<{ ok: boolean; canceled?: boolean; path?: string; message?: string }>
+      openBackupFile?: () => Promise<{ ok: boolean; canceled?: boolean; path?: string; content?: string; message?: string }>
       platform: string
       persistentStorage?: PersistentStorageApi
       biliApi: BiliApi

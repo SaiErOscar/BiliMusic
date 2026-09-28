@@ -9,6 +9,7 @@ import { registerWebdavHandlers } from './webdav'
 import { registerMiniWindowHandlers, onMainWindowActivityChanged, destroyLyricWindow, isLyricVisible, toggleLyricWindow } from './miniWindows'
 import { registerSystemFontsHandlers } from './systemFonts'
 import { registerColorPickerHandlers } from './colorPicker'
+import { registerBackupHandlers } from './backup'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -677,6 +678,7 @@ app.whenReady().then(() => {
   registerWebdavHandlers()
   registerSystemFontsHandlers()
   registerColorPickerHandlers()
+  registerBackupHandlers()
   registerMiniWindowHandlers({
     getMainWindow: () => mainWindow,
     // 歌词可见性变化 → 刷新托盘状态的 lyricVisible 并回推托盘窗口

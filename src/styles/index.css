@@ -4791,3 +4791,128 @@ body {
 .am-library-login:hover {
   background: var(--sidebar-active-bg);
 }
+
+/* ===== v1.4.3-pre6 备份数据弹窗 ===== */
+.bm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.52);
+  backdrop-filter: blur(4px);
+  animation: bm-fade 0.18s ease;
+}
+@keyframes bm-fade { from { opacity: 0 } to { opacity: 1 } }
+
+.bm-modal {
+  width: min(92vw, 420px);
+  max-height: 86vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 22px 22px;
+  border-radius: 16px;
+  border: 1px solid var(--color-border);
+  background: #fff;
+  color: var(--color-foreground);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.4);
+}
+[data-theme="dark"] .bm-modal {
+  background: rgba(28, 28, 31, 0.96);
+  color: #fff;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.5), inset 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.bm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.bm-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 800;
+}
+.bm-title svg { color: var(--color-primary, #ff375f); }
+.bm-close {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-border) 48%, transparent);
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+}
+.bm-close:disabled { opacity: 0.5; cursor: default; }
+
+.bm-body { display: flex; flex-direction: column; gap: 12px; }
+.bm-center { align-items: center; justify-content: center; padding: 18px 0; gap: 10px; color: var(--color-muted-foreground); }
+
+.bm-hint { font-size: 13px; line-height: 1.55; color: var(--color-muted-foreground); margin: 0; }
+
+.bm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-border) 22%, transparent);
+  color: var(--color-foreground);
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+[data-theme="dark"] .bm-btn { color: #fff; }
+.bm-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--color-border) 42%, transparent); }
+.bm-btn:active:not(:disabled) { transform: scale(0.99); }
+.bm-btn:disabled { opacity: 0.55; cursor: default; }
+.bm-btn.primary {
+  background: var(--color-primary, #ff375f);
+  border-color: transparent;
+  color: #fff;
+}
+.bm-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--color-primary, #ff375f) 88%, #000); }
+.bm-btn.ghost { background: transparent; }
+
+.bm-actions { display: flex; gap: 10px; }
+.bm-actions .bm-btn { width: auto; flex: 1 1 0; }
+
+.bm-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 650; color: var(--color-muted-foreground); }
+.bm-field input {
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--color-border);
+  background: var(--color-background, #fff);
+  color: var(--color-foreground);
+  font-size: 14px;
+}
+[data-theme="dark"] .bm-field input { background: rgba(0, 0, 0, 0.28); color: #fff; }
+.bm-field input:focus { outline: none; border-color: var(--color-primary, #ff375f); }
+
+.bm-warn {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, #ff9800 14%, transparent);
+  border: 1px solid color-mix(in srgb, #ff9800 40%, transparent);
+}
+.bm-warn svg { color: #ff9800; flex: 0 0 auto; margin-top: 2px; }
+.bm-warn p { margin: 0; font-size: 13px; line-height: 1.55; }
+
+.bm-error { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: #e53935; }
+.bm-ok { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 14px; font-weight: 650; color: #2e9e5b; }
+
+.bm-spin { animation: bm-rotate 0.9s linear infinite; }
+@keyframes bm-rotate { to { transform: rotate(360deg) } }

@@ -633,6 +633,36 @@ export function registerBiliApiHandlers() {
     }
   })
 
+  // v1.4.3-pre6 备份导入：把备份里的 B 站登录凭证写回 defaultSession，切换账号免重新登录
+  ipcMain.handle('bili:setCookies', async (_e, payload: { sessdata: string; biliJct: string; dedeUserId: string }) => {
+    if (!payload?.sessdata || !payload?.dedeUserId) {
+      return { success: false, message: '备份中的登录凭证不完整' }
+    }
+    const items: Array<[string, string]> = [
+      ['SESSDATA', payload.sessdata],
+      ['bili_jct', payload.biliJct || ''],
+      ['DedeUserID', payload.dedeUserId],
+    ]
+    for (const [name, value] of items) {
+      if (!value) continue
+      try {
+        await session.defaultSession.cookies.set({
+          url: BILI_API,
+          name,
+          value,
+          domain: '.bilibili.com',
+          path: '/',
+          secure: true,
+          httpOnly: true,
+        })
+      } catch (e) {
+        console.warn('[biliApi] setCookies failed:', name, e)
+        return { success: false, message: '写入登录凭证失败' }
+      }
+    }
+    return { success: true }
+  })
+
   // 收藏/取消收藏 B站收藏夹（主进程 net.fetch，自动带 Cookie 且无 CORS 限制）
   // rid 支持 aid（数字）或 bvid（字符串），B站 deal 接口两者均可
   ipcMain.handle('bili:dealFavorite', async (_e, rid: number | string, addMediaIds: number[], delMediaIds: number[] = []) => {

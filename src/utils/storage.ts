@@ -63,6 +63,14 @@ export function loadDownloadRecords(): DownloadRecord[] {
   } catch { return [] }
 }
 
+// v1.4.3-pre6 备份导入：批量覆盖下载记录（合并后整体写回）
+export function saveDownloadRecords(records: DownloadRecord[]) {
+  try {
+    safeSetItem(DOWNLOADS_KEY, JSON.stringify(records.slice(0, 200)))
+    window.dispatchEvent(new CustomEvent(DOWNLOADS_CHANGED_EVENT))
+  } catch { /* ignore */ }
+}
+
 export function saveDownloadRecord(record: DownloadRecord) {
   try {
     const records = loadDownloadRecords()

@@ -45,6 +45,8 @@
 
 ## 变更记录
 
+- 2026-09-28 **v1.4.3-pre6 = 一键全量数据备份**：「设置 → 关于」新增「备份数据」入口，备份含 B 站登录 Cookie、歌单、我喜欢、最近播放、下载记录、歌词偏移与设置。四操作：导出为文件 / 从文件导入（.bmback 加密文件，经主进程 dialog + fs）/ 同步至 WebDAV / 从 WebDAV 导入（仅「歌单云同步」已配 WebDAV 即 getWebdavConfig().configured 时出现，固定单文件 biliMusic-backup.bmback 覆盖式）。加密：PBKDF2-SHA256(150k)+AES-256-GCM，口令不落盘不可恢复；导出前隐私确认。导入合并：歌单/我喜欢复用 mergeItems（id+时间戳+墓碑），最近播放/下载记录按 id 去重，歌词偏移本地优先，设置覆盖；**B 站账号不同时弹窗询问**，选保留当前或切换到备份（新增 bili:setCookies 回写 Cookie 免重登）。新增 src/utils/backup.ts、src/components/BackupModal.tsx、electron/backup.ts（registerBackupHandlers）；preload 暴露 saveBackupFile/openBackupFile/biliApi.setCookies；鸿蒙隐藏入口（isHarmonyOS）。
+
 - 2026-09-27 按用户「推进下一步更新」指示，实际发布 **v1.4.3 = 两项桌面体验新增**：①设置→关于新增「使用说明」按钮，内置本地化上手指南（文案按语言对象组织，当前仅中文，预留多语言结构）；②任务栏托盘新增「打开/关闭桌面歌词」按钮，实时跟随歌词窗实际可见态（主进程经 notifyLyricVisible 回调驱动 trayPlayerState.lyricVisible 刷新）。「关于」弹窗与说明文案位于 src/utils/helpContent.ts、src/components/HelpModal.tsx；托盘逻辑在 electron/main.ts getTrayHtml/sendTrayCommand 与 miniWindows.ts registerMiniWindowHandlers({onLyricVisibleChange})。本项不占原鸿蒙/移动端计划槽位，下方表格计划编号仅表示相对顺序，实际发布版本号以每次发布记录为准；原计划 1.4.3 鸿蒙无账号构建验证及以后相应顺延。
 
 - 2026-09-26 建立本页。发现页聚合卡片改造提为 v1.4.1；业务逻辑解耦及后续功能链整体 +1 顺延（解耦 → v1.4.2）。

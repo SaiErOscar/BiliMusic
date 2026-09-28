@@ -41,6 +41,9 @@ const biliApi = {
   getCookies: () =>
     ipcRenderer.invoke('bili:getCookies'),
 
+  setCookies: (payload) =>
+    ipcRenderer.invoke('bili:setCookies', payload),
+
   // 收藏到 B站收藏夹
   dealFavorite: (rid, addMediaIds, delMediaIds) =>
     ipcRenderer.invoke('bili:dealFavorite', rid, addMediaIds, delMediaIds),
@@ -154,6 +157,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   webdavGet: (relPath) => ipcRenderer.invoke('webdav:get', relPath),
   webdavPut: (relPath, content, etag) => ipcRenderer.invoke('webdav:put', relPath, content, etag),
   clearWebdav: () => ipcRenderer.invoke('webdav:clear'),
+  // v1.4.3-pre6 备份：文件对话框读写（主进程搬运 .bmback 文本）
+  saveBackupFile: (content) => ipcRenderer.invoke('backup:saveFile', content),
+  openBackupFile: () => ipcRenderer.invoke('backup:openFile'),
   platform: process.platform,
   persistentStorage,
   biliApi,
