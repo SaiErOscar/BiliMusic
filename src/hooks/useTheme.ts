@@ -30,6 +30,13 @@ export function useTheme() {
     writeStoredItem(THEME_MODE_KEY, mode)
   }, [mode])
 
+  // v1.4.3-pre7：备份导入等外部修改主题后，同步刷新本组件状态（否则开关回显滞后）
+  useEffect(() => {
+    const handler = () => setMode(readStoredMode())
+    window.addEventListener('bilimusic:theme-changed', handler)
+    return () => window.removeEventListener('bilimusic:theme-changed', handler)
+  }, [])
+
   useEffect(() => {
     if (mode !== 'system') return
     const mq = window.matchMedia('(prefers-color-scheme: dark)')

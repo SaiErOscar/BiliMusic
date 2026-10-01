@@ -624,17 +624,19 @@ export function registerBiliApiHandlers() {
     const sessdata = cookies.find(c => c.name === 'SESSDATA')
     const biliJct = cookies.find(c => c.name === 'bili_jct')
     const dedeUserId = cookies.find(c => c.name === 'DedeUserID')
+    const dedeCkMd5 = cookies.find(c => c.name === 'DedeUserID__ckMd5')
 
     return {
       isLoggedIn: !!(sessdata && biliJct && dedeUserId),
       sessdata: sessdata?.value || '',
       biliJct: biliJct?.value || '',
       dedeUserId: dedeUserId?.value || '',
+      dedeCkMd5: dedeCkMd5?.value || '',
     }
   })
 
   // v1.4.3-pre6 备份导入：把备份里的 B 站登录凭证写回 defaultSession，切换账号免重新登录
-  ipcMain.handle('bili:setCookies', async (_e, payload: { sessdata: string; biliJct: string; dedeUserId: string }) => {
+  ipcMain.handle('bili:setCookies', async (_e, payload: { sessdata: string; biliJct: string; dedeUserId: string; dedeCkMd5?: string }) => {
     if (!payload?.sessdata || !payload?.dedeUserId) {
       return { success: false, message: '备份中的登录凭证不完整' }
     }
@@ -642,6 +644,7 @@ export function registerBiliApiHandlers() {
       ['SESSDATA', payload.sessdata],
       ['bili_jct', payload.biliJct || ''],
       ['DedeUserID', payload.dedeUserId],
+      ['DedeUserID__ckMd5', payload.dedeCkMd5 || ''],
     ]
     for (const [name, value] of items) {
       if (!value) continue
@@ -654,6 +657,7 @@ export function registerBiliApiHandlers() {
           path: '/',
           secure: true,
           httpOnly: true,
+          sameSite: 'no_restriction',
         })
       } catch (e) {
         console.warn('[biliApi] setCookies failed:', name, e)

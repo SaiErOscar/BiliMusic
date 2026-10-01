@@ -156,10 +156,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   testWebdav: () => ipcRenderer.invoke('webdav:test'),
   webdavGet: (relPath) => ipcRenderer.invoke('webdav:get', relPath),
   webdavPut: (relPath, content, etag) => ipcRenderer.invoke('webdav:put', relPath, content, etag),
+  webdavDelete: (relPath) => ipcRenderer.invoke('webdav:delete', relPath),
   clearWebdav: () => ipcRenderer.invoke('webdav:clear'),
   // v1.4.3-pre6 备份：文件对话框读写（主进程搬运 .bmback 文本）
   saveBackupFile: (content) => ipcRenderer.invoke('backup:saveFile', content),
   openBackupFile: () => ipcRenderer.invoke('backup:openFile'),
+  deleteBackupFile: (filePath) => ipcRenderer.invoke('backup:deleteFile', filePath),
   platform: process.platform,
   persistentStorage,
   biliApi,

@@ -4914,5 +4914,35 @@ body {
 .bm-error { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: #e53935; }
 .bm-ok { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 14px; font-weight: 650; color: #2e9e5b; }
 
+.bm-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  user-select: none;
+}
+.bm-check input {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary, #ff375f);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.bm-notes {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-muted-foreground);
+}
+
 .bm-spin { animation: bm-rotate 0.9s linear infinite; }
 @keyframes bm-rotate { to { transform: rotate(360deg) } }

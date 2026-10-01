@@ -6,6 +6,7 @@ import {
   readBackupMeta,
   decryptBackup,
   applyBackup,
+  restoreBackupAccount,
   type BackupPayload,
   type BackupMeta,
   type ApplyResult,
@@ -33,6 +34,21 @@ interface AccountChoice {
   backupUid: string
 }
 
+function DeleteSourceOption({ pending, checked, onChange }: {
+  pending: { kind: 'file'; path: string } | { kind: 'webdav' } | null
+  checked: boolean
+  onChange: (v: boolean) => void
+}) {
+  if (!pending) return null
+  const label = pending.kind === 'webdav' ? '删除 WebDAV 上的备份文件' : '删除该本地备份文件'
+  return (
+    <label className="bm-check">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span>{label}（推荐，导入成功后自动删除，避免隐私泄露）</span>
+    </label>
+  )
+}
+
 export default function BackupModal({ onClose, webdavConfigured }: BackupModalProps) {
   const { checkLogin, username: curName } = useAuth()
   const [phase, setPhase] = useState<Phase>({ name: 'menu' })
@@ -42,10 +58,12 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
   const [pendingPayload, setPendingPayload] = useState<BackupPayload | null>(null)
   const [pendingText, setPendingText] = useState<string>('')
   const [account, setAccount] = useState<AccountChoice | null>(null)
-  const [result, setResult] = useState<{ ok: boolean; message: string; detail?: ApplyResult } | null>(null)
+  const [result, setResult] = useState<{ ok: boolean; message: string; detail?: ApplyResult; notes?: string[] } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [exportTarget, setExportTarget] = useState<'file' | 'webdav'>('file')
+  const [deleteSource, setDeleteSource] = useState(true)
+  const [pendingSource, setPendingSource] = useState<{ kind: 'file'; path: string } | { kind: 'webdav' } | null>(null)
 
   const api = window.electronAPI
   const hasFileApi = Boolean(api?.saveBackupFile && api?.openBackupFile)
@@ -83,7 +101,7 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
 
   // ===== 导入 =====
   const startImport = useCallback(async (viaWebdav: boolean) => {
-    setError(''); setPassword(''); setMeta(null); setPendingPayload(null); setPendingText(''); setAccount(null)
+    setError(''); setPassword(''); setMeta(null); setPendingPayload(null); setPendingText(''); setAccount(null); setPendingSource(null); setDeleteSource(true)
     try {
       let fileText: string
       if (viaWebdav) {
@@ -91,12 +109,14 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
         const get = await api?.webdavGet?.(BACKUP_FILE)
         if (!get?.ok || !get.content) throw new Error(get?.message || 'WebDAV 上未找到备份文件')
         fileText = get.content
+        setPendingSource({ kind: 'webdav' })
       } else {
         setBusy(true)
         const open = await api?.openBackupFile?.()
         if (open?.canceled) return
         if (!open?.ok || !open.content) throw new Error(open?.message || '读取文件失败')
         fileText = open.content
+        setPendingSource(open.path ? { kind: 'file', path: open.path } : null)
       }
       setMeta(readBackupMeta(fileText))
       setPendingText(fileText)
@@ -140,27 +160,55 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
     const payload = pendingPayload
     if (!payload) return
     setBusy(true); setError('')
+    const notes: string[] = []
     try {
-      // 账号处理：仅在备份含账号且用户选择切换时写回 Cookie
-      if (switchAccount && payload.account?.sessdata && payload.account?.dedeUserId) {
-        const res = await api?.biliApi?.setCookies?.({
-          sessdata: payload.account.sessdata,
-          biliJct: payload.account.biliJct,
-          dedeUserId: payload.account.dedeUserId,
-        })
-        if (!res?.success) throw new Error(res?.message || '切换账号失败（凭证可能已失效，稍后可重新登录）')
-        localStorage.setItem('bilimusic_user', JSON.stringify({ username: payload.account.username, avatar: payload.account.avatar }))
-        await checkLogin().catch(() => undefined)
-      }
+      // 数据合并先行（不受账号结果影响，避免凭证失效导致整次导入失败）
       const detail = applyBackup(payload)
-      setResult({ ok: true, message: switchAccount ? '导入完成，已切换到备份账号' : '导入完成，数据已合并', detail })
+      await checkLogin().catch(() => undefined)
+
+      // 账号处理：仅在备份含账号且用户选择切换时写回凭证，并用 nav 接口实际验证登录是否生效
+      let switched = false
+      if (switchAccount) {
+        if (payload.account?.sessdata && payload.account?.dedeUserId) {
+          const r = await restoreBackupAccount(payload.account)
+          switched = r.ok
+          await checkLogin().catch(() => undefined)
+          if (!r.loginVerified) {
+            notes.push(r.message || '凭证已写入，但登录态未通过验证，若收藏夹无法加载请重新登录')
+          } else {
+            notes.push(`已切换到账号「${r.uname || payload.account.username}」并验证登录成功`)
+          }
+        } else {
+          notes.push('备份中不含登录凭证，未切换账号')
+        }
+      }
+
+      // v1.4.3-pre7：导入成功后按勾选删除源备份（默认删除，降低隐私泄露风险）
+      if (deleteSource && pendingSource) {
+        if (pendingSource.kind === 'webdav') {
+          const d = await api?.webdavDelete?.(BACKUP_FILE)
+          notes.push(d?.ok ? '已删除 WebDAV 上的备份文件' : `WebDAV 备份删除失败：${d?.message || '未知错误'}`)
+        } else if (pendingSource.path) {
+          const d = await api?.deleteBackupFile?.(pendingSource.path)
+          notes.push(d?.ok ? '已删除本地备份文件' : `本地备份删除失败：${d?.message || '未知错误'}`)
+        }
+      } else if (!deleteSource) {
+        notes.push('已保留源备份文件（未删除）')
+      }
+
+      const headline = switched && notes.some((n) => n.includes('验证登录成功'))
+        ? '导入完成，已切换到备份账号'
+        : switchAccount
+          ? '导入完成（账号切换结果见下方）'
+          : '导入完成，数据已合并'
+      setResult({ ok: true, message: headline, detail, notes })
       setPhase({ name: 'result' })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
     }
-  }, [pendingPayload, api, checkLogin])
+  }, [pendingPayload, api, checkLogin, deleteSource, pendingSource])
 
   const cancel = () => { setPhase({ name: 'menu' }); setError(''); setPassword('') }
 
@@ -263,6 +311,7 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
             {account.same ? (
               <>
                 <p className="bm-hint">账号一致或备份不含账号，将把数据合并到本机。</p>
+                <DeleteSourceOption pending={pendingSource} checked={deleteSource} onChange={setDeleteSource} />
                 <div className="bm-actions">
                   <button type="button" className="bm-btn ghost" onClick={cancel}>取消</button>
                   <button type="button" className="bm-btn primary" onClick={() => finishImport(false)} disabled={busy}>确认导入合并</button>
@@ -279,6 +328,7 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
                   <button type="button" className="bm-btn ghost" onClick={() => finishImport(false)} disabled={busy}>保留当前账号</button>
                   <button type="button" className="bm-btn primary" onClick={() => finishImport(true)} disabled={busy}>切换到备份账号</button>
                 </div>
+                <DeleteSourceOption pending={pendingSource} checked={deleteSource} onChange={setDeleteSource} />
               </>
             )}
             {error && <p className="bm-error"><AlertTriangle size={14} /> {error}</p>}
@@ -294,6 +344,11 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
               <p className="bm-hint">
                 歌单 {result.detail.playlists} · 我喜欢 {result.detail.favorites} · 最近播放 {result.detail.recent} · 下载记录 {result.detail.downloads}
               </p>
+            )}
+            {result.notes && result.notes.length > 0 && (
+              <ul className="bm-notes">
+                {result.notes.map((n, i) => <li key={i}>{n}</li>)}
+              </ul>
             )}
             <div className="bm-actions"><button type="button" className="bm-btn primary" onClick={onClose}>完成</button></div>
           </div>

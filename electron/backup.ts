@@ -45,4 +45,16 @@ export function registerBackupHandlers(): void {
       return { ok: false, message: err instanceof Error ? err.message : '读取文件失败' }
     }
   })
+
+  // v1.4.3-pre7 导入后删除源备份文件（仅允许 .bmback，避免误删其它文件）
+  ipcMain.handle('backup:deleteFile', async (_e, filePath: string) => {
+    if (typeof filePath !== 'string' || !filePath) return { ok: false, message: '无效的文件路径' }
+    if (!filePath.toLowerCase().endsWith('.bmback')) return { ok: false, message: '仅允许删除 .bmback 备份文件' }
+    try {
+      await fs.promises.unlink(filePath)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : '删除文件失败' }
+    }
+  })
 }

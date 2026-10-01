@@ -128,6 +128,21 @@ async function put(relPath: string, content: string, etag?: string): Promise<Web
   }
 }
 
+async function del(relPath: string): Promise<WebdavResult> {
+  if (!config) return { ok: false, status: 0, etag: null, content: null, message: '未配置' }
+  try {
+    const res = await davFetch(joinUrl(config.url, SYNC_DIR, relPath), { method: 'DELETE' })
+    if (res.status === 404) return { ok: true, status: 404, etag: null, content: null } // 已不存在视为删除成功
+    if (res.status === 401) return { ok: false, status: 401, etag: null, content: null, message: '认证失败' }
+    if (res.status >= 200 && res.status < 300) {
+      return { ok: true, status: res.status, etag: null, content: null }
+    }
+    return { ok: false, status: res.status, etag: null, content: null, message: `HTTP ${res.status}` }
+  } catch (err) {
+    return { ok: false, status: 0, etag: null, content: null, message: err instanceof Error ? err.message : String(err) }
+  }
+}
+
 export function registerWebdavHandlers(): void {
   loadConfig()
 
@@ -147,6 +162,8 @@ export function registerWebdavHandlers(): void {
   ipcMain.handle('webdav:test', () => testConnection())
   ipcMain.handle('webdav:get', (_e, relPath: string) => get(relPath))
   ipcMain.handle('webdav:put', (_e, relPath: string, content: string, etag?: string) => put(relPath, content, etag || undefined))
+  // v1.4.3-pre7 备份导入后删除源备份（WebDAV）
+  ipcMain.handle('webdav:delete', (_e, relPath: string) => del(relPath))
   ipcMain.handle('webdav:clear', () => {
     config = null
     try {

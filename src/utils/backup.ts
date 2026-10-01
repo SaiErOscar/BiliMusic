@@ -7,7 +7,7 @@
 // 用户名、各类数据）经 PBKDF2-SHA256 派生密钥后用 AES-256-GCM 加密为 ct。
 // 口令不落盘、不存储：忘记即无法解密。
 
-import type { AppSettings, DownloadRecord, Playlist, Tombstone, Track } from '@/types'
+import type { AppSettings, DownloadRecord, Playlist, ThemeMode, Tombstone, Track } from '@/types'
 import {
   DEFAULT_APP_SETTINGS,
   DOWNLOADS_CHANGED_EVENT,
@@ -30,6 +30,8 @@ import {
   saveRecentTracks,
 } from '@/utils/storage'
 import { loadLyricOffsetMap, saveLyricOffsetMap } from '@/services/lyrics'
+import { getNavInfo } from '@/services/bilibiliApi'
+import { readStoredItemSync, writeStoredItem } from '@/utils/persistentStorage'
 import { mergeItems } from '@/utils/sync'
 
 // 歌词偏移合并：本地优先（与 sync.ts 内部逻辑一致，就近定义避免额外导出）
@@ -42,6 +44,14 @@ function mergeLyricOffsets(localMap: Record<string, number>, remoteMap?: Record<
 const MAGIC = 'BiliMusic-Backup/v1'
 const FORMAT_VERSION = 1
 const RECENT_EVENT = 'bilimusic:recent-changed'
+const THEME_MODE_KEY = 'theme-mode'
+export const THEME_CHANGED_EVENT = 'bilimusic:theme-changed'
+
+// 与 useTheme 的 system 解析保持一致：system 取当前系统偏好
+function resolveTheme(mode: ThemeMode): 'light' | 'dark' {
+  if (mode !== 'system') return mode
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
 
 const PBKDF2_ITERATIONS = 150000
 const KEY_LENGTH = 256
@@ -50,6 +60,7 @@ export interface BackupAccount {
   dedeUserId: string
   sessdata: string
   biliJct: string
+  ckMd5?: string
   username: string
   avatar: string
 }
@@ -68,6 +79,7 @@ export interface BackupPayload {
   downloads: DownloadRecord[]
   lyricOffsets: Record<string, number>
   settings: AppSettings
+  theme: ThemeMode
 }
 
 // 信封（base64 文件里编码的对象）；meta 明文，密文负载在 ct
@@ -140,6 +152,7 @@ export async function collectBackup(): Promise<BackupPayload> {
         dedeUserId: cookies.dedeUserId,
         sessdata: cookies.sessdata || '',
         biliJct: cookies.biliJct || '',
+        ckMd5: cookies.dedeCkMd5 || '',
         username: cachedUser.username || '',
         avatar: cachedUser.avatar || '',
       }
@@ -160,6 +173,7 @@ export async function collectBackup(): Promise<BackupPayload> {
     downloads: loadDownloadRecords(),
     lyricOffsets: loadLyricOffsetMap(),
     settings: loadAppSettings(),
+    theme: (readStoredItemSync(THEME_MODE_KEY) as ThemeMode) || 'system',
   }
 }
 
@@ -278,6 +292,15 @@ export function applyBackup(payload: BackupPayload): ApplyResult {
   // 设置：整份覆盖（导入确认框已明示），与默认值合并防字段缺失
   saveAppSettings({ ...DEFAULT_APP_SETTINGS, ...(payload.settings || {}) } as AppSettings)
 
+  // 深浅色模式：写回存储并即时应用到 DOM（v1.4.3-pre7 修复：主题此前未纳入备份）
+  if (payload.theme) {
+    const mode: ThemeMode = payload.theme
+    localStorage.setItem(THEME_MODE_KEY, mode)
+    void writeStoredItem(THEME_MODE_KEY, mode)
+    document.documentElement.setAttribute('data-theme', resolveTheme(mode))
+    window.dispatchEvent(new CustomEvent(THEME_CHANGED_EVENT))
+  }
+
   // 触发各页刷新事件
   window.dispatchEvent(new CustomEvent(PLAYLISTS_CHANGED_EVENT))
   window.dispatchEvent(new CustomEvent(FAVORITES_CHANGED_EVENT))
@@ -286,6 +309,50 @@ export function applyBackup(payload: BackupPayload): ApplyResult {
   window.dispatchEvent(new CustomEvent(RECENT_EVENT))
 
   return { playlists: playlists.length, favorites: favorites.length, recent: recent.length, downloads: downloads.length }
+}
+
+// ===== 账号恢复（v1.4.3-pre7）=====
+// 把备份里的 B 站登录凭证写回 defaultSession，并主动跑一遍正常登录链路的验证
+// （调 nav 接口，与收藏夹/用户信息同一渲染层 fetch，credentials:include）。只有
+// Cookie 以 SameSite=None 正确写入才能验证通过，因此这一步能真实反映设备间衔接。
+export interface RestoreAccountResult {
+  ok: boolean
+  loginVerified: boolean
+  message?: string
+  uname?: string
+  face?: string
+}
+
+export async function restoreBackupAccount(account: BackupAccount | null): Promise<RestoreAccountResult> {
+  if (!account || !account.sessdata || !account.dedeUserId) {
+    return { ok: false, loginVerified: false, message: '备份中不含可用的登录凭证' }
+  }
+  const setCookies = window.electronAPI?.biliApi?.setCookies
+  if (!setCookies) {
+    return { ok: false, loginVerified: false, message: '当前环境不支持写入登录凭证' }
+  }
+  const res = await setCookies({
+    sessdata: account.sessdata,
+    biliJct: account.biliJct,
+    dedeUserId: account.dedeUserId,
+    dedeCkMd5: account.ckMd5 || '',
+  })
+  if (!res?.success) {
+    return { ok: false, loginVerified: false, message: res?.message || '写入登录凭证失败' }
+  }
+  // 写入成功≠登录生效，用 nav 接口实际验证（未登录/失效时 biliFetch 会抛错）
+  try {
+    const nav = await getNavInfo()
+    if (nav?.isLogin) {
+      try {
+        localStorage.setItem('bilimusic_user', JSON.stringify({ username: nav.uname, avatar: nav.face }))
+      } catch { /* ignore */ }
+      return { ok: true, loginVerified: true, uname: nav.uname, face: nav.face }
+    }
+    return { ok: true, loginVerified: false, message: '凭证已写入，但 B 站未确认登录（Cookie 可能已失效，需重新登录）' }
+  } catch {
+    return { ok: true, loginVerified: false, message: '凭证已写入，验证登录态时请求未通过（网络/风控或 Cookie 失效），若异常请重新登录' }
+  }
 }
 
 // mergeItems 已决定存留哪些歌单 id；这里对这些存留歌单把本地与备份的同 id 曲项目录做并集合并

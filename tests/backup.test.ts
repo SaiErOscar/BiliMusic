@@ -26,6 +26,7 @@ function samplePayload(): BackupPayload {
     downloads: [],
     lyricOffsets: { a: 100 },
     settings: { downloadDir: '/tmp/x' } as BackupPayload['settings'],
+    theme: 'dark' as const,
   }
 }
 
@@ -85,6 +86,20 @@ describe('backup 合并恢复', () => {
     applyBackup(samplePayload())
     const s = JSON.parse(localStorage.getItem('bilimusic_settings') || '{}')
     expect(s.downloadDir).toBe('/tmp/x')
+  })
+
+  it('深浅色模式随备份恢复并即时生效（v1.4.3-pre7）', () => {
+    localStorage.setItem('theme-mode', 'light')
+    applyBackup(samplePayload()) // payload.theme = 'dark'
+    expect(localStorage.getItem('theme-mode')).toBe('dark')
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
+  })
+
+  it('加解密往返保留主题字段', async () => {
+    const file = await buildBackupFile(samplePayload(), 'pw')
+    const back = await decryptBackup(file, 'pw')
+    expect(back.theme).toBe('dark')
+    expect(back.account?.dedeUserId).toBe('12345')
   })
 })
 
