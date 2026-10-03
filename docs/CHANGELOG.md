@@ -5,55 +5,26 @@
 
 ---
 
-## v1.4.4-pre3 — 平台解耦收口：备份 / WebDAV 配置能力 + 深色原生控件配色
+## v1.4.4 — UI 层桌面壳解耦收口：八组能力平台化 + 深色原生控件配色
 
 **发布日期：2026-10-03**
 
 ### 变更（重构，界面行为零变化；含一项配色修复）
 
-- **平台适配层新增两组能力**：`src/platform` 在既有 capability 之外新增
+- **平台适配层新补八组能力**：`src/platform` 在既有下载 / 登录 / B 站请求 / 收藏夹 / 歌词 / 云存储 / 运行时之外，补齐桌面 UI 层能力
+  - `fonts`：系统字体枚举，非桌面平台不做探测，字体下拉回退内置保底列表；
+  - `shell`：窗口最小化 / 最大化 / 关闭、最大化与全屏状态订阅、标题栏按钮显隐、外部链接打开；
+  - `tray`：向任务栏托盘推送播放状态、订阅托盘菜单命令；
+  - `miniWindow`：迷你窗与桌面歌词的播放状态推送、小窗命令订阅、桌面歌词可见态查询与订阅、播放页开关上报与「打开播放器」命令订阅；
+  - `colorPicker`：Windows 专属全局取色器（desktopCapturer 全屏准星取色），字段可选，缺失时色块控件回退原生 `input[type=color]`；
+  - `updater`：版本号获取、主动检查更新、更新事件订阅、下载完成后重启安装与应用界面（OTA）更新；
   - `backup`：`.bmback` 备份文件的系统对话框（导出 / 读取 / 删除），桌面专属，手机端缺失即隐藏文件导入 / 导出入口；
   - `webdavConfig`：WebDAV 连接配置的读取 / 保存 / 测试连通性，缺失时 Settings 的 WebDAV 段自然降级。
   同时扩展三组既有能力：`auth` 增 `setCookies`（备份恢复账号写回凭证）、`storage` 增 `webdavDelete`（导入后删除源备份）、`runtime` 增 `notifyRendererReady`（渲染层挂载成功回报，防 OTA 误回滚）。签名统一复用 `Pick<Window['electronAPI'], ...>`，Electron 实现仍是 getter 动态读取，与原先 `if (window.electronAPI?.xxx)` 能力探测语义等价。
-- **调用方切换**：`BackupModal`、`utils/backup.ts`、`LoginDialog`、`useAppSettings`、`useAutoSync`、`Settings`（WebDAV 段）、`App.tsx`（渲染就绪上报）改为只依赖 `platform` 接口。
-- **解耦收口达成**：`src/` 内 `window.electronAPI` 直调由 10 处降至 0，仅剩 `src/platform/electron.ts` 的 getter 动态读取。UI 层桌面壳解耦（v1.4.4 主线）至此闭环。
+- **调用方切换**：`FontSelect`、`TitleBar`、`NowPlaying`、`Downloads`、`Discover`、`Settings`（平台判定 / 打开下载目录 / 打开项目主页 / 更新检查段 / WebDAV 段）、`PlayerContext`、`ColorField`、`useMiniWindowSync`、`useDesktopLyric`、`MainLayout`、`PlayerBar`、`BackupModal`、`utils/backup.ts`、`LoginDialog`、`useAppSettings`、`useAutoSync`、`App.tsx`（渲染就绪上报）全部改为只依赖 `platform` 接口。
+- **解耦收口达成**：`src/` 内 `window.electronAPI` 直调由 55 处逐步降至 0，仅剩 `src/platform/electron.ts` 的 getter 动态读取。UI 层桌面壳解耦（v1.4.4 主线）至此闭环，Electron / Capacitor / 鸿蒙三端共享同一套含桌面壳调用的渲染逻辑。
 - **深色面板原生控件配色**（顺带功能项）：`.settings-select` 背景由半透明玻璃改不透明 `--color-card`，并补 `.settings-select option` 显式配色，修复深色主题下字体下拉展开列表被 Chromium 混白、选项不可见的问题；设置页两处桌面歌词字号 / 粗细滑条 `accentColor` 由未定义的 `--accent` 修正为真实主题变量 `--color-primary`，使其跟随配色主题。
-- **测试**：`tests/platform.test.ts` 新增 4 项（合计 14 项），覆盖 `backup` / `webdavConfig` 降级与直通、`storage.webdavDelete` / `runtime.notifyRendererReady` / `auth.setCookies` 扩展及老 preload 缺方法静默降级。
-
----
-
-## v1.4.4-pre2 — 平台解耦续环：迷你窗 / 取色器 / 更新能力收口
-
-**发布日期：2026-10-03**
-
-### 变更（重构，界面行为零变化）
-
-- **平台适配层新增三组能力**：`src/platform` 在字体 / 桌面壳 / 托盘之外，新增
-  - `miniWindow`：迷你窗与桌面歌词的播放状态推送、小窗命令订阅、桌面歌词可见态查询与订阅、播放页开关上报与「打开播放器」命令订阅；
-  - `colorPicker`：Windows 专属全局取色器（desktopCapturer 全屏准星取色），字段可选，缺失时色块控件回退原生 `input[type=color]`；
-  - `updater`：版本号获取、主动检查更新、更新事件订阅、下载完成后重启安装与应用界面（OTA）更新。
-  三组能力仍为可选字段，Electron 实现用 getter 动态读取 `window.electronAPI`，与原先 `if (window.electronAPI?.xxx)` 的能力探测语义等价。
-- **调用方切换**：`Settings`（更新检查段）、`ColorField`（取色器探测与唤起）、`useMiniWindowSync`（状态推送与命令订阅）、`useDesktopLyric`（歌词可见态与开关）、`MainLayout`（播放页开关上报、打开播放器命令）、`PlayerBar`（桌面歌词开关）改为只依赖 `platform` 接口。
-- **解耦进度**：`src/` 内 `window.electronAPI` 直调由 38 处降至 10 处，剩余 10 处（`backup` / `webdavConfig` / `openLoginWindow` / `persistentStorage` / `notifyRendererReady`）全部落在 pre3 已划定范围内。
-- **未纳入本轮**：数据备份与 WebDAV 配置相关的 `BackupModal`、`LoginDialog`、`useAppSettings`、`useAutoSync`、`utils/backup.ts`、`App.tsx`（渲染就绪上报）留待 v1.4.4-pre3 收口，转正门槛仍为 `src/` 内 `window.electronAPI` 只剩 `src/platform/`。
-- **测试**：`tests/platform.test.ts` 新增 5 项（合计 10 项），覆盖无 `electronAPI` 时三组新能力降级、`miniWindow` 状态推送与三类订阅退订、老 preload 缺方法不抛错、取色器直通与缺失回退、更新能力直通与事件订阅。
-
----
-
-## v1.4.4-pre1 — 平台解耦续环：字体 / 桌面壳 / 托盘能力收口
-
-**发布日期：2026-10-03**
-
-### 变更（重构，界面行为零变化）
-
-- **平台适配层新增三组能力**：`src/platform` 在原有下载 / 登录 / B 站请求 / 收藏夹 / 歌词 / 云存储 / 运行时之外，新增
-  - `fonts`：系统字体枚举，非桌面平台不做探测，字体下拉回退内置保底列表；
-  - `shell`：窗口最小化 / 最大化 / 关闭、最大化与全屏状态订阅、标题栏按钮显隐、外部链接打开；
-  - `tray`：向任务栏托盘推送播放状态、订阅托盘菜单命令。
-  每个能力仍为可选字段，Electron 实现用 getter 动态读取 `window.electronAPI`，与原先 `if (window.electronAPI?.xxx)` 的能力探测语义等价。
-- **调用方切换**：`FontSelect`、`TitleBar`、`NowPlaying`、`Downloads`、`Discover`、`Settings`（平台判定、打开下载目录、打开项目主页）与 `PlayerContext`（托盘状态推送与命令订阅）改为只依赖 `platform` 接口。
-- **未纳入本轮**：更新检查 / WebDAV 配置（`Settings` 内）、全局取色器、桌面歌词与迷你窗同步、数据备份，仍按原拆分留给 v1.4.4-pre2、pre3 收口。
-- **测试**：新增 `tests/platform.test.ts` 5 项，覆盖无 `electronAPI` 时的能力降级、getter 动态读取、shell 直通、字体枚举缺失回退与托盘订阅。
+- **测试**：`tests/platform.test.ts` 新增 14 项，覆盖八组新能力与三组扩展的降级 / 直通、订阅退订、老 preload 缺方法静默降级。
 
 ---
 
