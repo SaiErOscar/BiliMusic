@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { platform } from '@/platform'
 import type { DesktopLyricState } from '@/types/electron'
 
 /**
@@ -15,12 +16,12 @@ export function useDesktopLyricVisible() {
 
   useEffect(() => {
     let mounted = true
-    window.electronAPI?.getDesktopLyricVisible?.()
+    platform.miniWindow?.getDesktopLyricVisible?.()
       .then((v) => {
         if (mounted && v && typeof v === 'object') setState(v)
       })
       .catch(() => { /* 主进程不可用时降级 */ })
-    const off = window.electronAPI?.onDesktopLyricVisible?.((v) => {
+    const off = platform.miniWindow?.onDesktopLyricVisible?.((v) => {
       if (v && typeof v === 'object') setState(v)
     })
     return () => {
@@ -29,7 +30,7 @@ export function useDesktopLyricVisible() {
     }
   }, [])
 
-  const toggle = () => window.electronAPI?.toggleDesktopLyric?.()
+  const toggle = () => platform.miniWindow?.toggleDesktopLyric?.()
 
   return { visible: state.intent, suppressed: state.suppressed, state, toggle }
 }

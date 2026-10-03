@@ -23,6 +23,7 @@ import { useAddToPlaylist } from '@/contexts/AddToPlaylistContext'
 import PlayQueue from '@/components/PlayQueue'
 import PlayerSlider from '@/components/PlayerSlider'
 import DownloadButton from '@/components/DownloadButton'
+import { platform } from '@/platform'
 
 const spring = {
   type: 'spring',
@@ -348,7 +349,7 @@ export default function PlayerBar() {
         <IconButton
           ariaLabel="桌面歌词"
           active={false}
-          onClick={() => window.electronAPI?.toggleDesktopLyric?.()}
+          onClick={() => platform.miniWindow?.toggleDesktopLyric?.()}
         >
           <TextCursorInput size={18} />
         </IconButton>

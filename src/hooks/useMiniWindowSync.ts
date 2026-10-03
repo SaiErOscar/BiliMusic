@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePlayer, usePlayerProgress } from '@/contexts/PlayerContext'
 import { getLyricForTrack, LYRIC_OFFSET_CHANGED_EVENT } from '@/services/lyrics'
 import { useAppSettings } from '@/hooks/useAppSettings'
+import { platform } from '@/platform'
 import type { MiniPlayerState, MiniCommand } from '@/types/electron'
 import type { AppSettings } from '@/types'
 
@@ -115,7 +116,7 @@ export function useMiniWindowSync() {
 
   // 实时推送：每次 miniState 变化（progress/播放状态/歌词/主题/配色等）即发送给主进程
   useEffect(() => {
-    window.electronAPI?.updateMiniPlayerState?.(miniState)
+    platform.miniWindow?.updateMiniPlayerState?.(miniState)
   }, [miniState])
 
   // 命令回调闭包只注册一次，用 ref 持有最新 repeatMode，避免读到初始值
@@ -124,7 +125,7 @@ export function useMiniWindowSync() {
 
   // 处理小窗发来的音量 / 进度 / 播放顺序命令
   useEffect(() => {
-    return window.electronAPI?.onMiniPlayerCommand?.((cmd: MiniCommand) => {
+    return platform.miniWindow?.onMiniPlayerCommand?.((cmd: MiniCommand) => {
       if (cmd.type === 'update-lyric-appearance') {
         // v1.3.6 桌面歌词窗外观小面板：持久化到 AppSettings，
         // settings 变化经上方 miniState 推送回流歌词窗，形成即时生效闭环

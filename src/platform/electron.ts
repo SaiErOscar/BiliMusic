@@ -63,4 +63,35 @@ export const electronPlatform: Platform = {
     const a = api()
     return a ? { updateTrayPlayerState: a.updateTrayPlayerState, onTrayPlayerCommand: a.onTrayPlayerCommand } : undefined
   },
+  /** v1.4.4-pre2：桌面歌词/迷你窗（状态推送、命令订阅、歌词可见态、播放页开关），手机端无此能力 */
+  get miniWindow() {
+    const a = api()
+    if (!a) return undefined
+    return {
+      updateMiniPlayerState: a.updateMiniPlayerState,
+      onMiniPlayerCommand: a.onMiniPlayerCommand,
+      toggleDesktopLyric: a.toggleDesktopLyric,
+      getDesktopLyricVisible: a.getDesktopLyricVisible,
+      onDesktopLyricVisible: a.onDesktopLyricVisible,
+      setNowPlayingOpen: a.setNowPlayingOpen,
+      onOpenNowPlaying: a.onOpenNowPlaying,
+    }
+  },
+  /** v1.4.4-pre2：全局取色器（仅 Windows 暴露），缺失时 ColorField 回退原生 input[type=color] */
+  get colorPicker() {
+    const a = api()
+    return a ? { openColorPicker: a.openColorPicker } : undefined
+  },
+  /** v1.4.4-pre2：更新（版本号/检查/事件订阅/重启安装/应用界面更新），鸿蒙端不提供 */
+  get updater() {
+    const a = api()
+    if (!a) return undefined
+    return {
+      getAppVersion: a.getAppVersion,
+      checkForUpdate: a.checkForUpdate,
+      quitAndInstall: a.quitAndInstall,
+      applyRendererUpdate: a.applyRendererUpdate,
+      onUpdaterEvent: a.onUpdaterEvent,
+    }
+  },
 }

@@ -5,6 +5,24 @@
 
 ---
 
+## v1.4.4-pre2 — 平台解耦续环：迷你窗 / 取色器 / 更新能力收口
+
+**发布日期：2026-10-03**
+
+### 变更（重构，界面行为零变化）
+
+- **平台适配层新增三组能力**：`src/platform` 在字体 / 桌面壳 / 托盘之外，新增
+  - `miniWindow`：迷你窗与桌面歌词的播放状态推送、小窗命令订阅、桌面歌词可见态查询与订阅、播放页开关上报与「打开播放器」命令订阅；
+  - `colorPicker`：Windows 专属全局取色器（desktopCapturer 全屏准星取色），字段可选，缺失时色块控件回退原生 `input[type=color]`；
+  - `updater`：版本号获取、主动检查更新、更新事件订阅、下载完成后重启安装与应用界面（OTA）更新。
+  三组能力仍为可选字段，Electron 实现用 getter 动态读取 `window.electronAPI`，与原先 `if (window.electronAPI?.xxx)` 的能力探测语义等价。
+- **调用方切换**：`Settings`（更新检查段）、`ColorField`（取色器探测与唤起）、`useMiniWindowSync`（状态推送与命令订阅）、`useDesktopLyric`（歌词可见态与开关）、`MainLayout`（播放页开关上报、打开播放器命令）、`PlayerBar`（桌面歌词开关）改为只依赖 `platform` 接口。
+- **解耦进度**：`src/` 内 `window.electronAPI` 直调由 38 处降至 10 处，剩余 10 处（`backup` / `webdavConfig` / `openLoginWindow` / `persistentStorage` / `notifyRendererReady`）全部落在 pre3 已划定范围内。
+- **未纳入本轮**：数据备份与 WebDAV 配置相关的 `BackupModal`、`LoginDialog`、`useAppSettings`、`useAutoSync`、`utils/backup.ts`、`App.tsx`（渲染就绪上报）留待 v1.4.4-pre3 收口，转正门槛仍为 `src/` 内 `window.electronAPI` 只剩 `src/platform/`。
+- **测试**：`tests/platform.test.ts` 新增 5 项（合计 10 项），覆盖无 `electronAPI` 时三组新能力降级、`miniWindow` 状态推送与三类订阅退订、老 preload 缺方法不抛错、取色器直通与缺失回退、更新能力直通与事件订阅。
+
+---
+
 ## v1.4.4-pre1 — 平台解耦续环：字体 / 桌面壳 / 托盘能力收口
 
 **发布日期：2026-10-03**

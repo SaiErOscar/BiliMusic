@@ -1,7 +1,29 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { electronPlatform } from '../src/platform/electron'
+import type { MiniPlayerState } from '../src/types/electron'
 
 type WinWithApi = Window & { electronAPI?: unknown }
+
+const miniState: MiniPlayerState = {
+  hasTrack: false,
+  title: '',
+  artist: '',
+  coverUrl: '',
+  isPlaying: false,
+  volume: 1,
+  isMuted: false,
+  progress: 0,
+  duration: 0,
+  lyricLines: [],
+  synced: false,
+  theme: 'dark',
+  lyricTextColor: '#ffffff',
+  lyricControlColor: '#ffffff',
+  lyricFontSize: 28,
+  lyricFontWeight: 600,
+  lyricFontFamily: 'system-ui',
+  repeatMode: 'none',
+}
 
 function setElectronApi(api: unknown) {
   ;(window as WinWithApi).electronAPI = api
@@ -128,5 +150,113 @@ describe('platform/electron 能力包装（v1.4.4-pre1 新增 fonts/shell/tray�
     off?.()
     expect(received).toBe('unsubscribed')
     expect(pushed).toHaveLength(1)
+  })
+})
+
+describe('platform/electron 能力包装（v1.4.4-pre2 新增 miniWindow/colorPicker/updater）', () => {
+  it('无 electronAPI 时三组新 capability 均不可用，调用方自然走降级分支', () => {
+    expect(electronPlatform.miniWindow).toBeUndefined()
+    expect(electronPlatform.colorPicker).toBeUndefined()
+    expect(electronPlatform.updater).toBeUndefined()
+  })
+
+  it('miniWindow 推送播放状态、订阅小窗命令与桌面歌词可见态', () => {
+    const pushed: unknown[] = []
+    const events: string[] = []
+    setElectronApi({
+      platform: 'win32',
+      updateMiniPlayerState: (state: unknown) => pushed.push(state),
+      onMiniPlayerCommand: (cb: (command: string) => void) => {
+        cb('seek')
+        events.push('mini-sub')
+        return () => events.push('mini-unsub')
+      },
+      toggleDesktopLyric: () => events.push('toggle'),
+      getDesktopLyricVisible: () => Promise.resolve({ visible: true, intent: true, suppressed: false }),
+      onDesktopLyricVisible: (cb: (state: { visible: boolean }) => void) => {
+        cb({ visible: true })
+        events.push('lyric-sub')
+        return () => events.push('lyric-unsub')
+      },
+      setNowPlayingOpen: (open: boolean) => events.push(`now-playing:${open}`),
+      onOpenNowPlaying: (cb: () => void) => {
+        cb()
+        events.push('open-sub')
+        return () => events.push('open-unsub')
+      },
+    })
+
+    const mini = electronPlatform.miniWindow
+    expect(mini).toBeDefined()
+    mini!.updateMiniPlayerState?.(miniState)
+    const offMini = mini!.onMiniPlayerCommand?.(() => {})
+    mini!.toggleDesktopLyric?.()
+    mini!.setNowPlayingOpen?.(true)
+    const offLyric = mini!.onDesktopLyricVisible?.(() => {})
+    const offOpen = mini!.onOpenNowPlaying?.(() => {})
+    offMini?.()
+    offLyric?.()
+    offOpen?.()
+
+    expect(pushed).toHaveLength(1)
+    expect(events).toEqual([
+      'mini-sub',
+      'toggle',
+      'now-playing:true',
+      'lyric-sub',
+      'open-sub',
+      'mini-unsub',
+      'lyric-unsub',
+      'open-unsub',
+    ])
+  })
+
+  it('miniWindow 老 preload 缺方法时对应字段为 undefined，不抛错', () => {
+    setElectronApi({ platform: 'win32' })
+    expect(electronPlatform.miniWindow?.getDesktopLyricVisible).toBeUndefined()
+    expect(electronPlatform.miniWindow?.toggleDesktopLyric).toBeUndefined()
+    // 可选链调用缺失方法应静默返回 undefined（调用方降级语义）
+    expect(electronPlatform.miniWindow?.updateMiniPlayerState?.(miniState)).toBeUndefined()
+  })
+
+  it('colorPicker 直通取色面板，缺失时不报错（调用方回退原生 input[type=color]）', async () => {
+    setElectronApi({
+      platform: 'win32',
+      openColorPicker: (initialHex?: string) => Promise.resolve(`${initialHex}-picked`),
+    })
+    await expect(electronPlatform.colorPicker?.openColorPicker?.('#112233')).resolves.toBe('#112233-picked')
+
+    setElectronApi({ platform: 'darwin' })
+    expect(electronPlatform.colorPicker?.openColorPicker).toBeUndefined()
+  })
+
+  it('updater 直通版本号、检查更新、重启/应用界面更新与事件订阅', async () => {
+    const calls: string[] = []
+    setElectronApi({
+      platform: 'win32',
+      getAppVersion: () => Promise.resolve('1.4.4-pre2'),
+      checkForUpdate: () => {
+        calls.push('check')
+        return Promise.resolve()
+      },
+      quitAndInstall: () => calls.push('quit'),
+      applyRendererUpdate: () => calls.push('reload'),
+      onUpdaterEvent: (cb: (event: { type: string }) => void) => {
+        cb({ type: 'checking' })
+        calls.push('sub')
+        return () => calls.push('unsub')
+      },
+    })
+
+    const updater = electronPlatform.updater
+    expect(updater).toBeDefined()
+    await expect(updater!.getAppVersion?.()).resolves.toBe('1.4.4-pre2')
+    await updater!.checkForUpdate?.()
+    updater!.quitAndInstall?.()
+    updater!.applyRendererUpdate?.()
+    const off = updater!.onUpdaterEvent?.(() => {})
+    off?.()
+
+    expect(calls).toEqual(['check', 'quit', 'reload', 'sub', 'unsub'])
   })
 })

@@ -54,10 +54,10 @@ export default function Settings() {
   const isHarmonyOS = platform.runtime?.platform === 'openharmony'
 
   useEffect(() => {
-    window.electronAPI?.getAppVersion?.()?.then((v) => {
+    platform.updater?.getAppVersion?.()?.then((v) => {
       if (v) setAppVersion(v)
     })
-    return window.electronAPI?.onUpdaterEvent?.((event) => {
+    return platform.updater?.onUpdaterEvent?.((event) => {
       switch (event.type) {
         case 'checking':
           setUpdateStatus('正在检查更新…'); setUpdateAction(null); break
@@ -86,11 +86,11 @@ export default function Settings() {
   const checkUpdate = () => {
     setUpdateStatus('正在检查更新…')
     setUpdateAction(null)
-    window.electronAPI?.checkForUpdate?.()
+    platform.updater?.checkForUpdate?.()
   }
   const runUpdateAction = () => {
-    if (updateAction === 'restart') window.electronAPI?.quitAndInstall?.()
-    else if (updateAction === 'reload') window.electronAPI?.applyRendererUpdate?.()
+    if (updateAction === 'restart') platform.updater?.quitAndInstall?.()
+    else if (updateAction === 'reload') platform.updater?.applyRendererUpdate?.()
   }
 
   // ===== 云同步（WebDAV）=====

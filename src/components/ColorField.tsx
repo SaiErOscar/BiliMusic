@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { platform } from '@/platform'
 
 // v1.3.9-pre3 取色控件：Windows 下色块本身就是按钮，点击直接弹自写的"取色面板窗"（复刻原生
 // input[type=color] 的色板/色相/吸管/RGB/HEX UI，面板内点吸管再进全屏准星取色），入口收进色块、
@@ -18,8 +19,8 @@ export default function ColorField({
 }) {
   const [busy, setBusy] = useState(false)
   const canPick =
-    window.electronAPI?.platform === 'win32' &&
-    typeof window.electronAPI?.openColorPicker === 'function'
+    platform.runtime?.platform === 'win32' &&
+    typeof platform.colorPicker?.openColorPicker === 'function'
 
   if (!canPick) {
     return (
@@ -39,7 +40,7 @@ export default function ColorField({
     if (busy) return
     setBusy(true)
     try {
-      const hex = await window.electronAPI?.openColorPicker?.(value)
+      const hex = await platform.colorPicker?.openColorPicker?.(value)
       if (hex) onChange(hex)
     } finally {
       setBusy(false)
