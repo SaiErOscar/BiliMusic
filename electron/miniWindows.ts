@@ -44,6 +44,8 @@ export interface MiniPlayerState {
   /** v1.3.10 自动色算出的实际颜色（与手动色分离；开关开且非空时歌词窗显示之） */
   autoLyricTextColor: string
   autoLyricControlColor: string
+  /** v1.4.5 用户主动选「不显示歌词」：歌词窗显示「无歌词」，区别于自动匹配失败 */
+  noLyric?: boolean
 }
 
 export type MiniCommand =
@@ -84,6 +86,7 @@ const defaultState: MiniPlayerState = {
   autoControlColor: false,
   autoLyricTextColor: '',
   autoLyricControlColor: '',
+  noLyric: false,
 }
 
 let miniState: MiniPlayerState = { ...defaultState }
@@ -393,7 +396,7 @@ function getLyricHtml() {
   </div>
   <script>
     const { onState, sendCommand } = window.miniAPI
-    let state = { hasTrack:false, title:'', artist:'', coverUrl:'', isPlaying:false, volume:80, isMuted:false, progress:0, duration:0, lyricLines:[], synced:false, theme:'dark', lyricTextColor:'#ffffff', lyricControlColor:'#ff375f', lyricFontSize:30, lyricFontWeight:820, lyricFontFamily:'system-ui', repeatMode:'none', autoTextColor:false, autoControlColor:false, autoLyricTextColor:'', autoLyricControlColor:'' }
+    let state = { hasTrack:false, title:'', artist:'', coverUrl:'', isPlaying:false, volume:80, isMuted:false, progress:0, duration:0, lyricLines:[], synced:false, theme:'dark', lyricTextColor:'#ffffff', lyricControlColor:'#ff375f', lyricFontSize:30, lyricFontWeight:820, lyricFontFamily:'system-ui', repeatMode:'none', autoTextColor:false, autoControlColor:false, autoLyricTextColor:'', autoLyricControlColor:'', noLyric:false }
     const $ = (id) => document.getElementById(id)
     const volInput = $('volume')
     let lyricTimer = null
@@ -432,6 +435,10 @@ function getLyricHtml() {
       const line = $('line')
       if (!state.hasTrack) {
         line.textContent = '未在播放'; line.className = 'line idle'; return
+      }
+      // v1.4.5：用户主动选「不显示歌词」→ 显示「无歌词」（区别于自动匹配失败时的标题回落）
+      if (state.noLyric) {
+        line.textContent = '无歌词'; line.className = 'line idle'; return
       }
       if (!state.synced || !state.lyricLines || state.lyricLines.length === 0) {
         line.textContent = state.title || state.artist || '暂无歌词'; line.className = 'line idle'; return
@@ -784,6 +791,7 @@ export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserW
       autoControlColor: Boolean(state.autoControlColor),
       autoLyricTextColor: typeof state.autoLyricTextColor === 'string' ? state.autoLyricTextColor : miniState.autoLyricTextColor,
       autoLyricControlColor: typeof state.autoLyricControlColor === 'string' ? state.autoLyricControlColor : miniState.autoLyricControlColor,
+      noLyric: Boolean(state.noLyric),
     }
     broadcast()
     syncAutoColor()

@@ -26,15 +26,47 @@ export interface LyricResult {
   artistName: string
   sourceId: string
   offset: number // 时间偏移（毫秒），正数=歌词延后，负数=歌词提前
+  noLyric?: boolean // v1.4.5：用户主动选择「不显示歌词」时为 true，视为内容为「无歌词」的歌词态
 }
 
-/** v1.3.7 歌词候选来源 */
-export type LyricSource = 'qq' | 'netease' | 'lrclib'
+/** v1.3.7 歌词候选来源；v1.4.5 增 'none'（不显示歌词态，抽屉置顶项，无来源 tag） */
+export type LyricSource = 'qq' | 'netease' | 'lrclib' | 'none'
 
 export const LYRIC_SOURCE_LABELS: Record<LyricSource, string> = {
   qq: 'QQ',
   netease: '网易',
   lrclib: 'LRCLIB',
+  none: '不显示歌词',
+}
+
+/** v1.4.5「不显示歌词」候选固定 id，跨源唯一前缀 'none' */
+export const NO_LYRIC_ID = 'none'
+
+/** 构造一条内容为「无歌词」的结果（lines 空、noLyric=true） */
+function noneLyricResult(): LyricResult {
+  return {
+    lines: [],
+    synced: false,
+    instrumental: false,
+    trackName: '',
+    artistName: '',
+    sourceId: NO_LYRIC_ID,
+    offset: 0,
+    noLyric: true,
+  }
+}
+
+/** 抽屉置顶的「不显示歌词」候选，选中后永久标记该曲目无歌词 */
+export const NO_LYRIC_CANDIDATE: LyricCandidate = {
+  id: NO_LYRIC_ID,
+  songId: NO_LYRIC_ID,
+  source: 'none',
+  mid: '',
+  trackName: '不显示歌词',
+  artistName: '',
+  albumName: '',
+  duration: 0,
+  image: '',
 }
 
 export interface LyricCandidate {
@@ -482,6 +514,8 @@ const MISS_TTL = 24 * 60 * 60 * 1000
 type CacheEntry =
   | { status: 'ok'; result: LyricResult }
   | { status: 'miss'; ts: number }
+  // v1.4.5：用户主动选「不显示歌词」，永久生效（无 ts、不过期），优先于自动匹配
+  | { status: 'none' }
 
 function readCache(): Record<string, CacheEntry> {
   try {
@@ -508,6 +542,12 @@ function cacheOk(trackId: string, result: LyricResult): void {
 function cacheMiss(trackId: string): void {
   const map = readCache()
   map[trackId] = { status: 'miss', ts: Date.now() }
+  writeCache(map)
+}
+
+function cacheNone(trackId: string): void {
+  const map = readCache()
+  map[trackId] = { status: 'none' }
   writeCache(map)
 }
 
@@ -581,6 +621,8 @@ export function applyLyricOffset(result: LyricResult, trackId: string): LyricRes
 
 export async function getLyricForTrack(track: Track): Promise<LyricResult | null> {
   const entry = readCache()[track.id]
+  // v1.4.5：用户主动标记「不显示歌词」优先于自动匹配，永久生效、不发起网络搜索
+  if (entry?.status === 'none') return noneLyricResult()
   // 缓存命中时也要应用偏移：缓存保存的是原始（未偏移）歌词，
   // 否则第二次及以后播放/桌面歌词会拿到未偏移的时间轴，导致偏移失效
   if (entry?.status === 'ok') return applyLyricOffset(entry.result, track.id)
@@ -660,6 +702,11 @@ export async function searchMultiSourceRound(
 }
 
 export async function chooseLyricCandidate(trackId: string, record: LyricCandidate): Promise<LyricResult | null> {
+  // v1.4.5：选中「不显示歌词」→ 永久标记该曲目无歌词，不发起任何取词请求
+  if (record.id === NO_LYRIC_ID || record.source === 'none') {
+    cacheNone(trackId)
+    return noneLyricResult()
+  }
   const content = await getLyricContent(record)
   const result = lyricToResult(record, content)
   if (result) cacheOk(trackId, result)

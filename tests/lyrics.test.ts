@@ -7,8 +7,15 @@ import {
   normalizeCandidate,
   normalizeNetease,
   normalizeLrclib,
+  chooseLyricCandidate,
+  getLyricForTrack,
+  clearLyricCache,
+  NO_LYRIC_CANDIDATE,
+  NO_LYRIC_ID,
+  LYRIC_SOURCE_LABELS,
   type LyricCandidate,
 } from '../src/services/lyrics'
+import type { Track } from '../src/types'
 
 // 构造一个完整的 LyricCandidate，用于 mergeDedup 测试
 function cand(over: Partial<LyricCandidate>): LyricCandidate {
@@ -167,5 +174,70 @@ describe('dice', () => {
   it('空字符串返回0', () => {
     expect(dice('', 'test')).toBe(0)
     expect(dice('test', '')).toBe(0)
+  })
+})
+
+describe('v1.4.5 不显示歌词（none 态）', () => {
+  const mkTrack = (over: Partial<Track> = {}): Track => ({
+    id: over.id || 'bv_none_test',
+    bvid: over.bvid || 'BV_none_test',
+    aid: over.aid || 0,
+    cid: over.cid || 0,
+    title: over.title || '测试曲目',
+    artist: over.artist || '测试歌手',
+    coverUrl: '',
+    duration: 100,
+    videoUrl: '',
+    playCount: 0,
+    isLiked: false,
+    ...over,
+  } as Track)
+
+  it('NO_LYRIC_CANDIDATE 固定 id 为 none、source 为 none', () => {
+    expect(NO_LYRIC_CANDIDATE.id).toBe(NO_LYRIC_ID)
+    expect(NO_LYRIC_CANDIDATE.id).toBe('none')
+    expect(NO_LYRIC_CANDIDATE.source).toBe('none')
+  })
+
+  it('LYRIC_SOURCE_LABELS 含 none 标签（置顶项文本来源）', () => {
+    expect(LYRIC_SOURCE_LABELS.none).toBe('不显示歌词')
+  })
+
+  it('选择「不显示歌词」写入永久缓存并返回 noLyric 结果', async () => {
+    const track = mkTrack({ id: 'bv_pick_none' })
+    clearLyricCache(track.id)
+    const res = await chooseLyricCandidate(track.id, NO_LYRIC_CANDIDATE)
+    expect(res).not.toBeNull()
+    expect(res!.noLyric).toBe(true)
+    expect(res!.lines.length).toBe(0)
+    expect(res!.artistName).toBe('')
+  })
+
+  it('getLyricForTrack 命中 none 缓存返回 noLyric（优先于自动匹配、不发网络）', async () => {
+    const track = mkTrack({ id: 'bv_read_none' })
+    clearLyricCache(track.id)
+    await chooseLyricCandidate(track.id, NO_LYRIC_CANDIDATE)
+    const res = await getLyricForTrack(track)
+    expect(res).not.toBeNull()
+    expect(res!.noLyric).toBe(true)
+    expect(res!.lines.length).toBe(0)
+  })
+
+  it('none 缓存不过期：重复读取仍为 noLyric', async () => {
+    const track = mkTrack({ id: 'bv_sticky_none' })
+    clearLyricCache(track.id)
+    await chooseLyricCandidate(track.id, NO_LYRIC_CANDIDATE)
+    const r1 = await getLyricForTrack(track)
+    const r2 = await getLyricForTrack(track)
+    expect(r1!.noLyric).toBe(true)
+    expect(r2!.noLyric).toBe(true)
+  })
+
+  it('clearLyricCache 清除后不再处于 none 命中（可改回正常歌词的前提）', async () => {
+    const track = mkTrack({ id: 'bv_clear_none' })
+    await chooseLyricCandidate(track.id, NO_LYRIC_CANDIDATE)
+    clearLyricCache(track.id)
+    const entry = JSON.parse(localStorage.getItem('bilimusic_lyrics_v2') || '{}')
+    expect(entry[track.id]).toBeUndefined()
   })
 })

@@ -101,7 +101,8 @@ export default function DownloadButton({
 
       if (embedMeta || includeLyric) {
         const lyricResult = await getLyricForTrack(trackForLyric)
-        if (lyricResult) {
+        // v1.4.5：用户选「不显示歌词」→ 命中 none 态，无论开关都不下载歌词、不写歌手
+        if (lyricResult && !lyricResult.noLyric) {
           if (embedMeta && lyricResult.artistName) {
             artist = lyricResult.artistName
           }

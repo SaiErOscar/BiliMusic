@@ -20,9 +20,10 @@ export function useMiniWindowSync() {
   const player = usePlayer()
   const { progress, duration, setProgress } = usePlayerProgress()
   const { settings, setAppSettings } = useAppSettings()
-  const [lyrics, setLyrics] = useState<{ lines: { time: number; text: string }[]; synced: boolean }>({
+  const [lyrics, setLyrics] = useState<{ lines: { time: number; text: string }[]; synced: boolean; noLyric: boolean }>({
     lines: [],
     synced: false,
+    noLyric: false,
   })
   const trackId = player.currentTrack?.id
 
@@ -51,16 +52,17 @@ export function useMiniWindowSync() {
     let cancelled = false
     const track = player.currentTrack
     if (!track) {
-      setLyrics({ lines: [], synced: false })
+      setLyrics({ lines: [], synced: false, noLyric: false })
       return
     }
     getLyricForTrack(track)
       .then((res) => {
         if (cancelled) return
-        setLyrics({ lines: res?.lines || [], synced: Boolean(res?.synced) })
+        // v1.4.5：透传 noLyric（用户主动「不显示歌词」），歌词窗据此显示「无歌词」
+        setLyrics({ lines: res?.lines || [], synced: Boolean(res?.synced), noLyric: Boolean(res?.noLyric) })
       })
       .catch(() => {
-        if (!cancelled) setLyrics({ lines: [], synced: false })
+        if (!cancelled) setLyrics({ lines: [], synced: false, noLyric: false })
       })
     return () => {
       cancelled = true
@@ -92,6 +94,7 @@ export function useMiniWindowSync() {
     autoControlColor: settings.autoControlColor,
     autoLyricTextColor: settings.autoLyricTextColor,
     autoLyricControlColor: settings.autoLyricControlColor,
+    noLyric: lyrics.noLyric,
   }), [
     player.currentTrack,
     player.isPlaying,
@@ -112,6 +115,7 @@ export function useMiniWindowSync() {
     settings.autoControlColor,
     settings.autoLyricTextColor,
     settings.autoLyricControlColor,
+    lyrics.noLyric,
   ])
 
   // 实时推送：每次 miniState 变化（progress/播放状态/歌词/主题/配色等）即发送给主进程

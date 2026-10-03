@@ -10,7 +10,7 @@ import {
   type LyricCandidate,
 } from '@/services/lyrics'
 
-export type LyricStatus = 'idle' | 'loading' | 'ok' | 'unsynced' | 'empty'
+export type LyricStatus = 'idle' | 'loading' | 'ok' | 'unsynced' | 'empty' | 'none'
 
 /**
  * 按当前曲目懒加载歌词（仅当 enabled，即歌词页打开时）。
@@ -28,6 +28,13 @@ export function useLyrics(track: Track | null, enabled: boolean) {
     setResult(null)
     const res = await getLyricForTrack(t)
     if (reqId !== reqIdRef.current) return // 已切歌，丢弃过期结果
+    // v1.4.5：用户主动选「不显示歌词」→ 独立 none 态（内容为「无歌词」），区别于自动匹配失败的 empty
+    if (res?.noLyric) {
+      setStatus('none')
+      setResult(res)
+      setOffset(0)
+      return
+    }
     if (!res || (!res.lines.length && !res.instrumental)) {
       setStatus('empty')
       setResult(null)
@@ -51,6 +58,13 @@ export function useLyrics(track: Track | null, enabled: boolean) {
     if (!track) return
     setStatus('loading')
     const res = await chooseLyricCandidate(track.id, record)
+    // v1.4.5：选中「不显示歌词」→ 进入独立 none 态
+    if (res?.noLyric) {
+      setStatus('none')
+      setResult(res)
+      setOffset(0)
+      return
+    }
     if (!res) {
       setStatus('empty')
       setResult(null)

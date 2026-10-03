@@ -154,6 +154,8 @@ export interface MiniPlayerState {
   /** v1.3.10 自动算出的实际颜色（与手动色分离，歌词窗据此显示） */
   autoLyricTextColor?: string
   autoLyricControlColor?: string
+  /** v1.4.5 用户主动选「不显示歌词」：歌词窗显示「无歌词」，区别于自动匹配失败 */
+  noLyric?: boolean
 }
 
 export type MiniCommand =

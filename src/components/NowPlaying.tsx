@@ -17,6 +17,7 @@ import LyricsView from '@/components/LyricsView'
 import {
   searchMultiSourceRound,
   initialMultiSourceState,
+  NO_LYRIC_CANDIDATE,
   LYRIC_SOURCE_LABELS,
   type LyricCandidate,
   type MultiSourceState,
@@ -650,6 +651,12 @@ function LyricsPanel({
   const loadMore = () => runRound(query, false)
 
   const pick = async (record: LyricCandidate) => {
+    // v1.4.5：选「不显示歌词」仅置标记，不发起取词请求，不进 spinner
+    if (record.id === NO_LYRIC_CANDIDATE.id) {
+      await choose(record)
+      setSearchOpen(false)
+      return
+    }
     setChoosingId(record.id)
     await choose(record)
     setChoosingId(null)
@@ -674,6 +681,13 @@ function LyricsPanel({
             <button type="button" onClick={openSearch}><Search size={14} /> 手动搜索歌词</button>
           </Centered>
         )}
+        {status === 'none' && (
+          <Centered>
+            <Music size={42} strokeWidth={1.25} />
+            <strong>无歌词</strong>
+            <span>已选择「不显示歌词」，可在切换歌词里改回</span>
+          </Centered>
+        )}
         {(status === 'ok' || status === 'unsynced') && result && (
           <>
             {status === 'unsynced' && <div className="lyrics-panel__hint">该版本无逐行时间轴，按普通歌词显示</div>}
@@ -682,8 +696,8 @@ function LyricsPanel({
         )}
       </div>
 
-      {/* 歌词底部控制栏：切换歌词 + 时间偏移调整 */}
-      {(status === 'ok' || status === 'unsynced') && (
+      {/* 歌词底部控制栏：切换歌词 + 时间偏移调整（none 态保留以便改回歌词） */}
+      {(status === 'ok' || status === 'unsynced' || status === 'none') && (
         <div className="lyrics-panel__controls">
           <button type="button" className="lyrics-panel__ctrl-btn" onClick={handleToggleDesktopLyric} title={desktopLyricVisible ? '隐藏桌面歌词' : '显示桌面歌词'}>
             <Monitor size={15} />
@@ -744,6 +758,13 @@ function LyricsPanel({
               {results.length === 0 && !searching && (
                 <div className="lyrics-drawer__empty">{query.trim() ? '未找到相关歌曲，可换个关键词试试' : '输入歌名或歌手后搜索'}</div>
               )}
+              <button type="button" className="lyrics-candidate" onClick={() => pick(NO_LYRIC_CANDIDATE)}>
+                <span>
+                  <strong>{NO_LYRIC_CANDIDATE.trackName}</strong>
+                  <small>该曲目不再匹配、不再下载歌词</small>
+                </span>
+                <span>选择</span>
+              </button>
               {results.map((r) => (
                 <button key={r.id} type="button" className="lyrics-candidate" onClick={() => pick(r)} disabled={choosingId === r.id}>
                   <span>
