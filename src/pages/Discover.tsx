@@ -20,6 +20,7 @@ import {
 } from '@/utils/storage'
 import { MusicHero, MusicPageShell, LibraryCard, type LibraryItem } from '@/components/AppleMusicPage'
 import type { DownloadRecord, Track } from '@/types'
+import { platform } from '@/platform'
 
 /** 每张卡片横向展示的最大条数 */
 const PREVIEW_COUNT = 6
@@ -150,7 +151,7 @@ export default function Discover() {
   // 下载条目：与下载页一致，用系统默认浏览器打开原链接（无本地文件播放能力）
   const openDownload = useCallback((item: LibraryItem) => {
     const record = downloads.find((d) => d.id === item.id)
-    if (record) window.electronAPI?.openExternal?.(`https://www.bilibili.com/video/${record.bvid}`)
+    if (record) platform.shell?.openExternal?.(`https://www.bilibili.com/video/${record.bvid}`)
   }, [downloads])
 
   const biliItems = biliFolderTracks.map(trackToItem)

@@ -1,9 +1,10 @@
 {
   "name": "bilimusic",
   "private": true,
-  "version": "1.4.3",
+  "version": "1.4.4-pre1",
   "description": "BiliMusic - 基于 Bilibili 的桌面音乐播放器",
   "author": "SaiErOscar",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {

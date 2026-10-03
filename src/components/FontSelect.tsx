@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { platform } from '@/platform'
 
 // 内置保底字体：即使主进程枚举失败（如鸿蒙/权限受限）也能提供常见中文可选
 const FALLBACK_FONTS = [
@@ -43,8 +44,7 @@ export default function FontSelect({
       setFonts(cachedFonts)
       return
     }
-    const api = (window as unknown as { electronAPI?: { listSystemFonts?: () => Promise<string[]> } }).electronAPI
-    api
+    platform.fonts
       ?.listSystemFonts?.()
       .then((list) => {
         cachedFonts = normalize(list)

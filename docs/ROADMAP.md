@@ -46,6 +46,11 @@
 
 ## 变更记录
 
+- 2026-10-03 **Android CI 根因更正 + 许可证改 Apache-2.0 + v1.4.4-pre1 动工**。
+  - **Android CI 根因更正**：2026-09-26 条把 Android job 持续红的根因判为「sdkmanager 刷新 Google SDK 仓库索引超时」，与实际不符。真正原因是 `android-actions/setup-android@v3` 的 `packages` 默认值含已被 Google 下架的 legacy `tools` 包，`Setup Android SDK` 直接报 `Failed to find package 'tools'` 秒挂；`cmdline-tools-version: '15859902'` 等于 action 默认值，是空操作。2026-09-27 commit b5e6682 显式 `packages: 'platform-tools'` 后 Android job 已跑通，v1.4.3 起历次 v* tag 的 Android 构建正常。**上一条 2026-09-26 的根因描述作废**，勿再按「索引超时」方向排查。
+  - **许可证由 MIT 改为 Apache-2.0**（commit 4bd3c8b，LICENSE 尾部补派生来源署名）。同步对齐：README.md 徽章 `license-MIT` → `license-Apache--2.0`、package.json 增 `"license": "Apache-2.0"`、README.en.md 徽章行补 License 徽章并把 Changelog 链接文案更新为 `v1.4.3`。
+  - **v1.4.4-pre1 动工**（UI 层桌面壳解耦第一刀）：`src/platform` 新增 `fonts` / `shell` / `tray` 三组 capability，先切 FontSelect、TitleBar、Settings、NowPlaying、Downloads、Discover 与 PlayerContext 的托盘状态推送；updater / webdavConfig / miniWindow / colorPicker / backup 仍按原 pre 拆分留待 pre2、pre3。行为零变化，仅把直读 `window.electronAPI` 换成 `platform` 接口。
+
 - 2026-10-02 **鸿蒙验证线整线后置 v1.5（覆盖 10-01「顺延」结论）**：按用户「将『鸿蒙无账号构建验证』迁移至 1.5、不在 1.4 完成」指示，把原 v1.4 计划的鸿蒙验证线三项（① 无账号构建验证 ② 真机+签名剥离 ③ 追版回归，三者串行依赖）整线迁出 v1.4、并入 v1.5。只迁用户点名的第①项会让 ②③ 出现「前置已跑到 v1.5」的倒挂依赖，故按整线迁移。理由：v1.4 收敛回桌面体验 + 逻辑解耦（含 v1.4.4 UI 层桌面壳收口）+ 移动端补齐 + 桌面主题/性能，单人备考周期不再背鸿蒙质量债；且三项鸿蒙工作都强依赖桌面解耦彻底铺平（v1.4.4 后 UI 层 electronAPI 直调才收干净），提前在 v1.4 验要做两遍；鸿蒙真机签名本就卡监护人账号、与备考窗口冲突。落地：ROADMAP 表内原 1.4.3/1.4.4/1.4.5 三个「鸿蒙续命」槽位（按工作内容标注，非实际发布号）状态改为「迁出 → v1.5」，顶部定位语 / 排序原则 / 关键架构决策同步；v1.5 规划页新增「承接 v1.4 后置的鸿蒙验证线」一节列明三阶段。**本条作废上一条 2026-10-01「顺延」子项里「鸿蒙无账号构建验证 → v1.4.5」的结论**（鸿蒙项不再留在 v1.4 序列内）。表内计划号与实际发布号继续完全错位，一律以变更记录为准。
 
 - 2026-10-01 **v1.4.3 正式版转正 + v1.4.4 下一小版本规划**。

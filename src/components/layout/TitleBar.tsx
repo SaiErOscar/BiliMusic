@@ -1,19 +1,20 @@
 import { Maximize2, Minimize2, Minus, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import appIcon from '@/assets/icon.png'
+import { platform } from '@/platform'
 
 export default function TitleBar() {
   const [maximized, setMaximized] = useState(false)
 
-  // 窗口控制按钮只在桌面端（Electron 且非鸿蒙）显示；手机端没有 electronAPI，不显示
-  const showWindowControls = !!window.electronAPI && window.electronAPI.platform !== 'openharmony'
+  // 窗口控制按钮只在桌面壳（Electron 且非鸿蒙）显示；手机端没有 shell capability，不显示
+  const showWindowControls = !!platform.shell && platform.runtime?.platform !== 'openharmony'
 
   useEffect(() => {
-    const api = window.electronAPI
-    if (!api) return
+    const shell = platform.shell
+    if (!shell) return
 
-    api.isMaximized?.().then(setMaximized).catch(() => {})
-    return api.onMaximizedChange?.(setMaximized)
+    shell.isMaximized?.().then(setMaximized).catch(() => {})
+    return shell.onMaximizedChange?.(setMaximized)
   }, [])
 
   return (
@@ -46,11 +47,11 @@ function WindowButton({
   isClose?: boolean
 }) {
   const handleClick = () => {
-    const api = window.electronAPI
-    if (!api) return
-    if (action === 'minimize') api.minimize()
-    else if (action === 'maximize') api.maximize()
-    else if (action === 'close') api.close()
+    const shell = platform.shell
+    if (!shell) return
+    if (action === 'minimize') shell.minimize()
+    else if (action === 'maximize') shell.maximize()
+    else if (action === 'close') shell.close()
   }
 
   return (

@@ -4,6 +4,7 @@ import type { Track, RepeatMode } from '@/types'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { toggleFavoriteTrack, loadFavoriteTracks, addRecentTrack } from '@/utils/storage'
 import { resolveAudioPlayableUrl, releaseAudioPlayableUrl } from '@/services/http'
+import { platform } from '@/platform'
 
 function shuffleArray<T>(arr: T[]): T[] {
   const result = [...arr]
@@ -622,7 +623,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [currentTrack, isPlaying])
 
   useEffect(() => {
-    const pushTrayState = () => window.electronAPI?.updateTrayPlayerState?.({
+    const pushTrayState = () => platform.tray?.updateTrayPlayerState?.({
       hasTrack: Boolean(currentTrack),
       title: currentTrack?.title || '未在播放',
       artist: currentTrack?.artist || '搜索并播放音乐',
@@ -638,7 +639,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [currentTrack?.artist, currentTrack?.coverUrl, currentTrack?.id, currentTrack?.title, isPlaying, queue.length])
 
   useEffect(() => {
-    return window.electronAPI?.onTrayPlayerCommand?.((command) => {
+    return platform.tray?.onTrayPlayerCommand?.((command) => {
       if (command === 'toggle-play') togglePlay()
       if (command === 'next') next()
       if (command === 'prev') prev()

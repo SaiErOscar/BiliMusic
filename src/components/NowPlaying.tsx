@@ -22,6 +22,7 @@ import {
   type MultiSourceState,
 } from '@/services/lyrics'
 import { getVideoComments, type VideoComment } from '@/services/api'
+import { platform } from '@/platform'
 
 const sliderTheme = {
   ['--track-bg']: 'rgba(255,255,255,0.18)',
@@ -61,33 +62,34 @@ export default function NowPlaying() {
   }, [expanded, close])
 
   useEffect(() => {
-    const api = window.electronAPI
-    if (!api) return
-    api.isFullscreen?.().then(setFullscreen).catch(() => {})
-    return api.onFullscreenChange?.(setFullscreen)
+    const shell = platform.shell
+    if (!shell) return
+    shell.isFullscreen?.().then(setFullscreen).catch(() => {})
+    return shell.onFullscreenChange?.(setFullscreen)
   }, [])
 
   useEffect(() => {
-    const api = window.electronAPI
-    if (api?.platform !== 'openharmony') return
-    api.setWindowButtonVisibility?.(!expanded)
-    return () => api.setWindowButtonVisibility?.(true)
+    const shell = platform.shell
+    if (platform.runtime?.platform !== 'openharmony') return
+    shell?.setWindowButtonVisibility?.(!expanded)
+    return () => shell?.setWindowButtonVisibility?.(true)
   }, [expanded])
 
   const toggleFullscreen = () => {
-    window.electronAPI?.toggleFullscreen?.()
-    window.electronAPI?.isFullscreen?.()
+    const shell = platform.shell
+    shell?.toggleFullscreen?.()
+    shell?.isFullscreen?.()
       .then(setFullscreen)
       .catch(() => {})
     window.setTimeout(() => {
-      window.electronAPI?.isFullscreen?.()
+      shell?.isFullscreen?.()
         .then(setFullscreen)
         .catch(() => {})
     }, 180)
   }
 
   const closeToTray = () => {
-    window.electronAPI?.close()
+    platform.shell?.close()
   }
 
   const openArtistSpace = () => {
@@ -98,7 +100,7 @@ export default function NowPlaying() {
 
   const openSourceVideo = () => {
     if (!track?.bvid) return
-    window.electronAPI?.openExternal?.(`https://www.bilibili.com/video/${track.bvid}`)
+    platform.shell?.openExternal?.(`https://www.bilibili.com/video/${track.bvid}`)
   }
 
   const loadComments = useCallback(async (page = 1) => {

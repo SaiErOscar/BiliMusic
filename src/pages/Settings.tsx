@@ -31,6 +31,7 @@ import ColorField from '@/components/ColorField'
 import { useTheme } from '@/hooks/useTheme'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { selectDownloadFolder } from '@/services/api'
+import { platform } from '@/platform'
 import { useAuth } from '@/contexts/AuthContext'
 import { createPlaylistsExport, importPlaylistsFromText } from '@/utils/storage'
 import { runSync, forceUpload, forceDownload, getLastSync, SYNC_STATE_EVENT, WEBDAV_CONFIGURED_EVENT, type SyncResult } from '@/utils/sync'
@@ -50,7 +51,7 @@ export default function Settings() {
   const [showHelp, setShowHelp] = useState(false)
   const [showBackup, setShowBackup] = useState(false)
   // 鸿蒙端不提供更新能力，仅展示版本号
-  const isHarmonyOS = window.electronAPI?.platform === 'openharmony'
+  const isHarmonyOS = platform.runtime?.platform === 'openharmony'
 
   useEffect(() => {
     window.electronAPI?.getAppVersion?.()?.then((v) => {
@@ -304,7 +305,7 @@ export default function Settings() {
               />
             </SettingsRow>
             <SettingsRow label="打开目录" description="在文件管理器中打开下载目录">
-              <button type="button" onClick={() => window.electronAPI?.biliApi?.openDownloadDir?.(settings.downloadDir)}>
+              <button type="button" onClick={() => platform.download?.openDownloadDir?.(settings.downloadDir)}>
                 <FolderOpen size={14} />
                 打开
               </button>
@@ -436,7 +437,7 @@ export default function Settings() {
                   备份数据
                 </button>
               )}
-              <button type="button" onClick={() => window.electronAPI?.openExternal?.('https://github.com/SaiErOscar/BiliMusic')}>
+              <button type="button" onClick={() => platform.shell?.openExternal?.('https://github.com/SaiErOscar/BiliMusic')}>
                 <Github size={14} />
                 关于项目
               </button>

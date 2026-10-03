@@ -36,4 +36,31 @@ export const electronPlatform: Platform = {
     const a = api()
     return a ? { platform: a.platform, persistentStorage: a.persistentStorage } : undefined
   },
+  /** v1.4.4-pre1：系统字体枚举（UI 层 FontSelect 用，非 Electron 走内置保底列表） */
+  get fonts() {
+    const a = api()
+    return a ? { listSystemFonts: a.listSystemFonts } : undefined
+  },
+  /** v1.4.4-pre1：桌面壳（窗口控制/最大化/全屏/标题栏按钮/外部链接），手机端无此能力 */
+  get shell() {
+    const a = api()
+    if (!a) return undefined
+    return {
+      minimize: a.minimize,
+      maximize: a.maximize,
+      close: a.close,
+      isMaximized: a.isMaximized,
+      onMaximizedChange: a.onMaximizedChange,
+      toggleFullscreen: a.toggleFullscreen,
+      isFullscreen: a.isFullscreen,
+      onFullscreenChange: a.onFullscreenChange,
+      setWindowButtonVisibility: a.setWindowButtonVisibility,
+      openExternal: a.openExternal,
+    }
+  },
+  /** v1.4.4-pre1：托盘（播放状态推送与菜单命令订阅），手机端无此能力 */
+  get tray() {
+    const a = api()
+    return a ? { updateTrayPlayerState: a.updateTrayPlayerState, onTrayPlayerCommand: a.onTrayPlayerCommand } : undefined
+  },
 }

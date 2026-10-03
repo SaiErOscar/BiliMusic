@@ -11,6 +11,7 @@ import {
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { loadDownloadRecords, clearDownloadRecords, DOWNLOADS_CHANGED_EVENT } from '@/utils/storage'
 import type { DownloadRecord } from '@/types'
+import { platform } from '@/platform'
 
 export default function Downloads() {
   const { settings } = useAppSettings()
@@ -26,12 +27,12 @@ export default function Downloads() {
   }, [])
 
   const openDir = () => {
-    window.electronAPI?.biliApi?.openDownloadDir?.(settings.downloadDir)
+    platform.download?.openDownloadDir?.(settings.downloadDir)
   }
 
   const openLink = (bvid: string) => {
     // 用系统默认浏览器在外部打开，而非 Electron 内部新窗口
-    window.electronAPI?.openExternal?.(`https://www.bilibili.com/video/${bvid}`)
+    platform.shell?.openExternal?.(`https://www.bilibili.com/video/${bvid}`)
   }
 
   return (

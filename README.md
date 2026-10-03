@@ -1,11 +1,11 @@
 ![BiliMusic Logo](./src/assets/icon.png)
 
-![version](https://img.shields.io/badge/version-v1.4.3-2C2C2C?colorA=B03A2E&style=flat)
+![version](https://img.shields.io/badge/version-v1.4.4--pre1-2C2C2C?colorA=B03A2E&style=flat)
 ![electron](https://img.shields.io/badge/Electron-36-2C2C2C?colorA=B03A2E&colorB=2C2C2C&style=flat)
 ![react](https://img.shields.io/badge/React-19-2C2C2C?colorA=B03A2E&colorB=2C2C2C&style=flat)
 ![typescript](https://img.shields.io/badge/TypeScript-5.8-2C2C2C?colorA=B03A2E&colorB=2C2C2C&style=flat)
 ![platform](https://img.shields.io/badge/Windows-HarmonyOS-2C2C2C?colorA=B03A2E&colorB=2C2C2C&style=flat)
-![license](https://img.shields.io/badge/license-MIT-2C2C2C?colorA=B03A2E&colorB=2C2C2C&style=flat)
+![license](https://img.shields.io/badge/license-Apache--2.0-2C2C2C?colorA=B03A2E&colorB=2C2C2C&style=flat)
 
 ## 目录
 
