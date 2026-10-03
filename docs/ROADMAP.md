@@ -46,6 +46,7 @@
 
 ## 变更记录
 
+- 2026-10-03 **v1.4.4-pre3 收口：备份 / WebDAV 配置 + 深色原生控件配色**（tag v1.4.4-pre3）。`src/platform` 新增 `backup` / `webdavConfig` 两组 capability，并扩展 `auth.setCookies` / `storage.webdavDelete` / `runtime.notifyRendererReady`；切换调用方 7 个文件（`BackupModal` / `utils/backup.ts` / `LoginDialog` / `useAppSettings` / `useAutoSync` / `Settings` WebDAV 段 / `App.tsx`），`src/` 内 `window.electronAPI` 直调由 10 处降至 0，仅剩 `src/platform/electron.ts` getter——UI 层桌面壳解耦闭环达成（转正门槛的 grep 断言现已满足）。顺带做深色面板原生 select 展开列表配色修复（`.settings-select` 不透明背景 + `.settings-select option` 显式配色）与设置页两处滑条 `accentColor` 修正为 `--color-primary`。`tests/platform.test.ts` 新增 4 项（合计 14 项），vitest 89 项全绿、tsc/eslint 0 error，行为零变化（配色项为可见修复）。pre3 本地实测通过后转正式 v1.4.4。
 - 2026-10-03 **Android CI 根因更正 + 许可证改 Apache-2.0 + v1.4.4-pre1 动工**。
   - **Android CI 根因更正**：2026-09-26 条把 Android job 持续红的根因判为「sdkmanager 刷新 Google SDK 仓库索引超时」，与实际不符。真正原因是 `android-actions/setup-android@v3` 的 `packages` 默认值含已被 Google 下架的 legacy `tools` 包，`Setup Android SDK` 直接报 `Failed to find package 'tools'` 秒挂；`cmdline-tools-version: '15859902'` 等于 action 默认值，是空操作。2026-09-27 commit b5e6682 显式 `packages: 'platform-tools'` 后 Android job 已跑通，v1.4.3 起历次 v* tag 的 Android 构建正常。**上一条 2026-09-26 的根因描述作废**，勿再按「索引超时」方向排查。
   - **许可证由 MIT 改为 Apache-2.0**（commit 4bd3c8b，LICENSE 尾部补派生来源署名）。同步对齐：README.md 徽章 `license-MIT` → `license-Apache--2.0`、package.json 增 `"license": "Apache-2.0"`、README.en.md 徽章行补 License 徽章并把 Changelog 链接文案更新为 `v1.4.3`。

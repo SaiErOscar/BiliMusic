@@ -5,6 +5,7 @@ import {
   updateAppSettings,
 } from '@/utils/storage'
 import type { AppSettings } from '@/types'
+import { platform } from '@/platform'
 
 export function useAppSettings() {
   const [settings, setSettings] = useState<AppSettings>(() => loadAppSettings())
@@ -12,9 +13,9 @@ export function useAppSettings() {
   // 首次加载时，若下载路径为空，从主进程获取系统默认音乐目录
   useEffect(() => {
     if (settings.downloadDir) return
-    const api = window.electronAPI
-    if (!api?.biliApi?.getDefaultDownloadDir) return
-    api.biliApi.getDefaultDownloadDir().then((dir: string) => {
+    const getDefaultDownloadDir = platform.download?.getDefaultDownloadDir
+    if (!getDefaultDownloadDir) return
+    getDefaultDownloadDir().then((dir: string) => {
       if (dir) {
         updateAppSettings({ downloadDir: dir })
       }

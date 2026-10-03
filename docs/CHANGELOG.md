@@ -5,6 +5,23 @@
 
 ---
 
+## v1.4.4-pre3 — 平台解耦收口：备份 / WebDAV 配置能力 + 深色原生控件配色
+
+**发布日期：2026-10-03**
+
+### 变更（重构，界面行为零变化；含一项配色修复）
+
+- **平台适配层新增两组能力**：`src/platform` 在既有 capability 之外新增
+  - `backup`：`.bmback` 备份文件的系统对话框（导出 / 读取 / 删除），桌面专属，手机端缺失即隐藏文件导入 / 导出入口；
+  - `webdavConfig`：WebDAV 连接配置的读取 / 保存 / 测试连通性，缺失时 Settings 的 WebDAV 段自然降级。
+  同时扩展三组既有能力：`auth` 增 `setCookies`（备份恢复账号写回凭证）、`storage` 增 `webdavDelete`（导入后删除源备份）、`runtime` 增 `notifyRendererReady`（渲染层挂载成功回报，防 OTA 误回滚）。签名统一复用 `Pick<Window['electronAPI'], ...>`，Electron 实现仍是 getter 动态读取，与原先 `if (window.electronAPI?.xxx)` 能力探测语义等价。
+- **调用方切换**：`BackupModal`、`utils/backup.ts`、`LoginDialog`、`useAppSettings`、`useAutoSync`、`Settings`（WebDAV 段）、`App.tsx`（渲染就绪上报）改为只依赖 `platform` 接口。
+- **解耦收口达成**：`src/` 内 `window.electronAPI` 直调由 10 处降至 0，仅剩 `src/platform/electron.ts` 的 getter 动态读取。UI 层桌面壳解耦（v1.4.4 主线）至此闭环。
+- **深色面板原生控件配色**（顺带功能项）：`.settings-select` 背景由半透明玻璃改不透明 `--color-card`，并补 `.settings-select option` 显式配色，修复深色主题下字体下拉展开列表被 Chromium 混白、选项不可见的问题；设置页两处桌面歌词字号 / 粗细滑条 `accentColor` 由未定义的 `--accent` 修正为真实主题变量 `--color-primary`，使其跟随配色主题。
+- **测试**：`tests/platform.test.ts` 新增 4 项（合计 14 项），覆盖 `backup` / `webdavConfig` 降级与直通、`storage.webdavDelete` / `runtime.notifyRendererReady` / `auth.setCookies` 扩展及老 preload 缺方法静默降级。
+
+---
+
 ## v1.4.4-pre2 — 平台解耦续环：迷你窗 / 取色器 / 更新能力收口
 
 **发布日期：2026-10-03**

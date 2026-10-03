@@ -36,7 +36,7 @@ export type PlatformDownload = Pick<
 /** 登录鉴权能力：扫码登录、Cookie 读取、登出、登录窗 */
 export type PlatformAuth = Pick<
   BiliApi,
-  'qrGenerate' | 'qrPoll' | 'getCookies' | 'logout' | 'openLoginWindow'
+  'qrGenerate' | 'qrPoll' | 'getCookies' | 'setCookies' | 'logout' | 'openLoginWindow'
 >
 
 /** B 站请求能力：主进程 net.fetch 代理（渲染层跨域/风控受限的接口走此通道） */
@@ -52,6 +52,7 @@ export type PlatformLyrics = LyricsApi
 export interface PlatformStorage {
   webdavGet?: (relPath: string) => Promise<WebdavResult>
   webdavPut?: (relPath: string, content: string, etag?: string) => Promise<WebdavResult>
+  webdavDelete?: (relPath: string) => Promise<WebdavResult>
 }
 
 /** 运行时能力：平台标识 + 鸿蒙持久化存储 */
@@ -60,6 +61,8 @@ export interface PlatformRuntime {
   platform?: string
   /** 鸿蒙等平台的主进程文件持久化存储，其他平台为 undefined */
   persistentStorage?: PersistentStorageApi
+  /** 渲染层挂载成功后回报主进程（确认 OTA 热补丁渲染包可用，避免下次启动误回滚）；非桌面环境缺失即静默跳过 */
+  notifyRendererReady?: Window['electronAPI']['notifyRendererReady']
 }
 
 /** 字体能力：枚举系统字体。字段可选，缺失时调用方回退内置保底列表（非桌面平台） */
@@ -131,6 +134,24 @@ export type PlatformUpdater = Pick<
 >
 
 /**
+ * 本地备份文件能力：导出/读取/删除 .bmback 备份文件的系统文件对话框（桌面专属）。
+ * 手机端无此能力，BackupModal 以 `hasFileApi`（saveBackupFile && openBackupFile）探测后隐藏文件导入/导出入口。
+ */
+export type PlatformBackup = Pick<
+  Window['electronAPI'],
+  'saveBackupFile' | 'openBackupFile' | 'deleteBackupFile'
+>
+
+/**
+ * WebDAV 连接配置能力：读取/保存连接配置、测试连通性（桌面专属；云同步数据读写走 storage）。
+ * 字段可选，缺失时 Settings 的 WebDAV 段自然降级（无配置即不显示已同步态）。
+ */
+export type PlatformWebdavConfig = Pick<
+  Window['electronAPI'],
+  'getWebdavConfig' | 'configureWebdav' | 'testWebdav'
+>
+
+/**
  * 平台能力聚合。每个 capability 可选，缺失即代表当前平台不支持该能力，
  * 调用方按现有 `if (platform.xxx)` 模式做能力探测与降级。
  */
@@ -148,4 +169,6 @@ export interface Platform {
   miniWindow?: PlatformMiniWindow
   colorPicker?: PlatformColorPicker
   updater?: PlatformUpdater
+  backup?: PlatformBackup
+  webdavConfig?: PlatformWebdavConfig
 }

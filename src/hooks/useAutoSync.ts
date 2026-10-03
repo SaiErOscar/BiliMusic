@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { isSyncing, runSync, WEBDAV_CONFIGURED_EVENT } from '@/utils/sync'
 import { FAVORITES_CHANGED_EVENT, PLAYLISTS_CHANGED_EVENT } from '@/utils/storage'
+import { platform } from '@/platform'
 
 const DEBOUNCE = 5000
 const PERIODIC = 15 * 60 * 1000
@@ -10,8 +11,8 @@ const STARTUP_DELAY = 3000
 // 防回环关键：同步自身写入会触发 CHANGED 事件，isSyncing() 时一律忽略，否则无限循环。
 export function useAutoSync(): void {
   useEffect(() => {
-    const api = window.electronAPI
-    if (!api?.getWebdavConfig || !api?.webdavGet) return
+    const getWebdavConfig = platform.webdavConfig?.getWebdavConfig
+    if (!getWebdavConfig || !platform.storage?.webdavGet) return
 
     let configured = false
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -32,7 +33,7 @@ export function useAutoSync(): void {
       if (!periodicTimer) periodicTimer = setInterval(sync, PERIODIC)
     }
 
-    api.getWebdavConfig().then((c) => {
+    getWebdavConfig().then((c) => {
       if (c?.configured) enable()
     })
 

@@ -30,11 +30,15 @@ export const electronPlatform: Platform = {
   },
   get storage() {
     const a = api()
-    return a?.webdavGet || a?.webdavPut ? { webdavGet: a.webdavGet, webdavPut: a.webdavPut } : undefined
+    return a?.webdavGet || a?.webdavPut || a?.webdavDelete
+      ? { webdavGet: a.webdavGet, webdavPut: a.webdavPut, webdavDelete: a.webdavDelete }
+      : undefined
   },
   get runtime() {
     const a = api()
-    return a ? { platform: a.platform, persistentStorage: a.persistentStorage } : undefined
+    return a
+      ? { platform: a.platform, persistentStorage: a.persistentStorage, notifyRendererReady: a.notifyRendererReady }
+      : undefined
   },
   /** v1.4.4-pre1：系统字体枚举（UI 层 FontSelect 用，非 Electron 走内置保底列表） */
   get fonts() {
@@ -92,6 +96,26 @@ export const electronPlatform: Platform = {
       quitAndInstall: a.quitAndInstall,
       applyRendererUpdate: a.applyRendererUpdate,
       onUpdaterEvent: a.onUpdaterEvent,
+    }
+  },
+  /** v1.4.4-pre3：本地备份文件对话框（导出/读取/删除 .bmback），手机端无此能力 */
+  get backup() {
+    const a = api()
+    if (!a) return undefined
+    return {
+      saveBackupFile: a.saveBackupFile,
+      openBackupFile: a.openBackupFile,
+      deleteBackupFile: a.deleteBackupFile,
+    }
+  },
+  /** v1.4.4-pre3：WebDAV 连接配置（读取/保存/测试），缺失时 Settings 的 WebDAV 段降级 */
+  get webdavConfig() {
+    const a = api()
+    if (!a) return undefined
+    return {
+      getWebdavConfig: a.getWebdavConfig,
+      configureWebdav: a.configureWebdav,
+      testWebdav: a.testWebdav,
     }
   },
 }

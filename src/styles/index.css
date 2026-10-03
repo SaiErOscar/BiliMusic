@@ -3929,7 +3929,7 @@ body {
   padding: 0 34px 0 12px;
   border-radius: 999px;
   border: 1px solid var(--glass-border);
-  background: var(--glass-bg-heavy);
+  background: var(--color-card); /* v1.4.4-pre3：原生 select 展开列表底色取自此 background，必须不透明，半透明玻璃会被 Chromium 混白导致深色下选项不可读 */
   color: var(--color-foreground);
   cursor: pointer;
   outline: 0;
@@ -3952,6 +3952,11 @@ body {
 .settings-select:focus {
   border-color: color-mix(in srgb, var(--color-primary) 52%, var(--glass-border));
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+
+.settings-select option {
+  background: var(--color-card);
+  color: var(--color-foreground);
 }
 
 .settings-toggle {

@@ -103,7 +103,7 @@ export default function Settings() {
   const [lastSync, setLastSync] = useState(getLastSync())
 
   useEffect(() => {
-    window.electronAPI?.getWebdavConfig?.().then((c) => {
+    platform.webdavConfig?.getWebdavConfig?.().then((c) => {
       if (c?.configured) {
         setDavUrl(c.url)
         setDavUser(c.username)
@@ -121,7 +121,7 @@ export default function Settings() {
       return false
     }
     // 密码留空表示沿用已保存的密码（主进程处理）
-    await window.electronAPI?.configureWebdav?.({ url: davUrl.trim(), username: davUser.trim(), password: davPass })
+    await platform.webdavConfig?.configureWebdav?.({ url: davUrl.trim(), username: davUser.trim(), password: davPass })
     setDavConfigured(true)
     setDavPass('')
     window.dispatchEvent(new CustomEvent(WEBDAV_CONFIGURED_EVENT)) // 通知 useAutoSync 启用
@@ -133,7 +133,7 @@ export default function Settings() {
   const handleTestWebdav = async () => {
     if (!(await persistWebdav())) return
     setSyncMessage('正在测试连接…')
-    const r = await window.electronAPI?.testWebdav?.()
+    const r = await platform.webdavConfig?.testWebdav?.()
     setSyncMessage(r?.message || '测试失败')
   }
   const runSyncTask = async (task: () => Promise<SyncResult>, busyText: string) => {
@@ -262,11 +262,11 @@ export default function Settings() {
               </div>
             </SettingsRow>
             <SettingsRow label="歌词字号" description="桌面歌词的文字大小（18-60px，桌面歌词窗内也可调）">
-              <input type="range" min={18} max={60} step={1} value={settings.lyricFontSize} onChange={(e) => setAppSettings({ lyricFontSize: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--accent, #ff375f)' }} />
+              <input type="range" min={18} max={60} step={1} value={settings.lyricFontSize} onChange={(e) => setAppSettings({ lyricFontSize: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
               <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontSize}</span>
             </SettingsRow>
             <SettingsRow label="歌词粗细" description="桌面歌词的文字粗细（400-900，桌面歌词窗内也可调）">
-              <input type="range" min={400} max={900} step={20} value={settings.lyricFontWeight} onChange={(e) => setAppSettings({ lyricFontWeight: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--accent, #ff375f)' }} />
+              <input type="range" min={400} max={900} step={20} value={settings.lyricFontWeight} onChange={(e) => setAppSettings({ lyricFontWeight: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
               <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontWeight}</span>
             </SettingsRow>
             <SettingsRow label="歌词字体" description="桌面歌词使用的字体（桌面歌词窗内也可调）">

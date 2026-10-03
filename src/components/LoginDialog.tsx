@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { X, Loader2, Smartphone, CheckCircle2, AlertCircle, RefreshCw, KeyRound } from 'lucide-react'
 import QRCode from 'qrcode'
 import { generateQrCode, pollQrCode } from '@/services/api'
+import { platform } from '@/platform'
 
 type QrStatus = 'loading' | 'waiting' | 'scanned' | 'success' | 'expired' | 'error'
 
@@ -25,7 +26,7 @@ export default function LoginDialog({ onClose, onSuccess }: LoginDialogProps) {
     setWebLogging(true)
     setWebError('')
     try {
-      const res = await window.electronAPI?.biliApi?.openLoginWindow()
+      const res = await platform.auth?.openLoginWindow?.()
       if (res?.success) {
         setStatus('success')
         setTimeout(() => onSuccess(), 800)

@@ -8,6 +8,7 @@
 // 口令不落盘、不存储：忘记即无法解密。
 
 import type { AppSettings, DownloadRecord, Playlist, ThemeMode, Tombstone, Track } from '@/types'
+import { platform } from '@/platform'
 import {
   DEFAULT_APP_SETTINGS,
   DOWNLOADS_CHANGED_EVENT,
@@ -141,7 +142,7 @@ async function deriveKey(password: string, salt: Uint8Array, iterations: number)
 export async function collectBackup(): Promise<BackupPayload> {
   let account: BackupAccount | null = null
   try {
-    const cookies = await window.electronAPI?.biliApi?.getCookies?.()
+    const cookies = await platform.auth?.getCookies?.()
     let cachedUser: { username?: string; avatar?: string } = {}
     try {
       const raw = localStorage.getItem('bilimusic_user')
@@ -327,7 +328,7 @@ export async function restoreBackupAccount(account: BackupAccount | null): Promi
   if (!account || !account.sessdata || !account.dedeUserId) {
     return { ok: false, loginVerified: false, message: '备份中不含可用的登录凭证' }
   }
-  const setCookies = window.electronAPI?.biliApi?.setCookies
+  const setCookies = platform.auth?.setCookies
   if (!setCookies) {
     return { ok: false, loginVerified: false, message: '当前环境不支持写入登录凭证' }
   }

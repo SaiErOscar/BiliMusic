@@ -260,3 +260,66 @@ describe('platform/electron 能力包装（v1.4.4-pre2 新增 miniWindow/colorPi
     expect(calls).toEqual(['check', 'quit', 'reload', 'sub', 'unsub'])
   })
 })
+
+describe('platform/electron 能力包装（v1.4.4-pre3 新增 backup/webdavConfig 及 auth/storage/runtime 扩展）', () => {
+  it('无 electronAPI 时 backup/webdavConfig 不可用，调用方自然走降级分支', () => {
+    expect(electronPlatform.backup).toBeUndefined()
+    expect(electronPlatform.webdavConfig).toBeUndefined()
+    expect(electronPlatform.storage).toBeUndefined()
+    expect(electronPlatform.auth).toBeUndefined()
+  })
+
+  it('backup 直通本地备份文件对话框（导出/读取/删除 .bmback）', async () => {
+    const calls: string[] = []
+    setElectronApi({
+      platform: 'win32',
+      saveBackupFile: (content: string) => { calls.push(`save:${content}`); return Promise.resolve({ ok: true, path: 'C:/x.bmback' }) },
+      openBackupFile: () => { calls.push('open'); return Promise.resolve({ ok: true, content: 'RAW' }) },
+      deleteBackupFile: (fp: string) => { calls.push(`del:${fp}`); return Promise.resolve({ ok: true }) },
+    })
+    const backup = electronPlatform.backup
+    expect(backup).toBeDefined()
+    await expect(backup!.saveBackupFile('DATA')).resolves.toMatchObject({ ok: true })
+    await expect(backup!.openBackupFile()).resolves.toMatchObject({ content: 'RAW' })
+    await expect(backup!.deleteBackupFile('C:/x.bmback')).resolves.toMatchObject({ ok: true })
+    expect(calls).toEqual(['save:DATA', 'open', 'del:C:/x.bmback'])
+  })
+
+  it('webdavConfig 直通读取/保存连接配置与测试连通性', async () => {
+    const calls: string[] = []
+    setElectronApi({
+      platform: 'win32',
+      getWebdavConfig: () => Promise.resolve({ configured: true, url: 'https://dav', username: 'u' }),
+      configureWebdav: (cfg: unknown) => { calls.push('cfg'); return Promise.resolve({ ok: true }) },
+      testWebdav: () => { calls.push('test'); return Promise.resolve({ ok: true, message: '连接成功' }) },
+    })
+    const wc = electronPlatform.webdavConfig
+    expect(wc).toBeDefined()
+    await expect(wc!.getWebdavConfig?.()).resolves.toMatchObject({ configured: true })
+    await wc!.configureWebdav?.({ url: 'https://dav', username: 'u', password: 'p' })
+    await expect(wc!.testWebdav?.()).resolves.toMatchObject({ ok: true })
+    expect(calls).toEqual(['cfg', 'test'])
+  })
+
+  it('storage 现含 webdavDelete，runtime 现含 notifyRendererReady，auth 现含 setCookies', async () => {
+    const calls: string[] = []
+    setElectronApi({
+      platform: 'win32',
+      webdavGet: (r: string) => Promise.resolve({ ok: true }),
+      webdavDelete: (r: string) => { calls.push(`deldav:${r}`); return Promise.resolve({ ok: true }) },
+      notifyRendererReady: () => calls.push('ready'),
+      biliApi: { setCookies: (p: unknown) => { calls.push('setck'); return Promise.resolve({ success: true }) } },
+    })
+    await expect(electronPlatform.storage?.webdavDelete?.('b.bmback')).resolves.toMatchObject({ ok: true })
+    expect(electronPlatform.runtime?.notifyRendererReady).toBeTypeOf('function')
+    electronPlatform.runtime?.notifyRendererReady?.()
+    await expect(electronPlatform.auth?.setCookies?.({ sessdata: 's', biliJct: 'j', dedeUserId: 'd' })).resolves.toMatchObject({ success: true })
+    expect(calls).toEqual(['deldav:b.bmback', 'ready', 'setck'])
+
+    // 老 preload 未暴露 webdavDelete/notifyRendererReady 时对应字段 undefined，可选链静默降级
+    setElectronApi({ platform: 'win32', webdavGet: () => Promise.resolve({ ok: true }) })
+    expect(electronPlatform.storage?.webdavDelete).toBeUndefined()
+    expect(electronPlatform.runtime?.notifyRendererReady).toBeUndefined()
+    expect(electronPlatform.runtime?.notifyRendererReady?.()).toBeUndefined()
+  })
+})

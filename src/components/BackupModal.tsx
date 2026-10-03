@@ -12,6 +12,7 @@ import {
   type ApplyResult,
 } from '@/utils/backup'
 import { useAuth } from '@/contexts/AuthContext'
+import { platform } from '@/platform'
 
 const BACKUP_FILE = 'biliMusic-backup.bmback'
 
@@ -65,8 +66,7 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
   const [deleteSource, setDeleteSource] = useState(true)
   const [pendingSource, setPendingSource] = useState<{ kind: 'file'; path: string } | { kind: 'webdav' } | null>(null)
 
-  const api = window.electronAPI
-  const hasFileApi = Boolean(api?.saveBackupFile && api?.openBackupFile)
+  const hasFileApi = Boolean(platform.backup?.saveBackupFile && platform.backup?.openBackupFile)
 
   // ===== 导出 =====
   const startExport = (target: 'file' | 'webdav') => { setExportTarget(target); setPassword(''); setConfirmPw(''); setPhase({ name: 'export', step: 'privacy' }) }
@@ -81,11 +81,11 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
       const payload = await collectBackup()
       const fileText = await buildBackupFile(payload, password)
       if (viaWebdav) {
-        const put = await api?.webdavPut?.(BACKUP_FILE, fileText)
+        const put = await platform.storage?.webdavPut?.(BACKUP_FILE, fileText)
         if (!put?.ok) throw new Error(put?.message || '上传 WebDAV 失败')
         setResult({ ok: true, message: `已同步到 WebDAV（${BACKUP_FILE}）` })
       } else {
-        const save = await api?.saveBackupFile?.(fileText)
+        const save = await platform.backup?.saveBackupFile?.(fileText)
         if (save?.canceled) { setPhase({ name: 'menu' }); return }
         if (!save?.ok) throw new Error(save?.message || '写入文件失败')
         setResult({ ok: true, message: `已导出到：${save.path || '所选位置'}` })
@@ -97,7 +97,7 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
     } finally {
       setBusy(false)
     }
-  }, [password, confirmPw, api])
+  }, [password, confirmPw])
 
   // ===== 导入 =====
   const startImport = useCallback(async (viaWebdav: boolean) => {
@@ -106,13 +106,13 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
       let fileText: string
       if (viaWebdav) {
         setBusy(true)
-        const get = await api?.webdavGet?.(BACKUP_FILE)
+        const get = await platform.storage?.webdavGet?.(BACKUP_FILE)
         if (!get?.ok || !get.content) throw new Error(get?.message || 'WebDAV 上未找到备份文件')
         fileText = get.content
         setPendingSource({ kind: 'webdav' })
       } else {
         setBusy(true)
-        const open = await api?.openBackupFile?.()
+        const open = await platform.backup?.openBackupFile?.()
         if (open?.canceled) return
         if (!open?.ok || !open.content) throw new Error(open?.message || '读取文件失败')
         fileText = open.content
@@ -127,7 +127,7 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
     } finally {
       setBusy(false)
     }
-  }, [api])
+  }, [])
 
   const doImportDecrypt = useCallback(async () => {
     const fileText = pendingText
@@ -137,7 +137,7 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
       const payload = await decryptBackup(fileText, password)
       setPendingPayload(payload)
       // 账号比对
-      const cur = await api?.biliApi?.getCookies?.()
+      const cur = await platform.auth?.getCookies?.()
       const backupUid = payload.account?.dedeUserId || ''
       const currentUid = cur?.dedeUserId || ''
       const same = !!backupUid && backupUid === currentUid
@@ -154,7 +154,7 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
     } finally {
       setBusy(false)
     }
-  }, [password, pendingText, api, curName])
+  }, [password, pendingText, curName])
 
   const finishImport = useCallback(async (switchAccount: boolean) => {
     const payload = pendingPayload
@@ -186,10 +186,10 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
       // v1.4.3-pre7：导入成功后按勾选删除源备份（默认删除，降低隐私泄露风险）
       if (deleteSource && pendingSource) {
         if (pendingSource.kind === 'webdav') {
-          const d = await api?.webdavDelete?.(BACKUP_FILE)
+          const d = await platform.storage?.webdavDelete?.(BACKUP_FILE)
           notes.push(d?.ok ? '已删除 WebDAV 上的备份文件' : `WebDAV 备份删除失败：${d?.message || '未知错误'}`)
         } else if (pendingSource.path) {
-          const d = await api?.deleteBackupFile?.(pendingSource.path)
+          const d = await platform.backup?.deleteBackupFile?.(pendingSource.path)
           notes.push(d?.ok ? '已删除本地备份文件' : `本地备份删除失败：${d?.message || '未知错误'}`)
         }
       } else if (!deleteSource) {
@@ -208,7 +208,7 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
     } finally {
       setBusy(false)
     }
-  }, [pendingPayload, api, checkLogin, deleteSource, pendingSource])
+  }, [pendingPayload, checkLogin, deleteSource, pendingSource])
 
   const cancel = () => { setPhase({ name: 'menu' }); setError(''); setPassword('') }
 
