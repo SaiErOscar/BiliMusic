@@ -262,19 +262,47 @@ function runFfmpeg(args: string[], onTime?: (seconds: number) => void): Promise<
   })
 }
 
-/** 检测编码器可用性：优先 NVENC，未检出回退 libx264 */
+/**
+ * 检测编码器可用性：优先 NVENC，不可用时回退 libx264。
+ * 注意不能只看 `-encoders` 列表：静态 build 总会列出 h264_nvenc，但无 NVIDIA
+ * 驱动的机器上编码器初始化直接崩溃（Cannot load nvcuda.dll，exit 139 段错误），
+ * 必须真实试编 0.1 秒以 exit code 为准。
+ */
 async function pickVideoEncoderArgs(): Promise<string[]> {
-  try {
-    const out = await new Promise<string>((resolve, reject) => {
-      const proc = trackChild(spawn(ffmpegPath, ['-hide_banner', '-encoders'], { windowsHide: true }))
-      let stdout = ''
-      proc.stdout?.on('data', (c: Buffer) => { stdout += c.toString() })
-      proc.on('error', reject)
-      proc.on('exit', (code) => (code === 0 ? resolve(stdout) : reject(new Error(`exit ${code}`))))
-    })
-    if (out.includes('h264_nvenc')) return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '23']
-  } catch { /* 检测失败走软编 */ }
+  const probeOk = await new Promise<boolean>((resolve) => {
+    try {
+      const proc = trackChild(spawn(ffmpegPath, [
+        '-hide_banner', '-loglevel', 'error',
+        '-f', 'lavfi', '-i', 'color=size=320x240:duration=0.1:rate=10',
+        '-c:v', 'h264_nvenc', '-f', 'null', '-',
+      ], { windowsHide: true }))
+      proc.on('error', () => resolve(false))
+      proc.on('exit', (code) => resolve(code === 0))
+    } catch {
+      resolve(false)
+    }
+  })
+  if (probeOk) return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '23']
   return ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20']
+}
+
+/** 用 ffmpeg 读媒体文件时长（秒）；失败返回 0 */
+function probeDuration(filePath: string): Promise<number> {
+  return new Promise((resolve) => {
+    try {
+      const proc = trackChild(spawn(ffmpegPath, ['-i', filePath, '-f', 'null', '-'], { windowsHide: true }))
+      let stderr = ''
+      proc.stderr?.on('data', (c: Buffer) => { stderr += c.toString() })
+      proc.on('error', () => resolve(0))
+      // 退出码非 0 是预期的（无输出文件），从 stderr 的 Duration= 行解析
+      proc.on('exit', () => {
+        const m = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/)
+        resolve(m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : 0)
+      })
+    } catch {
+      resolve(0)
+    }
+  })
 }
 
 /** 找一个可用的中文界面字体给 drawtext；找不到返回 null（跳过 drawtext，视频没有时间数字） */
@@ -392,19 +420,33 @@ async function captureKeyframes(job: MvExportJob, payload: MvExportPayload, plan
   const frames: string[] = []
   try {
     for (let i = 0; i < plans.length; i++) {
-      if (job.cancelRequested) throw new Error('已取消')
+      if (job.cancelRequested || win.isDestroyed()) throw new Error('已取消')
       const plan = plans[i]
       state.windowStart = plan.windowStart
       state.currentIdx = plan.currentIdx
       await win.webContents.executeJavaScript(`window.__mvSetState(${JSON.stringify(state)}); 'ok'`)
-      // 强制重绘并等一帧 paint 再捕获：offscreen 窗口 capturePage 可能拿到旧帧
+      // 强制重绘并等一帧 paint 再捕获：offscreen 窗口 capturePage 可能拿到旧帧。
+      // 定时器是兜底路径，paint 先到就 clearTimeout；窗口可能已被销毁（取消/异常），
+      // 定时器回调必须先判 isDestroyed，否则「Object has been destroyed」未捕获异常直接炸主进程
       const painted = new Promise<void>((resolve) => {
-        const onPaint = () => { win.webContents.off('paint', onPaint); resolve() }
+        const timer = setTimeout(() => {
+          try {
+            if (!win.isDestroyed()) win.webContents.off('paint', onPaint)
+          } catch { /* 窗口已销毁 */ }
+          resolve()
+        }, 150)
+        const onPaint = () => {
+          clearTimeout(timer)
+          try {
+            if (!win.isDestroyed()) win.webContents.off('paint', onPaint)
+          } catch { /* 窗口已销毁 */ }
+          resolve()
+        }
         win.webContents.on('paint', onPaint)
-        setTimeout(() => { win.webContents.off('paint', onPaint); resolve() }, 150)
       })
       win.webContents.invalidate()
       await painted
+      if (win.isDestroyed()) throw new Error('已取消')
       const img0 = await win.webContents.capturePage()
       // 高 DPI 屏幕离屏缓冲按 deviceScaleFactor 放大，统一缩回目标分辨率
       const size = img0.getSize()
@@ -435,7 +477,6 @@ function sendProgress(sender: Electron.WebContents | null, progress: MvExportPro
 }
 
 async function runExport(payload: MvExportPayload, sender: Electron.WebContents | null): Promise<{ filePath: string }> {
-  const duration = Math.max(1, payload.duration || 0)
   const outDir = path.join(payload.outputDir || path.join(app.getPath('userData'), 'downloads'), 'MV')
   await fs.mkdir(outDir, { recursive: true })
   const safeName = (payload.title || 'mv').replace(/[\\/:*?"<>|]/g, '_').trim() || 'mv'
@@ -456,6 +497,13 @@ async function runExport(payload: MvExportPayload, sender: Electron.WebContents 
         sendProgress(sender, { phase: 'audio', percent: p, message: '下载音频' })
       }
     })
+
+    // 时长兜底：渲染层 track.duration 可能为 0（如 avid/cid 回退源），以音频实测为准
+    let duration = Math.max(1, payload.duration || 0)
+    if (!payload.duration || payload.duration < 1) {
+      const probed = await probeDuration(audioPath)
+      if (probed > 0) duration = probed
+    }
 
     // 2. 渲染关键帧
     const plans = buildKeyframePlan(payload.lyrics, duration)
@@ -534,7 +582,9 @@ export function registerMvExportHandlers() {
       const { filePath } = await runExport(payload, event.sender)
       return { ok: true, filePath }
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
+      // 取消路径下离屏窗口被 destroy，循环内调用会以「Object has been destroyed」冒泡，归一为「已取消」
+      const raw = e instanceof Error ? e.message : String(e)
+      const message = currentJob?.cancelRequested && raw.includes('Object has been destroyed') ? '已取消' : raw
       console.warn('[mvExport] export failed:', message)
       if (message !== '已取消') {
         sendProgress(event.sender, { phase: 'done', percent: 100, message })
