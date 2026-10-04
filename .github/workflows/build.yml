@@ -144,6 +144,11 @@ jobs:
         working-directory: android
         run: bash gradlew assembleRelease --no-daemon
 
+      - name: Build release AAB
+        if: env.HAS_RELEASE_KEYSTORE == 'true'
+        working-directory: android
+        run: bash gradlew bundleRelease --no-daemon
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -158,6 +163,15 @@ jobs:
         with:
           name: android-release-apk
           path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload release AAB
+        if: env.HAS_RELEASE_KEYSTORE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-aab
+          path: android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
           retention-days: 14
 
@@ -181,6 +195,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: android-release-apk
+          path: release-assets
+
+      - name: Download Android release AAB
+        if: env.HAS_RELEASE_KEYSTORE == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: android-release-aab
           path: release-assets
 
       - name: Publish release assets
