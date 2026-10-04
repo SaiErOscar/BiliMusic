@@ -10,6 +10,7 @@ import { registerMiniWindowHandlers, onMainWindowActivityChanged, destroyLyricWi
 import { registerSystemFontsHandlers } from './systemFonts'
 import { registerColorPickerHandlers } from './colorPicker'
 import { registerBackupHandlers } from './backup'
+import { registerMvExportHandlers, killMvExportChildren } from './mvExport'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -679,6 +680,7 @@ app.whenReady().then(() => {
   registerSystemFontsHandlers()
   registerColorPickerHandlers()
   registerBackupHandlers()
+  registerMvExportHandlers()
   registerMiniWindowHandlers({
     getMainWindow: () => mainWindow,
     // 歌词可见性变化 → 刷新托盘状态的 lyricVisible 并回推托盘窗口
@@ -748,6 +750,7 @@ app.on('will-quit', (event) => {
   console.log('[quit] will-quit：终止子进程')
   try {
     killAllChildren()
+    killMvExportChildren()
   } catch (err) {
     console.log('[quit] 子进程清理异常：', err instanceof Error ? err.message : String(err))
   }

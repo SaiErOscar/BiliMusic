@@ -13,6 +13,32 @@ export interface DownloadOptions {
   lyricContent?: string
 }
 
+/** v1.4.6 MV 导出请求载荷（渲染层解析好音源/歌词后交给主进程） */
+export interface MvExportPayload {
+  title: string
+  artist: string
+  audioUrl: string
+  coverUrl: string
+  duration: number
+  lyrics: { time: number; text: string }[]
+  watermark: boolean
+  outputDir?: string
+}
+
+export interface MvExportProgress {
+  phase: 'audio' | 'render' | 'compose' | 'done'
+  percent: number
+  message?: string
+  filePath?: string
+}
+
+/** v1.4.6 MV 导出能力（桌面端专属，electronAPI 平铺暴露） */
+export interface MvExportApi {
+  exportMvSingle: (payload: MvExportPayload) => Promise<{ ok: boolean; filePath?: string; message?: string }>
+  cancelMvExport: () => Promise<{ ok: boolean }>
+  onMvExportProgress: (callback: (progress: MvExportProgress) => void) => () => void
+}
+
 export interface BiliApi {
   downloadAudio: (audioUrl: string, filename: string, customDir?: string, options?: DownloadOptions) => Promise<{
     filePath: string
@@ -250,6 +276,9 @@ declare global {
       persistentStorage?: PersistentStorageApi
       biliApi: BiliApi
       lyricsApi: LyricsApi
+      exportMvSingle?: MvExportApi['exportMvSingle']
+      cancelMvExport?: MvExportApi['cancelMvExport']
+      onMvExportProgress?: MvExportApi['onMvExportProgress']
     }
   }
 }

@@ -151,6 +151,16 @@ export type PlatformWebdavConfig = Pick<
   'getWebdavConfig' | 'configureWebdav' | 'testWebdav'
 >
 
+
+/**
+ * MV 导出能力（v1.4.6，桌面专属）：单首播放界面 MP4 导出、取消与进度订阅。
+ * 手机端无 ffmpeg/离屏渲染链路，缺失时调用方隐藏「导出 MV」入口。
+ */
+export type PlatformMvExport = Pick<
+  Window['electronAPI'],
+  'exportMvSingle' | 'cancelMvExport' | 'onMvExportProgress'
+>
+
 /**
  * 平台能力聚合。每个 capability 可选，缺失即代表当前平台不支持该能力，
  * 调用方按现有 `if (platform.xxx)` 模式做能力探测与降级。
@@ -171,4 +181,5 @@ export interface Platform {
   updater?: PlatformUpdater
   backup?: PlatformBackup
   webdavConfig?: PlatformWebdavConfig
+  mvExport?: PlatformMvExport
 }

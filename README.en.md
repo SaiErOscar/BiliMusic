@@ -18,7 +18,7 @@
     <img alt="Electron" src="https://img.shields.io/badge/Electron-36-47848F?style=for-the-badge&logo=electron&logoColor=fff" />
     <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?style=for-the-badge&logo=vite&logoColor=fff" />
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=fff" />
-    <img alt="Version" src="https://img.shields.io/badge/version-1.4.4-30d158?style=for-the-badge" />
+    <img alt="Version" src="https://img.shields.io/badge/version-1.4.6--pre1-30d158?style=for-the-badge" />
     <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-30d158?style=for-the-badge" />
   </p>
 </div>

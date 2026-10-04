@@ -1,10 +1,11 @@
 import { useState, useCallback } from 'react'
-import { Download, Loader2, Check, Music, FileText, Edit3, FileMusic, Tag } from 'lucide-react'
+import { Download, Loader2, Check, Music, FileText, Edit3, FileMusic, Tag, Clapperboard } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { usePlayer } from '@/contexts/PlayerContext'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { downloadTrack } from '@/services/api'
 import { cleanTitle, getLyricForTrack, formatLrc } from '@/services/lyrics'
+import { exportTrackMv, isMvExportSupported } from '@/services/mvExport'
 import { saveDownloadRecord } from '@/utils/storage'
 
 import type { DownloadFormat } from '@/types'
@@ -45,6 +46,9 @@ export default function DownloadButton({
   const [customName, setCustomName] = useState('')
   const [includeLyric, setIncludeLyric] = useState(true)
   const [embedMeta, setEmbedMeta] = useState(true)
+  // v1.4.6 MV 导出状态（桌面端专属）
+  const [mvExporting, setMvExporting] = useState(false)
+  const [mvStatus, setMvStatus] = useState('')
 
   const actualTrack = player.currentTrack
   const actualBvid = bvid || actualTrack?.bvid || actualTrack?.id
@@ -142,6 +146,47 @@ export default function DownloadButton({
     }
   }, [actualBvid, actualAid, actualCid, actualId, actualTrack, actualTitle, getFilename, qualityPref, settings.downloadDir, includeLyric, embedMeta])
 
+  // v1.4.6 导出播放界面 MV（离屏渲染 + ffmpeg 合成，主进程完成）
+  const doExportMv = useCallback(async () => {
+    if (!actualBvid) return
+    setMenuOpen(false)
+    setMvExporting(true)
+    setError('')
+    setDone(false)
+    setMvStatus('准备中...')
+    const trackForMv = actualTrack || {
+      id: actualId!,
+      title: actualTitle,
+      artist: '',
+      coverUrl: '',
+      duration: 0,
+      videoUrl: '',
+      bvid: actualBvid,
+      aid: actualAid,
+      cid: actualCid,
+      playCount: 0,
+      isLiked: false,
+    }
+    try {
+      await exportTrackMv(trackForMv, {
+        quality: qualityPref,
+        watermark: settings.mvWatermark,
+        outputDir: settings.downloadDir || undefined,
+        onProgress: (p) => {
+          setMvStatus(p.message ? `${p.message} ${p.percent}%` : `${p.percent}%`)
+        },
+      })
+      setDone(true)
+      setTimeout(() => setDone(false), 2500)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'MV 导出失败')
+      setTimeout(() => setError(''), 5000)
+    } finally {
+      setMvExporting(false)
+      setMvStatus('')
+    }
+  }, [actualBvid, actualAid, actualCid, actualId, actualTrack, actualTitle, qualityPref, settings.downloadDir, settings.mvWatermark])
+
   if (!actualBvid || !actualId) return null
 
   return (
@@ -149,24 +194,24 @@ export default function DownloadButton({
       {variant === 'icon' ? (
         <button
           className="track-action-button"
-          title={error || (done ? '下载完成' : downloading ? '下载中...' : '下载')}
+          title={error || (done ? '下载完成' : mvExporting ? `导出 MV 中：${mvStatus}` : downloading ? '下载中...' : '下载')}
           onClick={() => setMenuOpen(o => !o)}
-          disabled={downloading}
+          disabled={downloading || mvExporting}
           style={{ color: error ? '#ff375f' : done ? '#30d158' : undefined }}
         >
-          {downloading ? <Loader2 size={size} className="spin" /> :
+          {downloading || mvExporting ? <Loader2 size={size} className="spin" /> :
            done ? <Check size={size} /> :
            <Download size={size} />}
         </button>
       ) : (
         <button
           className="now-playing-round"
-          title={error || (done ? '下载完成' : downloading ? '下载中...' : '下载')}
+          title={error || (done ? '下载完成' : mvExporting ? `导出 MV 中：${mvStatus}` : downloading ? '下载中...' : '下载')}
           onClick={() => setMenuOpen(o => !o)}
-          disabled={downloading}
+          disabled={downloading || mvExporting}
           style={{ color: error ? '#ff375f' : done ? '#30d158' : undefined }}
         >
-          {downloading ? <Loader2 size={size} className="spin" /> :
+          {downloading || mvExporting ? <Loader2 size={size} className="spin" /> :
            done ? <Check size={size} /> :
            <Download size={size} />}
         </button>
@@ -378,10 +423,63 @@ export default function DownloadButton({
                   含画面+声音
                 </span>
               </button>
+
+              {/* v1.4.6 导出播放界面 MV（仅桌面端显示） */}
+              {isMvExportSupported() && (
+                <>
+                  <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 0' }} />
+                  <button
+                    type="button"
+                    onClick={doExportMv}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      width: '100%',
+                      padding: '8px 10px',
+                      border: 'none',
+                      borderRadius: 8,
+                      background: 'transparent',
+                      color: 'var(--color-foreground)',
+                      fontSize: 13,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <Clapperboard size={14} />
+                    导出 MV
+                    <span style={{ marginLeft: 'auto', color: 'var(--color-muted)', fontSize: 11 }}>
+                      播放界面视频
+                    </span>
+                  </button>
+                </>
+              )}
             </motion.div>
           </>
         )}
       </AnimatePresence>
+
+      {mvExporting && mvStatus && (
+        <span style={{
+          position: 'absolute',
+          bottom: '100%',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          marginBottom: 4,
+          padding: '4px 10px',
+          borderRadius: 8,
+          background: 'rgba(30, 30, 34, 0.92)',
+          color: '#fff',
+          fontSize: 11,
+          whiteSpace: 'nowrap',
+          pointerEvents: 'none',
+          zIndex: 101,
+        }}>
+          导出 MV：{mvStatus}
+        </span>
+      )}
 
       {error && (
         <span style={{

@@ -73,6 +73,8 @@ export interface AppSettings {
   // 手动色永不被自动色覆盖，关闭开关即回到开启前的手动色；歌词窗按「开关开且自动色就绪」时显示自动色。
   autoLyricTextColor: string
   autoLyricControlColor: string
+  // v1.4.6 MV 导出：画面角落 BiliMusic 水印开关（默认开）
+  mvWatermark: boolean
 }
 
 export type NavItem = {

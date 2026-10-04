@@ -322,4 +322,26 @@ describe('platform/electron 能力包装（v1.4.4-pre3 新增 backup/webdavConfi
     expect(electronPlatform.runtime?.notifyRendererReady).toBeUndefined()
     expect(electronPlatform.runtime?.notifyRendererReady?.()).toBeUndefined()
   })
+
+  it('mvExport 直通导出/取消/进度订阅（v1.4.6），缺失时 undefined 降级', async () => {
+    const calls: string[] = []
+    setElectronApi({
+      platform: 'win32',
+      exportMvSingle: (payload: unknown) => { calls.push(`export:${JSON.stringify(payload)}`); return Promise.resolve({ ok: true, filePath: 'D:/MV/a.mp4' }) },
+      cancelMvExport: () => { calls.push('cancel'); return Promise.resolve({ ok: true }) },
+      onMvExportProgress: (cb: (p: unknown) => void) => { cb({ phase: 'render', percent: 50 }); return () => calls.push('unsub') },
+    })
+    const mv = electronPlatform.mvExport
+    expect(mv).toBeDefined()
+    await expect(mv!.exportMvSingle({ title: 'a', artist: '', audioUrl: 'https://x', coverUrl: '', duration: 10, lyrics: [], watermark: true }))
+      .resolves.toMatchObject({ ok: true, filePath: 'D:/MV/a.mp4' })
+    await mv!.cancelMvExport()
+    mv!.onMvExportProgress(() => {})
+    expect(calls[0]).toContain('"title":"a"')
+    expect(calls).toContain('cancel')
+
+    // 老 preload 无 mvExport 命名空间时 capability 为 undefined，调用方隐藏入口
+    setElectronApi({ platform: 'win32' })
+    expect(electronPlatform.mvExport).toBeUndefined()
+  })
 })

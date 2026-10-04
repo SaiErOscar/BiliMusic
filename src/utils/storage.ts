@@ -37,6 +37,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   // 空串 = 尚未算出自动色，歌词窗兜底用手动色；避免初次开开关时闪一下默认色
   autoLyricTextColor: '',
   autoLyricControlColor: '',
+  // v1.4.6 MV 导出：是否在画面角落加 BiliMusic 水印
+  mvWatermark: true,
 }
 
 function notifySettingsChanged() {

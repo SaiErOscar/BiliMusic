@@ -31,6 +31,7 @@ import ColorField from '@/components/ColorField'
 import { useTheme } from '@/hooks/useTheme'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { selectDownloadFolder } from '@/services/api'
+import { isMvExportSupported } from '@/services/mvExport'
 import { platform } from '@/platform'
 import { useAuth } from '@/contexts/AuthContext'
 import { createPlaylistsExport, importPlaylistsFromText } from '@/utils/storage'
@@ -310,6 +311,11 @@ export default function Settings() {
                 打开
               </button>
             </SettingsRow>
+            {isMvExportSupported() && (
+              <SettingsRow label="MV 导出水印" description="导出播放界面 MV 时在画面角落加 BiliMusic 角标">
+                <ToggleSwitch checked={settings.mvWatermark} onChange={() => setAppSettings({ mvWatermark: !settings.mvWatermark })} />
+              </SettingsRow>
+            )}
           </SettingsGroup>
 
           <SettingsGroup title="歌单云同步" icon={<Cloud size={20} />}>

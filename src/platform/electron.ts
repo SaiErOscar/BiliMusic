@@ -118,4 +118,15 @@ export const electronPlatform: Platform = {
       testWebdav: a.testWebdav,
     }
   },
+  /** v1.4.6：MV 导出（离屏渲染 + ffmpeg 稀疏合成），桌面端专属 */
+  get mvExport() {
+    const a = api()
+    return a?.exportMvSingle || a?.onMvExportProgress
+      ? {
+          exportMvSingle: a.exportMvSingle,
+          cancelMvExport: a.cancelMvExport,
+          onMvExportProgress: a.onMvExportProgress,
+        }
+      : undefined
+  },
 }
