@@ -138,12 +138,17 @@ function setHiddenWindows(p: string): Promise<void> {
 async function markFolderPurpose(downloadDir: string, kind: 'video' | 'audio') {
   try {
     if (path.resolve(downloadDir) === path.resolve(defaultDownloadDir())) return
+    // 防路径穿越：downloadDir 来自渲染层设置，必须是不含空字节与相对上跳的绝对路径才允许写入标记
+    if (!path.isAbsolute(downloadDir) || downloadDir.includes('\0') || /(^|[\\/])\.\.($|[\\/])/.test(downloadDir)) return
     const entries = await fs.readdir(downloadDir)
     const markers = entries.filter((e) => e === '.bilimusic-video' || e === '.bilimusic-audio')
     if (markers.length > 0) return // 已有用途标记，不重复
     const meaningful = entries.filter((e) => e !== '.tmp' && !e.startsWith('.bilimusic-'))
     if (meaningful.length > 0) return // 非空文件夹，不标记
-    const marker = path.join(downloadDir, kind === 'video' ? '.bilimusic-video' : '.bilimusic-audio')
+    // realpath 收敛：目录不存在（穿越目标）会抛错落入 catch，符号链接解析到真实位置，
+    // 后续 writeFile 只能在该真实目录内创建固定文件名的标记
+    const realDir = await fs.realpath(downloadDir)
+    const marker = path.join(realDir, kind === 'video' ? '.bilimusic-video' : '.bilimusic-audio')
     await fs.writeFile(marker, '', 'utf-8')
     await setHiddenWindows(marker)
     console.log(`[biliApi] Marked folder as ${kind}:`, downloadDir)
