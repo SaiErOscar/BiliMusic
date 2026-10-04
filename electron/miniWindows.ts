@@ -153,6 +153,11 @@ function syncAutoColor() {
 }
 let lyricWindow: BrowserWindow | null = null
 let getMainWindow: (() => BrowserWindow | null) | null = null
+// v1.4.5-pre2 桌面歌词窗显隐动画：淡出计时窗口内 lyricHiding=true（逻辑上视为已隐藏，
+// 托盘/按钮即时更新），到点才真正 win.hide()。单一 pendingHideTimer 兼作快速连切的防抖。
+let lyricHiding = false
+let pendingHideTimer: ReturnType<typeof setTimeout> | null = null
+const HIDE_ANIM_MS = 220 // 须 ≥ CSS .wrap 淡出时长，留缓冲确保动画播完再物理隐藏
 
 // ===== 桌面歌词显示状态机（v1.3.1）=====
 // 拆分“用户意图”与“实际可见性”：
@@ -287,7 +292,8 @@ function getLyricHtml() {
   body.light { color-scheme: light; }
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif; }
-  .wrap { display: flex; flex-direction: column; height: 100%; padding: 4px 14px; position: relative; -webkit-app-region: drag; }
+  .wrap { display: flex; flex-direction: column; height: 100%; padding: 4px 14px; position: relative; -webkit-app-region: drag; opacity: 0; transform: translateY(10px); transition: opacity .2s ease, transform .2s ease; will-change: opacity, transform; }
+  .wrap.shown { opacity: 1; transform: translateY(0); }
   .wrap button, .wrap input, #appearPanel { -webkit-app-region: no-drag; }
   .close {
     position: absolute; top: 6px; right: 8px; z-index: 10;
@@ -395,7 +401,12 @@ function getLyricHtml() {
     </div>
   </div>
   <script>
-    const { onState, sendCommand } = window.miniAPI
+    const { onState, sendCommand, onVisibility } = window.miniAPI
+    // v1.4.5-pre2 显隐动画：主进程下发 show/hide，切换 .wrap.shown 触发 CSS 淡入/淡出
+    if (onVisibility) onVisibility((v) => {
+      const w = document.querySelector('.wrap')
+      if (w) w.classList.toggle('shown', Boolean(v && v.show))
+    })
     let state = { hasTrack:false, title:'', artist:'', coverUrl:'', isPlaying:false, volume:80, isMuted:false, progress:0, duration:0, lyricLines:[], synced:false, theme:'dark', lyricTextColor:'#ffffff', lyricControlColor:'#ff375f', lyricFontSize:30, lyricFontWeight:820, lyricFontFamily:'system-ui', repeatMode:'none', autoTextColor:false, autoControlColor:false, autoLyricTextColor:'', autoLyricControlColor:'', noLyric:false }
     const $ = (id) => document.getElementById(id)
     const volInput = $('volume')
@@ -708,8 +719,18 @@ function createLyricWindow() {
 export function showLyricWindow() {
   const win = createLyricWindow()
   if (!win) return
+  // 取消待执行的淡出隐藏，回到"可见"意图
+  if (pendingHideTimer) { clearTimeout(pendingHideTimer); pendingHideTimer = null }
+  lyricHiding = false
   win.setAlwaysOnTop(true, 'screen-saver')
   win.showInactive()
+  // v1.4.5-pre2 淡入：向歌词窗下发显示信号触发 .wrap CSS 过渡。
+  // 首帧新建窗 webContents 尚未加载完，此时 send 会丢，故挂 did-finish-load 补发；复用窗直接发。
+  const pushShow = () => {
+    if (lyricWindow && !lyricWindow.isDestroyed()) lyricWindow.webContents.send('mini:visibility', { show: true })
+  }
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', pushShow)
+  else pushShow()
   // v1.3.9-beta6 枚举系统字体缓存后随 mini:state 下发给歌词窗字体下拉（data: 窗独立通道收不到，改走已验证通畅的 state 通道）
   if (!cachedFontList.length) {
     collectSystemFonts().then((list) => { cachedFontList = list; broadcast() }).catch(() => { /* 枚举失败保留默认项 */ })
@@ -719,12 +740,22 @@ export function showLyricWindow() {
 }
 
 export function hideLyricWindow() {
-  lyricWindow?.hide()
+  if (!lyricWindow || lyricWindow.isDestroyed()) { notifyLyricVisible(); return }
+  // v1.4.5-pre2 淡出：先通知歌词窗播放 CSS 过渡，置 lyricHiding（逻辑上立即视为隐藏，
+  // 使 isLyricVisible/tray/按钮同步更新），动画播完 HIDE_ANIM_MS 后再真正 win.hide()。
+  lyricWindow.webContents.send('mini:visibility', { show: false })
+  lyricHiding = true
+  if (pendingHideTimer) clearTimeout(pendingHideTimer)
+  pendingHideTimer = setTimeout(() => {
+    pendingHideTimer = null
+    if (lyricHiding && lyricWindow && !lyricWindow.isDestroyed()) lyricWindow.hide()
+  }, HIDE_ANIM_MS)
   notifyLyricVisible()
 }
 
 export function isLyricVisible() {
-  return Boolean(lyricWindow && !lyricWindow.isDestroyed() && lyricWindow.isVisible())
+  // 淡出计时窗口内 lyricHiding=true 视为已隐藏，保证托盘文案/按钮态与实际意图一致
+  return Boolean(lyricWindow && !lyricWindow.isDestroyed() && lyricWindow.isVisible() && !lyricHiding)
 }
 
 function notifyLyricVisible() {
@@ -749,6 +780,9 @@ export function toggleLyricWindow() {
 
 /** 退出清理：销毁桌面歌词窗（destroy 绕过一切 close 拦截） */
 export function destroyLyricWindow() {
+  // 退出清理不等动画：取消淡出计时并直接销毁
+  if (pendingHideTimer) { clearTimeout(pendingHideTimer); pendingHideTimer = null }
+  lyricHiding = false
   if (lyricWindow && !lyricWindow.isDestroyed()) {
     lyricWindow.destroy()
     console.log('[quit] 桌面歌词窗已销毁')
