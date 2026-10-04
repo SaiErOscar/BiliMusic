@@ -41,7 +41,8 @@ export interface DownloadRecord {
   title: string
   artist: string
   bvid: string
-  format: DownloadFormat
+  /** 音频/视频下载；v1.4.6 新增 'mv'（导出播放界面视频） */
+  format: DownloadFormat | 'mv'
   quality: string
   filename: string
   downloadDir: string

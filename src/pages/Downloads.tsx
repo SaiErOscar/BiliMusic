@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Download, FolderOpen, HardDrive, Music, ExternalLink, FileAudio, FileVideo, Clock, Trash2 } from 'lucide-react'
+import { Download, FolderOpen, HardDrive, Music, ExternalLink, FileAudio, FileVideo, Clock, Trash2, Clapperboard } from 'lucide-react'
 import type { ReactNode } from 'react'
 import {
   ActionButton,
@@ -109,11 +109,11 @@ export default function Downloads() {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  background: record.format === 'video' ? 'rgba(0, 122, 255, 0.12)' : 'rgba(255, 45, 85, 0.12)',
-                  color: record.format === 'video' ? '#007aff' : '#ff2d55',
+                  background: record.format === 'video' ? 'rgba(0, 122, 255, 0.12)' : record.format === 'mv' ? 'rgba(48, 209, 88, 0.12)' : 'rgba(255, 45, 85, 0.12)',
+                  color: record.format === 'video' ? '#007aff' : record.format === 'mv' ? '#30d158' : '#ff2d55',
                   flexShrink: 0,
                 }}>
-                  {record.format === 'video' ? <FileVideo size={18} /> : <FileAudio size={18} />}
+                  {record.format === 'video' ? <FileVideo size={18} /> : record.format === 'mv' ? <Clapperboard size={18} /> : <FileAudio size={18} />}
                 </div>
 
                 {/* 歌曲信息 */}
@@ -143,7 +143,7 @@ export default function Downloads() {
                       {new Date(record.downloadedAt).toLocaleString()}
                     </span>
                     <span style={{ opacity: 0.3 }}>·</span>
-                    <span>{record.format === 'video' ? '视频' : '音频'}</span>
+                    <span>{record.format === 'video' ? '视频' : record.format === 'mv' ? 'MV' : '音频'}</span>
                     {record.quality && (
                       <>
                         <span style={{ opacity: 0.3 }}>·</span>

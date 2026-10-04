@@ -6,13 +6,17 @@
 import { downloadTrack } from '@/services/api'
 import { platform } from '@/platform'
 import { cleanTitle, getLyricForTrack, formatLrc } from '@/services/lyrics'
-import { saveDownloadRecord } from '@/utils/storage'
+import { exportTrackMv } from '@/services/mvExport'
+import { loadAppSettings, saveDownloadRecord } from '@/utils/storage'
 import type { Track, DownloadFormat } from '@/types'
 
 export type NameMode = 'video' | 'song' | 'custom'
 
+/** v1.4.6：批量任务格式在音频/视频之外新增 'mv'（导出播放界面 MP4，桌面端专属） */
+export type BatchFormat = DownloadFormat | 'mv'
+
 export interface BatchConfig {
-  format: DownloadFormat
+  format: BatchFormat
   downloadDir: string
   includeLyric: boolean
   embedMeta: boolean
@@ -26,10 +30,12 @@ export interface BatchProgress {
   trackTitle: string
   status: 'pending' | 'downloading' | 'done' | 'error'
   error?: string
-  /** 当前文件下载字节进度（audio 格式经 onDownloadProgress 实时更新） */
+  /** 当前文件下载字节进度（audio 格式经 onDownloadProgress 实时更新；mv 格式为分阶段进度百分比） */
   fileReceived?: number
   fileTotal?: number
   filePercent?: number
+  /** v1.4.6 mv 格式：当前文件内阶段说明（下载音频/渲染关键帧/合成视频） */
+  filePhase?: string
 }
 
 /** 单个失败曲目的错误信息，供 UI 展示具体失败原因 */
@@ -125,21 +131,26 @@ async function run() {
   if (!config) return
   const dir = config.downloadDir || undefined
   const qualityPref = 'lossless'
+  const isMv = config.format === 'mv'
+  const appSettings = loadAppSettings()
 
-  // 订阅主进程单文件下载字节进度（audio 格式有实时回调），写回当前 progress
-  const unsubProgress = platform.download?.onDownloadProgress?.(
-    ({ received, total, percent }) => {
-      if (!state.running || !state.progress) return
-      setState({
-        progress: {
-          ...state.progress,
-          fileReceived: received,
-          fileTotal: total,
-          filePercent: percent,
+  // 订阅主进程单文件下载字节进度（audio 格式有实时回调），写回当前 progress；
+  // mv 格式改为消费 exportTrackMv 的分阶段进度回调（订阅在导出调用内完成）
+  const unsubProgress = isMv
+    ? undefined
+    : platform.download?.onDownloadProgress?.(
+        ({ received, total, percent }) => {
+          if (!state.running || !state.progress) return
+          setState({
+            progress: {
+              ...state.progress,
+              fileReceived: received,
+              fileTotal: total,
+              filePercent: percent,
+            },
+          })
         },
-      })
-    },
-  )
+      )
 
   try {
     for (let i = 0; i < tracks.length; i++) {
@@ -158,7 +169,8 @@ async function run() {
         let lyricContent: string | undefined
         let artist: string | undefined
 
-        if (config.embedMeta || config.includeLyric) {
+        // mv 格式不需要歌词（画面内已按时间轴渲染）；跳过省一次匹配请求
+        if (!isMv && (config.embedMeta || config.includeLyric)) {
           const lyricResult = await getLyricForTrack(track)
           // v1.4.5：用户选「不显示歌词」→ 命中 none 态，无论开关都不下载歌词、不写歌手
           if (lyricResult && !lyricResult.noLyric) {
@@ -173,15 +185,34 @@ async function run() {
 
         const filename = getFilename(config, track, i + 1)
 
-        await downloadTrack(
-          track.bvid || track.id,
-          { aid: track.aid, cid: track.cid },
-          filename,
-          config.format,
-          qualityPref,
-          dir,
-          { artist, title: filename, lyricContent },
-        )
+        if (isMv) {
+          // v1.4.6：批量导出播放界面 MV（桌面端专属；入口已在 UI 层按平台裁剪）
+          await exportTrackMv(track, {
+            quality: qualityPref,
+            watermark: appSettings.mvWatermark,
+            outputDir: dir,
+            onProgress: (p) => {
+              if (!state.running || !state.progress) return
+              setState({
+                progress: {
+                  ...state.progress,
+                  filePercent: p.phase === 'done' ? 100 : p.percent,
+                  filePhase: p.message || '',
+                },
+              })
+            },
+          })
+        } else {
+          await downloadTrack(
+            track.bvid || track.id,
+            { aid: track.aid, cid: track.cid },
+            filename,
+            config.format as DownloadFormat,
+            qualityPref,
+            dir,
+            { artist, title: filename, lyricContent },
+          )
+        }
 
         saveDownloadRecord({
           id: crypto.randomUUID ? crypto.randomUUID() : `dl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,

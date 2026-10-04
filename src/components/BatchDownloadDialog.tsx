@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect, useSyncExternalStore } from 'react'
-import { Download, Loader2, Check, X, FolderOpen, Music, FileText, Edit3, FileMusic, Tag } from 'lucide-react'
+import { Download, Loader2, Check, X, FolderOpen, Music, FileText, Edit3, FileMusic, Tag, Clapperboard } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { selectDownloadFolder } from '@/services/api'
+import { isMvExportSupported } from '@/services/mvExport'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import {
   batchSubscribe,
@@ -11,8 +12,8 @@ import {
   hideBatchDialog,
   closeBatchDialog,
 } from '@/services/batchDownloadStore'
-import type { Track, DownloadFormat } from '@/types'
-import type { NameMode } from '@/services/batchDownloadStore'
+import type { Track } from '@/types'
+import type { NameMode, BatchFormat } from '@/services/batchDownloadStore'
 
 interface BatchDownloadDialogProps {
   tracks: Track[]
@@ -34,7 +35,7 @@ export default function BatchDownloadDialog({ tracks, onClose }: BatchDownloadDi
   const store = useSyncExternalStore(batchSubscribe, getBatchState)
 
   // 首次打开的配置
-  const [format, setFormat] = useState<DownloadFormat>('audio')
+  const [format, setFormat] = useState<BatchFormat>('audio')
   const [downloadDir, setDownloadDir] = useState(settings.downloadDir || '')
   const [nameMode, setNameMode] = useState<NameMode>('video')
   const [customName, setCustomName] = useState('')
@@ -139,10 +140,12 @@ export default function BatchDownloadDialog({ tracks, onClose }: BatchDownloadDi
           transition: 'width 0.3s ease',
         }} />
       </div>
-      {/* 当前文件字节进度（audio 格式实时更新） */}
+      {/* 当前文件字节进度（audio 格式实时更新；mv 格式为分阶段百分比） */}
       {isRunning && progress?.filePercent != null && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
-          <span style={{ fontSize: 10, color: 'var(--color-muted)', flexShrink: 0 }}>当前文件</span>
+          <span style={{ fontSize: 10, color: 'var(--color-muted)', flexShrink: 0 }}>
+            {progress.filePhase || '当前文件'}
+          </span>
           <div style={{ flex: 1, height: 3, borderRadius: 2, background: 'var(--glass-border)', overflow: 'hidden' }}>
             <div style={{
               height: '100%',
@@ -338,6 +341,31 @@ export default function BatchDownloadDialog({ tracks, onClose }: BatchDownloadDi
                       <Download size={15} />
                       视频
                     </button>
+                    {isMvExportSupported() && (
+                      <button
+                        type="button"
+                        onClick={() => setFormat('mv')}
+                        style={{
+                          flex: 1,
+                          padding: '10px 12px',
+                          border: `1px solid ${format === 'mv' ? 'var(--color-accent)' : 'var(--glass-border)'}`,
+                          borderRadius: 10,
+                          background: format === 'mv' ? 'var(--sidebar-active-bg)' : 'transparent',
+                          color: 'var(--color-foreground)',
+                          fontSize: 13,
+                          fontWeight: 500,
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Clapperboard size={15} />
+                        MV
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -448,11 +476,12 @@ export default function BatchDownloadDialog({ tracks, onClose }: BatchDownloadDi
                   )}
                 </div>
 
-                {/* 歌词与属性选项（独立） */}
-                <div style={{ marginBottom: 16 }}>
-                  <button
-                    type="button"
-                    onClick={() => setIncludeLyric(v => !v)}
+                {/* 歌词与属性选项（独立；MV 格式无歌词/属性概念，隐藏） */}
+                {format !== 'mv' && (
+                  <div style={{ marginBottom: 16 }}>
+                    <button
+                      type="button"
+                      onClick={() => setIncludeLyric(v => !v)}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -498,7 +527,8 @@ export default function BatchDownloadDialog({ tracks, onClose }: BatchDownloadDi
                     修改文件属性(写入歌手)
                     {embedMeta && <Check size={12} style={{ marginLeft: 'auto' }} />}
                   </button>
-                </div>
+                  </div>
+                )}
 
                 {/* 操作按钮 */}
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
