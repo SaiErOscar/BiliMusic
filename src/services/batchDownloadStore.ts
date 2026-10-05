@@ -214,12 +214,13 @@ async function run() {
             quality: qualityPref,
             filename: mvName,
             downloadDir: mvDir,
+            filePath: mvPath,
             downloadedAt: new Date().toISOString(),
           })
           setState({ completedCount: state.completedCount + 1 })
           continue
         }
-          await downloadTrack(
+          const { filePath: dlPath } = await downloadTrack(
             track.bvid || track.id,
             { aid: track.aid, cid: track.cid },
             filename,
@@ -228,6 +229,8 @@ async function run() {
             dir,
             { artist, title: filename, lyricContent },
           )
+          // 记录真实落盘路径（主进程同名防覆盖可能带序号），供下载页定位文件
+          const dlName = dlPath.split(/[\\/]/).pop() || filename
 
         saveDownloadRecord({
           id: crypto.randomUUID ? crypto.randomUUID() : `dl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
@@ -236,8 +239,9 @@ async function run() {
           bvid: track.bvid || track.id,
           format: config.format,
           quality: qualityPref,
-          filename,
-          downloadDir: dir || '',
+          filename: dlName,
+          downloadDir: dlPath.slice(0, dlPath.length - dlName.length - 1),
+          filePath: dlPath,
           downloadedAt: new Date().toISOString(),
         })
 

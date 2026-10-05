@@ -46,6 +46,8 @@ export interface DownloadRecord {
   quality: string
   filename: string
   downloadDir: string
+  /** v1.4.6-pre4：实际产物绝对路径（同名防覆盖改写后的真实位置）；旧记录可能缺失，UI 以 downloadDir+filename 兜底推算 */
+  filePath?: string
   downloadedAt: string
 }
 

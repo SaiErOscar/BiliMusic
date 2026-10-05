@@ -14,6 +14,15 @@ const biliApi = {
   // 打开下载目录
   openDownloadDir: (dirPath) =>
     ipcRenderer.invoke('bili:openDownloadDir', dirPath),
+  // 下载记录：检测记录文件是否仍存在
+  pathExists: (filePath) =>
+    ipcRenderer.invoke('bili:pathExists', filePath),
+  // 下载记录：用系统默认程序打开文件
+  openRecordFile: (filePath) =>
+    ipcRenderer.invoke('bili:openRecordFile', filePath),
+  // 下载记录：在文件管理器中定位文件
+  showRecordInFolder: (filePath) =>
+    ipcRenderer.invoke('bili:showRecordInFolder', filePath),
   // 获取系统默认下载目录
   getDefaultDownloadDir: () =>
     ipcRenderer.invoke('bili:getDefaultDownloadDir'),

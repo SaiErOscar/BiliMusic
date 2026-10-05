@@ -21,12 +21,15 @@ import type {
   WebdavResult,
 } from '@/types/electron'
 
-/** 下载能力：音频/视频下载、下载目录、歌词文件、字节进度订阅 */
+/** 下载能力：音频/视频下载、下载目录、歌词文件、字节进度订阅；v1.4.6-pre4 增下载记录文件定位三方法 */
 export type PlatformDownload = Pick<
   BiliApi,
   | 'downloadAudio'
   | 'downloadVideo'
   | 'openDownloadDir'
+  | 'pathExists'
+  | 'openRecordFile'
+  | 'showRecordInFolder'
   | 'getDefaultDownloadDir'
   | 'selectDownloadFolder'
   | 'saveLyricFile'

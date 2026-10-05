@@ -116,7 +116,7 @@ export default function DownloadButton({
         }
       }
 
-      await downloadTrack(
+      const { filePath } = await downloadTrack(
         actualBvid,
         { aid: actualAid, cid: actualCid },
         getFilename(),
@@ -125,6 +125,8 @@ export default function DownloadButton({
         settings.downloadDir,
         { artist, title: getFilename(), lyricContent },
       )
+      // 记录真实落盘路径（主进程同名防覆盖可能带序号），供下载页定位文件
+      const actualName = filePath.split(/[\\/]/).pop() || getFilename()
       saveDownloadRecord({
         id: crypto.randomUUID ? crypto.randomUUID() : `dl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
         title: getFilename(),
@@ -132,8 +134,9 @@ export default function DownloadButton({
         bvid: actualBvid,
         format,
         quality: qualityPref,
-        filename: getFilename(),
-        downloadDir: settings.downloadDir,
+        filename: actualName,
+        downloadDir: filePath.slice(0, filePath.length - actualName.length - 1),
+        filePath,
         downloadedAt: new Date().toISOString(),
       })
       setDone(true)
@@ -168,13 +171,27 @@ export default function DownloadButton({
       isLiked: false,
     }
     try {
-      await exportTrackMv(trackForMv, {
+      const { filePath } = await exportTrackMv(trackForMv, {
         quality: qualityPref,
         watermark: settings.mvWatermark,
         outputDir: settings.downloadDir || undefined,
         onProgress: (p) => {
           setMvStatus(p.message ? `${p.message} ${p.percent}%` : `${p.percent}%`)
         },
+      })
+      // 单首 MV 导出同样写入下载记录（此前只有批量写，记录里查不到单首产物）
+      const mvName = filePath.split(/[\\/]/).pop() || trackForMv.title
+      saveDownloadRecord({
+        id: crypto.randomUUID ? crypto.randomUUID() : `dl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+        title: trackForMv.title,
+        artist: trackForMv.artist || '',
+        bvid: actualBvid,
+        format: 'mv',
+        quality: qualityPref,
+        filename: mvName,
+        downloadDir: filePath.slice(0, filePath.length - mvName.length - 1),
+        filePath,
+        downloadedAt: new Date().toISOString(),
       })
       setDone(true)
       setTimeout(() => setDone(false), 2500)

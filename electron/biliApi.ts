@@ -520,6 +520,31 @@ export function registerBiliApiHandlers() {
     return { success: true }
   })
 
+  // 下载记录：检测文件是否仍存在于记录路径（不存在则 UI 不展示打开按钮）
+  ipcMain.handle('bili:pathExists', async (_event, filePath: string) => {
+    try {
+      if (!filePath || typeof filePath !== 'string') return false
+      const stat = await fs.stat(filePath)
+      return stat.isFile()
+    } catch {
+      return false
+    }
+  })
+
+  // 下载记录：用系统默认程序打开文件
+  ipcMain.handle('bili:openRecordFile', async (_event, filePath: string) => {
+    if (!filePath || typeof filePath !== 'string') return { success: false }
+    const err = await shell.openPath(filePath)
+    return { success: !err, message: err || undefined }
+  })
+
+  // 下载记录：在文件管理器中定位文件
+  ipcMain.handle('bili:showRecordInFolder', async (_event, filePath: string) => {
+    if (!filePath || typeof filePath !== 'string') return { success: false }
+    shell.showItemInFolder(filePath)
+    return { success: true }
+  })
+
   // 返回系统默认音乐目录，供渲染层作为下载路径初始值
   ipcMain.handle('bili:getDefaultDownloadDir', async () => {
     return path.join(app.getPath('music'), 'BiliMusic')

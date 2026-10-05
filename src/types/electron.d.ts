@@ -49,6 +49,12 @@ export interface BiliApi {
     size: number
   }>
   openDownloadDir: (dirPath?: string) => Promise<{ success: boolean }>
+  /** 下载记录：检测记录文件是否仍存在于磁盘 */
+  pathExists: (filePath: string) => Promise<boolean>
+  /** 下载记录：用系统默认程序打开文件（message 非空为错误信息） */
+  openRecordFile: (filePath: string) => Promise<{ success: boolean; message?: string }>
+  /** 下载记录：在文件管理器中定位文件 */
+  showRecordInFolder: (filePath: string) => Promise<{ success: boolean }>
   getDefaultDownloadDir: () => Promise<string>
   selectDownloadFolder: () => Promise<string | null>
   saveLyricFile: (content: string, filePath: string) => Promise<{ success: boolean; filePath: string }>
