@@ -187,7 +187,7 @@ async function run() {
 
         if (isMv) {
           // v1.4.6：批量导出播放界面 MV（桌面端专属；入口已在 UI 层按平台裁剪）
-          await exportTrackMv(track, {
+          const { filePath: mvPath } = await exportTrackMv(track, {
             quality: qualityPref,
             watermark: appSettings.mvWatermark,
             outputDir: dir,
@@ -202,7 +202,23 @@ async function run() {
               })
             },
           })
-        } else {
+          // 记录与实际产物对齐：MV 落在 <dir>/MV/<名>.mp4，主进程同名防覆盖可能带序号
+          const mvName = mvPath.split(/[\\/]/).pop() || filename
+          const mvDir = mvPath.slice(0, mvPath.length - mvName.length - 1).replace(/\//g, '\\')
+          saveDownloadRecord({
+            id: crypto.randomUUID ? crypto.randomUUID() : `dl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+            title: filename,
+            artist: artist || track.artist || '',
+            bvid: track.bvid || track.id,
+            format: config.format,
+            quality: qualityPref,
+            filename: mvName,
+            downloadDir: mvDir,
+            downloadedAt: new Date().toISOString(),
+          })
+          setState({ completedCount: state.completedCount + 1 })
+          continue
+        }
           await downloadTrack(
             track.bvid || track.id,
             { aid: track.aid, cid: track.cid },
@@ -212,7 +228,6 @@ async function run() {
             dir,
             { artist, title: filename, lyricContent },
           )
-        }
 
         saveDownloadRecord({
           id: crypto.randomUUID ? crypto.randomUUID() : `dl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,

@@ -7,6 +7,8 @@ interface LyricsViewProps {
   currentTime: number
   synced: boolean
   onSeek: (time: number) => void
+  /** 滚动动画行为；MV 导出离屏渲染传 'auto' 使换行即时落位，便于逐帧捕获 */
+  scrollBehavior?: ScrollBehavior
 }
 
 // 二分：返回最后一个 time <= t 的下标
@@ -26,7 +28,7 @@ function activeIndexFor(lines: LyricLine[], t: number): number {
   return res
 }
 
-export default function LyricsView({ lines, currentTime, synced, onSeek }: LyricsViewProps) {
+export default function LyricsView({ lines, currentTime, synced, onSeek, scrollBehavior = 'smooth' }: LyricsViewProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const lineRefs = useRef<(HTMLDivElement | null)[]>([])
   const userScrollingRef = useRef(false)
@@ -41,7 +43,7 @@ export default function LyricsView({ lines, currentTime, synced, onSeek }: Lyric
     const el = lineRefs.current[posIndex]
     if (!vp || !el) return
     const nextTop = el.offsetTop + el.offsetHeight / 2 - vp.clientHeight / 2
-    vp.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' })
+    vp.scrollTo({ top: Math.max(0, nextTop), behavior: scrollBehavior })
   }
 
   // 当前行变化 → 自动滚动到视口中间；用户手动滚动时短暂让出控制权。

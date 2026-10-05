@@ -140,24 +140,28 @@ export default function BatchDownloadDialog({ tracks, onClose }: BatchDownloadDi
           transition: 'width 0.3s ease',
         }} />
       </div>
-      {/* 当前文件字节进度（audio 格式实时更新；mv 格式为分阶段百分比） */}
-      {isRunning && progress?.filePercent != null && (
+      {/* 当前文件进度：常显（无百分比事件时显示阶段名 + indeterminate 动画），不再隐藏 */}
+      {isRunning && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
-          <span style={{ fontSize: 10, color: 'var(--color-muted)', flexShrink: 0 }}>
-            {progress.filePhase || '当前文件'}
+          <span style={{ fontSize: 10, color: 'var(--color-muted)', flexShrink: 0, whiteSpace: 'nowrap' }}>
+            第 {progress?.current ?? completedCount + 1}/{total} · {progress?.filePhase || '准备中'}
           </span>
           <div style={{ flex: 1, height: 3, borderRadius: 2, background: 'var(--glass-border)', overflow: 'hidden' }}>
-            <div style={{
-              height: '100%',
-              width: `${Math.min(100, Math.max(0, progress.filePercent))}%`,
-              background: 'var(--color-accent)',
-              opacity: 0.7,
-              borderRadius: 2,
-              transition: 'width 0.25s ease',
-            }} />
+            {progress?.filePercent != null ? (
+              <div style={{
+                height: '100%',
+                width: `${Math.min(100, Math.max(0, progress.filePercent))}%`,
+                background: 'var(--color-accent)',
+                opacity: 0.7,
+                borderRadius: 2,
+                transition: 'width 0.25s ease',
+              }} />
+            ) : (
+              <div className="batch-indeterminate" />
+            )}
           </div>
           <span style={{ fontSize: 10, color: 'var(--color-muted)', flexShrink: 0 }}>
-            {Math.round(Math.min(100, Math.max(0, progress.filePercent)))}%
+            {progress?.filePercent != null ? `${Math.round(Math.min(100, Math.max(0, progress.filePercent)))}%` : ''}
           </span>
         </div>
       )}

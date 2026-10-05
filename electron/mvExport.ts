@@ -1,12 +1,16 @@
 /**
- * v1.4.6 播放页 MV 视频导出（桌面端专属）
+ * v1.4.6 播放页 MV 视频导出（桌面端专属）—— pre3 方案 A 整改版
  *
- * 技术路线：离屏渲染 + ffmpeg 稀疏合成（非录屏）。
- * 1. 隐藏 BrowserWindow 渲染一张「播放界面」布局（左侧封面+歌名+歌手、右侧歌词区），
- *    仅在歌词显示状态变化（换行/滚动窗口移动）时捕获整帧关键帧 JPEG，落盘临时目录。
- * 2. 进度条填充、当前时间数字、水印交给 ffmpeg drawbox/drawtext 的 t 时间表达式逐帧程序化绘制。
- * 3. 所有关键帧作为 -loop 1 图像输入，overlay enable=between(t,..) 切换，-r 45 封装层补齐 45fps。
- * 4. 编码优先 NVENC，未检出时回退 libx264 -preset veryfast；音频从播放 CDN 下载后重编码为 AAC。
+ * 真实 UI 离屏渲染：隐藏窗口加载真实渲染层（打包 app://local / 开发 dev server），
+ * 路由到 #/mv-export 导出态舞台（复用真实 NowPlaying 的 CSS 与 LyricsView/PlayerSlider
+ * 组件与主题），主进程只按时间轴步进「当前播放时间」并逐帧捕获。进度条/时间数字/
+ * 水印全部由真实组件画进帧内，ffmpeg 不再有任何 drawbox/drawtext 叠画。
+ *
+ * 合成（O(N)）：关键帧按时间点连成 concat demuxer 清单（每帧带 duration），
+ * 单个 ffmpeg 进程一次编码完成，替代 pre2 的 N 层 overlay 链（O(总帧数×关键帧数)）。
+ * 编码器探测链：NVENC → QSV → AMF → libx264，全部以真实试编退出码为准。
+ *
+ * 进度：合成阶段用 ffmpeg `-progress pipe:1` 结构化输出，每秒至少一次回调。
  *
  * 内存约束：每帧 NativeImage 立即 JPEG 编码写盘，内存峰值恒定；临时目录用完即删。
  */
@@ -52,9 +56,12 @@ export interface MvExportProgress {
 
 const WIDTH = 1280
 const HEIGHT = 720
-const PROGRESS_X = 80
-const PROGRESS_W = 1120
-const PROGRESS_Y = 656
+/** 捕获时间网格步长（秒）：进度条/时间数字的刷新粒度 */
+const CAPTURE_STEP = 0.5
+/** 最大关键帧数（超出自动放粗步长），控制渲染耗时上限 */
+const MAX_FRAMES = 720
+/** 封面降采样尺寸（CSS 显示 400px，高 DPI 留足余量） */
+const COVER_SIZE = 800
 
 // ===== ffmpeg 路径解析（与 biliApi.ts 同策略：ffmpeg-static 优先，asar.unpacked 回退） =====
 
@@ -119,136 +126,35 @@ export function isMvExportRunning(): boolean {
   return currentJob !== null
 }
 
-// ===== 渲染布局 =====
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// ===== 捕获时间轴 =====
 
 /**
- * 关键帧布局状态。窗口只负责画静态布局 + 歌词区窗口，
- * 进度条填充与时间数字由 ffmpeg 绘制（稀疏帧之间要连续移动）。
+ * 生成捕获时间点：固定网格（进度条/时间数字刷新）∪ 歌词行起点（高亮切换精确落位）。
+ * 返回升序去重数组，首点恒为 0。
  */
-interface FrameState {
-  cover: string
-  title: string
-  artist: string
-  windowStart: number
-  currentIdx: number
-  lines: { time: number; text: string }[]
-  noLyric: boolean
-}
-
-function buildFrameHtml(): string {
-  return `<!doctype html>
-<html>
-<head>
-<meta charset="UTF-8" />
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
-  html, body { width: ${WIDTH}px; height: ${HEIGHT}px; overflow: hidden; }
-  body {
-    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-    background: linear-gradient(135deg, #1a1b21 0%, #131418 60%, #191a20 100%);
-    color: #f2f3f5;
+function buildCaptureTimes(lyrics: { time: number; text: string }[], duration: number): number[] {
+  const step = Math.max(CAPTURE_STEP, duration / MAX_FRAMES)
+  const round = (t: number) => Math.round(t * 1000) / 1000
+  const set = new Set<number>([0])
+  for (let t = step; t < duration; t += step) set.add(round(t))
+  for (const l of lyrics) {
+    if (Number.isFinite(l.time) && l.time >= 0 && l.time < duration && l.text.trim()) set.add(round(l.time))
   }
-  .left { position: absolute; left: 80px; top: 96px; width: 400px; }
-  .cover {
-    width: 400px; height: 400px; border-radius: 20px; object-fit: cover;
-    box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
-    background: linear-gradient(135deg, #2a2b33, #1e1f26);
-  }
-  .title { margin-top: 34px; font-size: 27px; font-weight: 760; line-height: 1.3;
-    overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .artist { margin-top: 10px; font-size: 18px; color: rgba(242, 243, 245, .55); font-weight: 560; }
-  .brand { position: absolute; left: 80px; top: 48px; font-size: 17px; font-weight: 800; color: #ff375f; letter-spacing: .5px; }
-  .lyrics { position: absolute; left: 620px; top: 0; width: 580px; height: ${HEIGHT}px; overflow: hidden; }
-  .lyrics-inner { position: absolute; top: 50%; transform: translateY(-50%); width: 100%; }
-  .line { height: 46px; line-height: 46px; font-size: 20px; color: rgba(242, 243, 245, .34);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 560; }
-  .line.active { font-size: 25px; height: 52px; line-height: 52px; color: #f2f3f5; font-weight: 800; }
-  .no-lyric { font-size: 20px; color: rgba(242, 243, 245, .34); }
-  /* 进度条底槽（填充与时间数字由 ffmpeg 绘制） */
-  .track { position: absolute; left: ${PROGRESS_X}px; top: ${PROGRESS_Y}px; width: ${PROGRESS_W}px; height: 5px;
-    border-radius: 3px; background: rgba(255, 255, 255, .14); }
-</style>
-</head>
-<body>
-  <div class="brand">BiliMusic</div>
-  <div class="left">
-    <img class="cover" id="cover" />
-    <div class="title" id="title"></div>
-    <div class="artist" id="artist"></div>
-  </div>
-  <div class="lyrics"><div class="lyrics-inner" id="lyricsInner"></div></div>
-  <div class="track"></div>
-  <script>
-    window.__mvSetState = function (state) {
-      document.getElementById('cover').src = state.cover || ''
-      document.getElementById('title').textContent = state.title || ''
-      document.getElementById('artist').textContent = state.artist || ''
-      var inner = document.getElementById('lyricsInner')
-      inner.innerHTML = ''
-      if (state.noLyric || !state.lines || !state.lines.length) {
-        var d = document.createElement('div')
-        d.className = 'no-lyric'
-        d.textContent = '暂无歌词'
-        inner.appendChild(d)
-        return
-      }
-      var WINDOW = 9
-      var start = Math.max(0, Math.min(state.windowStart, state.lines.length - 1))
-      for (var i = start; i < Math.min(start + WINDOW, state.lines.length); i++) {
-        var el = document.createElement('div')
-        el.className = 'line' + (i === state.currentIdx ? ' active' : '')
-        el.textContent = state.lines[i].text || ''
-        inner.appendChild(el)
-      }
-    }
-  </script>
-</body>
-</html>`
-}
-
-/** 歌词区可视窗口行数（与 buildFrameHtml 的 WINDOW 保持一致） */
-const LYRIC_WINDOW = 9
-
-/** 计算某时刻的歌词窗口起点：高亮行尽量居中，越界时贴边 */
-function windowStartFor(currentIdx: number, total: number): number {
-  return Math.max(0, Math.min(currentIdx - Math.floor(LYRIC_WINDOW / 2), Math.max(0, total - LYRIC_WINDOW)))
-}
-
-/** 生成关键帧计划：每个「歌词显示状态变化」一个时间点 */
-interface KeyframePlan {
-  time: number
-  windowStart: number
-  currentIdx: number
-}
-
-function buildKeyframePlan(lyrics: { time: number; text: string }[], duration: number): KeyframePlan[] {
-  const lines = lyrics
-    .filter((l) => Number.isFinite(l.time) && l.time >= 0 && l.time < duration && l.text.trim())
-    .sort((a, b) => a.time - b.time)
-  if (!lines.length) return [{ time: 0, windowStart: 0, currentIdx: -1 }]
-
-  const times = [0, ...lines.map((l) => l.time)]
-  const plans: KeyframePlan[] = []
-  let lastSig = ''
-  for (const t of times) {
-    // 当前高亮行 = 最后一条 time <= t 的行
-    let idx = -1
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].time <= t + 1e-6) idx = i
-      else break
-    }
-    const ws = windowStartFor(idx, lines.length)
-    const sig = `${idx}:${ws}`
-    if (sig === lastSig) continue
-    lastSig = sig
-    plans.push({ time: t, windowStart: ws, currentIdx: idx })
-  }
-  return plans
+  return [...set].sort((a, b) => a - b)
 }
 
 // ===== ffmpeg 辅助 =====
 
-function runFfmpeg(args: string[], onTime?: (seconds: number) => void): Promise<void> {
+interface RunFfmpegOptions {
+  /** stdout `-progress pipe:1` 的 out_time（秒）回调 */
+  onOutTime?: (seconds: number) => void
+}
+
+function runFfmpeg(args: string[], options: RunFfmpegOptions = {}): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = trackChild(spawn(ffmpegPath, args, { windowsHide: true }))
     if (currentJob) currentJob.proc = proc
@@ -256,12 +162,12 @@ function runFfmpeg(args: string[], onTime?: (seconds: number) => void): Promise<
     proc.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk.toString()
       if (stderr.length > 64 * 1024) stderr = stderr.slice(-32 * 1024)
-      if (onTime) {
-        const matches = stderr.matchAll(/time=(\d+):(\d+):(\d+\.\d+)/g)
-        for (const m of matches) {
-          onTime(Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]))
-        }
-      }
+    })
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      if (!options.onOutTime) return
+      // -progress 输出形如 out_time_ms=1234567（实为微秒）
+      const matches = chunk.toString().matchAll(/out_time_ms=(\d+)/g)
+      for (const m of matches) options.onOutTime(Number(m[1]) / 1e6)
     })
     proc.on('error', (err) => reject(new Error(`ffmpeg 启动失败: ${err.message}. ffmpegPath=${ffmpegPath}`)))
     proc.on('exit', (code) => {
@@ -272,28 +178,57 @@ function runFfmpeg(args: string[], onTime?: (seconds: number) => void): Promise<
   })
 }
 
+interface EncoderCandidate {
+  codec: string
+  /** 编码质量参数（追加在 -c:v 之后） */
+  qualityArgs: string[]
+}
+
+const ENCODER_CANDIDATES: EncoderCandidate[] = [
+  { codec: 'h264_nvenc', qualityArgs: ['-preset', 'p4', '-cq', '23'] },
+  { codec: 'h264_qsv', qualityArgs: ['-global_quality', '23'] },
+  { codec: 'h264_amf', qualityArgs: ['-quality', 'balanced'] },
+  { codec: 'libx264', qualityArgs: ['-preset', 'veryfast', '-crf', '20'] },
+]
+
 /**
- * 检测编码器可用性：优先 NVENC，不可用时回退 libx264。
- * 注意不能只看 `-encoders` 列表：静态 build 总会列出 h264_nvenc，但无 NVIDIA
- * 驱动的机器上编码器初始化直接崩溃（Cannot load nvcuda.dll，exit 139 段错误），
- * 必须真实试编 0.1 秒以 exit code 为准。
+ * 合成视频：编码器不做事前探测。真机实测（v1.4.6-pre3 harness）证明「探测通过 ≠ 能编完」——
+ * NVENC 探测直接段错误尚可拦住，但 QSV 能通过 0.1s 试编却在真实任务里中途 device failed (-17)。
+ * 所以直接用真实合成当探测：按 NVENC → QSV → AMF → libx264 逐个跑完整任务，失败回退下一个。
  */
-async function pickVideoEncoderArgs(): Promise<string[]> {
-  const probeOk = await new Promise<boolean>((resolve) => {
+async function composeVideo(listPath: string, audioPath: string, outputPath: string, duration: number, sender: Electron.WebContents | null): Promise<void> {
+  let lastError = ''
+  for (const candidate of ENCODER_CANDIDATES) {
+    if (currentJob?.cancelRequested) throw new Error('已取消')
+    const args: string[] = [
+      '-y', '-hide_banner', '-nostats',
+      '-f', 'concat', '-safe', '0', '-i', listPath,
+      '-i', audioPath,
+      '-vf', `scale=${WIDTH}:${HEIGHT}:flags=lanczos,format=yuv420p`,
+      '-map', '0:v', '-map', '1:a',
+      '-c:v', candidate.codec, ...candidate.qualityArgs,
+      '-c:a', 'aac', '-b:a', '192k',
+      '-r', '45',
+      '-t', duration.toFixed(3),
+      '-movflags', '+faststart',
+      '-progress', 'pipe:1',
+      outputPath,
+    ]
     try {
-      const proc = trackChild(spawn(ffmpegPath, [
-        '-hide_banner', '-loglevel', 'error',
-        '-f', 'lavfi', '-i', 'color=size=320x240:duration=0.1:rate=10',
-        '-c:v', 'h264_nvenc', '-f', 'null', '-',
-      ], { windowsHide: true }))
-      proc.on('error', () => resolve(false))
-      proc.on('exit', (code) => resolve(code === 0))
-    } catch {
-      resolve(false)
+      const label = candidate.codec === 'libx264' ? '合成视频' : `合成视频（${candidate.codec.replace('h264_', '').toUpperCase()}）`
+      await runFfmpeg(args, {
+        onOutTime: (seconds) => {
+          sendProgress(sender, { phase: 'compose', percent: Math.min(99, Math.round((seconds / duration) * 100)), message: label })
+        },
+      })
+      return
+    } catch (e) {
+      if (currentJob?.cancelRequested) throw e
+      lastError = e instanceof Error ? e.message : String(e)
+      console.warn(`[mvExport] encoder ${candidate.codec} failed on real task, falling back:`, lastError)
     }
-  })
-  if (probeOk) return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '23']
-  return ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20']
+  }
+  throw new Error(`视频合成失败（已尝试全部编码器）：${lastError}`)
 }
 
 /** 用 ffmpeg 读媒体文件时长（秒）；失败返回 0 */
@@ -315,34 +250,6 @@ function probeDuration(filePath: string): Promise<number> {
   })
 }
 
-/** 找一个可用的中文界面字体给 drawtext；找不到返回 null（跳过 drawtext，视频没有时间数字） */
-function pickDrawtextFont(): string | null {
-  const candidates = process.platform === 'win32'
-    ? [
-        'C:/Windows/Fonts/msyh.ttc',
-        'C:/Windows/Fonts/msyhbd.ttc',
-        'C:/Windows/Fonts/simhei.ttf',
-        'C:/Windows/Fonts/arial.ttf',
-      ]
-    : process.platform === 'darwin'
-      ? ['/System/Library/Fonts/PingFang.ttc', '/System/Library/Fonts/Helvetica.ttc']
-      : ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf']
-  for (const p of candidates) {
-    if (fsSync.existsSync(p)) return p
-  }
-  return null
-}
-
-/** filtergraph 选项值内的转义：':' 与 ',' 在 filter 解析层有特殊含义 */
-function fgEscape(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'").replace(/,/g, '\\,')
-}
-
-function formatMmSs(totalSeconds: number): { mm: number; ss: number } {
-  const s = Math.max(0, Math.floor(totalSeconds))
-  return { mm: Math.floor(s / 60), ss: s % 60 }
-}
-
 // ===== 主流程 =====
 
 async function downloadToFile(url: string, filePath: string, label: string, onPercent?: (p: number) => void): Promise<void> {
@@ -360,6 +267,7 @@ async function downloadToFile(url: string, filePath: string, label: string, onPe
   let received = 0
   try {
     for (;;) {
+      if (currentJob?.cancelRequested) throw new Error('已取消')
       const { done, value } = await reader.read()
       if (done) break
       if (value) {
@@ -380,23 +288,53 @@ async function downloadToFile(url: string, filePath: string, label: string, onPe
   }
 }
 
-async function captureKeyframes(job: MvExportJob, payload: MvExportPayload, plans: KeyframePlan[], tempDir: string, sender: Electron.WebContents | null): Promise<string[]> {
-  // 封面：主进程下载并降采样，转 data URL 嵌入（避免离屏页跨域加载 CDN 图）
-  let coverDataUrl = ''
-  if (payload.coverUrl) {
-    try {
-      const resp = await net.fetch(payload.coverUrl, { headers: { Referer: BILI_REFERER, 'User-Agent': BILI_UA } })
-      if (resp.ok) {
-        const buf = Buffer.from(await resp.arrayBuffer())
-        const img = nativeImage.createFromBuffer(buf)
-        const resized = img.isEmpty() ? null : img.resize({ width: 480, height: 480, quality: 'good' })
-        const jpeg = (resized || img).toJPEG(88)
-        coverDataUrl = `data:image/jpeg;base64,${jpeg.toString('base64')}`
-      }
-    } catch (e) {
-      console.warn('[mvExport] cover fetch failed, use placeholder:', e)
-    }
+/** 下载封面并降采样为 data URL（避免离屏页跨域加载 CDN 图与加载时序问题） */
+async function fetchCoverDataUrl(coverUrl: string): Promise<string> {
+  if (!coverUrl) return ''
+  try {
+    const resp = await net.fetch(coverUrl, { headers: { Referer: BILI_REFERER, 'User-Agent': BILI_UA } })
+    if (!resp.ok) return ''
+    const buf = Buffer.from(await resp.arrayBuffer())
+    const img = nativeImage.createFromBuffer(buf)
+    if (img.isEmpty()) return ''
+    const resized = img.resize({ width: COVER_SIZE, height: COVER_SIZE, quality: 'good' })
+    const jpeg = (img.getSize().width <= COVER_SIZE ? img : resized).toJPEG(90)
+    return `data:image/jpeg;base64,${jpeg.toString('base64')}`
+  } catch (e) {
+    console.warn('[mvExport] cover fetch failed, use placeholder:', e)
+    return ''
   }
+}
+
+/** 解析导出舞台页面地址：开发走 dev server，打包走 app://local 协议（与主窗口同源同 localStorage） */
+function resolveStageUrl(): string {
+  const devUrl = process.env.VITE_DEV_SERVER_URL
+  if (devUrl) return `${devUrl.replace(/\/$/, '')}#/mv-export`
+  return 'app://local/index.html#/mv-export'
+}
+
+/** 等待离屏 paint（兜底定时器先判 isDestroyed，防止「Object has been destroyed」） */
+function waitForPaint(win: BrowserWindow): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer)
+      try {
+        if (!win.isDestroyed()) win.webContents.off('paint', onPaint)
+      } catch { /* 窗口已销毁 */ }
+      resolve()
+    }
+    const timer = setTimeout(finish, 150)
+    const onPaint = () => finish()
+    win.webContents.on('paint', onPaint)
+  })
+}
+
+/**
+ * 驱动真实 UI 舞台逐帧捕获：加载 #/mv-export 舞台 → 注入曲目信息 → 等就绪 →
+ * 按捕获时间轴步进「当前播放时间」，每步等一帧 paint 后 capturePage 落盘 JPEG。
+ */
+async function captureFrames(job: MvExportJob, payload: MvExportPayload, times: number[], duration: number, tempDir: string, sender: Electron.WebContents | null): Promise<string[]> {
+  const coverDataUrl = await fetchCoverDataUrl(payload.coverUrl)
 
   const win = new BrowserWindow({
     width: WIDTH,
@@ -407,68 +345,59 @@ async function captureKeyframes(job: MvExportJob, payload: MvExportPayload, plan
     resizable: false,
     webPreferences: {
       offscreen: true,
-      contextIsolation: false,
+      contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
     },
   })
   job.window = win
   win.webContents.setBackgroundThrottling(false)
-
-  await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildFrameHtml())}`)
-
-  const state: FrameState = {
-    cover: coverDataUrl,
-    title: payload.title,
-    artist: payload.artist,
-    windowStart: 0,
-    currentIdx: -1,
-    lines: payload.lyrics,
-    noLyric: !payload.lyrics.length,
-  }
+  win.webContents.setFrameRate(60)
 
   const frames: string[] = []
   try {
-    for (let i = 0; i < plans.length; i++) {
+    await win.loadURL(resolveStageUrl())
+
+    // 注入曲目信息，等待字体/封面就绪（舞台置 window.__mvReady）
+    await win.webContents.executeJavaScript(
+      `window.__mvInit(${JSON.stringify(JSON.stringify({
+        title: payload.title,
+        artist: payload.artist,
+        cover: coverDataUrl,
+        duration,
+        lyrics: payload.lyrics,
+        watermark: payload.watermark,
+      }))})`,
+    )
+    const readyDeadline = Date.now() + 20_000
+    for (;;) {
       if (job.cancelRequested || win.isDestroyed()) throw new Error('已取消')
-      const plan = plans[i]
-      state.windowStart = plan.windowStart
-      state.currentIdx = plan.currentIdx
-      await win.webContents.executeJavaScript(`window.__mvSetState(${JSON.stringify(state)}); 'ok'`)
-      // 强制重绘并等一帧 paint 再捕获：offscreen 窗口 capturePage 可能拿到旧帧。
-      // 定时器是兜底路径，paint 先到就 clearTimeout；窗口可能已被销毁（取消/异常），
-      // 定时器回调必须先判 isDestroyed，否则「Object has been destroyed」未捕获异常直接炸主进程
-      const painted = new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          try {
-            if (!win.isDestroyed()) win.webContents.off('paint', onPaint)
-          } catch { /* 窗口已销毁 */ }
-          resolve()
-        }, 150)
-        const onPaint = () => {
-          clearTimeout(timer)
-          try {
-            if (!win.isDestroyed()) win.webContents.off('paint', onPaint)
-          } catch { /* 窗口已销毁 */ }
-          resolve()
-        }
-        win.webContents.on('paint', onPaint)
-      })
+      if (await win.webContents.executeJavaScript('window.__mvReady === true')) break
+      if (Date.now() > readyDeadline) throw new Error('导出页面加载超时')
+      await sleep(120)
+    }
+
+    // 主题/布局入场是静态的，先空转一帧让首屏稳定
+    win.webContents.invalidate()
+    await waitForPaint(win)
+
+    for (let i = 0; i < times.length; i++) {
+      if (job.cancelRequested || win.isDestroyed()) throw new Error('已取消')
+      await win.webContents.executeJavaScript(`window.__mvSetTime(${times[i].toFixed(3)})`)
       win.webContents.invalidate()
-      await painted
+      await waitForPaint(win)
       if (win.isDestroyed()) throw new Error('已取消')
-      const img0 = await win.webContents.capturePage()
-      // 高 DPI 屏幕离屏缓冲按 deviceScaleFactor 放大，统一缩回目标分辨率
-      const size = img0.getSize()
-      const img = size.width === WIDTH ? img0 : img0.resize({ width: WIDTH, height: HEIGHT, quality: 'good' })
+      const img = await win.webContents.capturePage()
       const filePath = path.join(tempDir, `kf_${String(i).padStart(4, '0')}.jpg`)
-      await fs.writeFile(filePath, img.toJPEG(90))
+      // 离屏缓冲按显示器 DPI 放大（如 175% → 2242×1262），保留原分辨率落盘，
+      // 合成阶段由 ffmpeg lanczos 高质量缩回 720p，比 NativeImage 缩放更锐
+      await fs.writeFile(filePath, img.toJPEG(88))
       frames.push(filePath)
-      if (i % 5 === 0 || i === plans.length - 1) {
+      if (i % 5 === 0 || i === times.length - 1) {
         sendProgress(sender, {
           phase: 'render',
-          percent: Math.round(((i + 1) / plans.length) * 100),
-          message: `渲染关键帧 ${i + 1}/${plans.length}`,
+          percent: Math.round(((i + 1) / times.length) * 100),
+          message: `渲染播放页 ${i + 1}/${times.length} 帧`,
         })
       }
     }
@@ -478,6 +407,20 @@ async function captureKeyframes(job: MvExportJob, payload: MvExportPayload, plan
   }
   if (!frames.length) throw new Error('未捕获到任何关键帧')
   return frames
+}
+
+/** 生成 concat demuxer 清单：每帧一个条目 + duration（末帧补一次重复行，concat 规范要求） */
+async function writeConcatList(frames: string[], times: number[], duration: number, listPath: string): Promise<void> {
+  const escapeConcat = (p: string) => p.replace(/\\/g, '/').replace(/'/g, "'\\''")
+  const lines: string[] = ['ffconcat version 1.0']
+  for (let i = 0; i < frames.length; i++) {
+    const segEnd = i + 1 < frames.length ? times[i + 1] : duration
+    const segDuration = Math.max(0.04, segEnd - times[i])
+    lines.push(`file '${escapeConcat(frames[i])}'`)
+    lines.push(`duration ${segDuration.toFixed(3)}`)
+  }
+  lines.push(`file '${escapeConcat(frames[frames.length - 1])}'`)
+  await fs.writeFile(listPath, lines.join('\n'), 'utf8')
 }
 
 function sendProgress(sender: Electron.WebContents | null, progress: MvExportProgress) {
@@ -490,7 +433,11 @@ async function runExport(payload: MvExportPayload, sender: Electron.WebContents 
   const outDir = path.join(payload.outputDir || path.join(app.getPath('userData'), 'downloads'), 'MV')
   await fs.mkdir(outDir, { recursive: true })
   const safeName = (payload.title || 'mv').replace(/[\\/:*?"<>|]/g, '_').trim() || 'mv'
-  const outputPath = path.join(outDir, `${safeName}.mp4`)
+  // 同名曲目防覆盖：已存在时追加序号（批量中同名曲目/重复导出不再互相吞文件）
+  let outputPath = path.join(outDir, `${safeName}.mp4`)
+  for (let n = 2; fsSync.existsSync(outputPath); n++) {
+    outputPath = path.join(outDir, `${safeName} (${n}).mp4`)
+  }
 
   const tempDir = path.join(os.tmpdir(), `bilimusic-mv-${Date.now()}`)
   await fs.mkdir(tempDir, { recursive: true })
@@ -515,62 +462,13 @@ async function runExport(payload: MvExportPayload, sender: Electron.WebContents 
       if (probed > 0) duration = probed
     }
 
-    // 2. 渲染关键帧
-    const plans = buildKeyframePlan(payload.lyrics, duration)
-    const frames = await captureKeyframes(job, payload, plans, tempDir, sender)
+    // 2. 真实 UI 逐帧捕获
+    const times = buildCaptureTimes(payload.lyrics, duration)
+    const frames = await captureFrames(job, payload, times, duration, tempDir, sender)
 
-    // 3. ffmpeg 稀疏合成
-    const encoderArgs = await pickVideoEncoderArgs()
-    const fontPath = pickDrawtextFont()
-
-    const args: string[] = ['-y', '-i', audioPath]
-    for (const f of frames) args.push('-loop', '1', '-framerate', '45', '-i', f)
-
-    // overlay 链：kf0 常驻，kf_i 在 [t_i, t_{i+1}) 显示
-    const graphParts: string[] = []
-    let cur = '[1:v]'
-    for (let i = 1; i < frames.length; i++) {
-      const nextT = i + 1 < frames.length ? plans[i + 1].time : duration + 1
-      const out = `[ov${i}]`
-      graphParts.push(`${cur}[${i + 1}:v]overlay=enable='between(t,${plans[i].time.toFixed(3)},${nextT.toFixed(3)})'${out}`)
-      cur = out
-    }
-    // 进度条填充（drawbox w 表达式随 t 线性增长，超宽自动截断）
-    let drawCur = cur
-    const chain = (filter: string, tag: string) => {
-      graphParts.push(`${drawCur}${filter}${tag}`)
-      drawCur = tag
-    }
-    chain(`drawbox=x=${PROGRESS_X}:y=${PROGRESS_Y}:w='${PROGRESS_W}*t/${duration.toFixed(3)}':h=5:color=0xFF375F@0.88:t=fill`, `[db]`)
-
-    if (fontPath) {
-      // 当前时间 mm:ss（eif 表达式）；总时长静态文本
-      const { mm, ss } = formatMmSs(duration)
-      const timeExpr = `text='%{eif\\:trunc(t/60)\\:d\\:2}\\:%{eif\\:mod(trunc(t)\\,60)\\:d\\:2}'`
-      chain(`drawtext=fontfile='${fgEscape(fontPath)}':${timeExpr}:x=${PROGRESS_X}:y=${PROGRESS_Y - 38}:fontsize=20:fontcolor=0xC9CDD6`, `[dt1]`)
-      const totalText = `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
-      chain(`drawtext=fontfile='${fgEscape(fontPath)}':text='${fgEscape(totalText)}':x=w-text_w-${PROGRESS_X}:y=${PROGRESS_Y - 38}:fontsize=20:fontcolor=0xC9CDD6`, `[dt2]`)
-      if (payload.watermark) {
-        chain(`drawtext=fontfile='${fgEscape(fontPath)}':text='${fgEscape('BiliMusic')}':x=w-text_w-40:y=32:fontsize=20:fontcolor=0xFFFFFF@0.32`, `[wm]`)
-      }
-    }
-    graphParts.push(`${drawCur}format=yuv420p[vout]`)
-    const filterComplex = graphParts.join(';')
-
-    args.push(
-      '-filter_complex', filterComplex,
-      '-map', '[vout]', '-map', '0:a',
-      ...encoderArgs,
-      '-c:a', 'aac', '-b:a', '192k',
-      '-r', '45',
-      '-t', duration.toFixed(3),
-      '-movflags', '+faststart',
-      outputPath,
-    )
-
-    await runFfmpeg(args, (seconds) => {
-      sendProgress(sender, { phase: 'compose', percent: Math.min(99, Math.round((seconds / duration) * 100)), message: '合成视频' })
-    })
+    // 3. 单遍合成：concat demuxer 按 duration 拼帧 → 一次编码（O(N)，无 overlay 链）
+    await writeConcatList(frames, times, duration, path.join(tempDir, 'list.txt'))
+    await composeVideo(path.join(tempDir, 'list.txt'), audioPath, outputPath, duration, sender)
 
     sendProgress(sender, { phase: 'done', percent: 100, filePath: outputPath })
     return { filePath: outputPath }
