@@ -5,7 +5,7 @@ import { usePlayer } from '@/contexts/PlayerContext'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { downloadTrack } from '@/services/api'
 import { cleanTitle, getLyricForTrack, formatLrc } from '@/services/lyrics'
-import { exportTrackMv, isMvExportSupported } from '@/services/mvExport'
+import { exportTrackMv, isMvExportSupported, cancelMvExport } from '@/services/mvExport'
 import { saveDownloadRecord } from '@/utils/storage'
 
 import type { DownloadFormat } from '@/types'
@@ -206,14 +206,21 @@ export default function DownloadButton({
 
   if (!actualBvid || !actualId) return null
 
+  // MV 导出中按钮即取消入口（此前单曲导出无法取消，只能等它跑完）
+  const handleCancelMv = () => {
+    cancelMvExport()
+    setMvStatus('正在取消...')
+  }
+  const toggleMenu = () => { if (!mvExporting) setMenuOpen(o => !o) }
+
   return (
     <div style={{ position: 'relative', display: 'inline-flex' }} onClick={(e) => e.stopPropagation()}>
       {variant === 'icon' ? (
         <button
           className="track-action-button"
-          title={error || (done ? '下载完成' : mvExporting ? `导出 MV 中：${mvStatus}` : downloading ? '下载中...' : '下载')}
-          onClick={() => setMenuOpen(o => !o)}
-          disabled={downloading || mvExporting}
+          title={error || (done ? '下载完成' : mvExporting ? `导出 MV 中：${mvStatus}（点击取消）` : downloading ? '下载中...' : '下载')}
+          onClick={mvExporting ? handleCancelMv : toggleMenu}
+          disabled={downloading}
           style={{ color: error ? '#ff375f' : done ? '#30d158' : undefined }}
         >
           {downloading || mvExporting ? <Loader2 size={size} className="spin" /> :
@@ -223,9 +230,9 @@ export default function DownloadButton({
       ) : (
         <button
           className="now-playing-round"
-          title={error || (done ? '下载完成' : mvExporting ? `导出 MV 中：${mvStatus}` : downloading ? '下载中...' : '下载')}
-          onClick={() => setMenuOpen(o => !o)}
-          disabled={downloading || mvExporting}
+          title={error || (done ? '下载完成' : mvExporting ? `导出 MV 中：${mvStatus}（点击取消）` : downloading ? '下载中...' : '下载')}
+          onClick={mvExporting ? handleCancelMv : toggleMenu}
+          disabled={downloading}
           style={{ color: error ? '#ff375f' : done ? '#30d158' : undefined }}
         >
           {downloading || mvExporting ? <Loader2 size={size} className="spin" /> :

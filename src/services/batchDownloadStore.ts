@@ -6,7 +6,7 @@
 import { downloadTrack } from '@/services/api'
 import { platform } from '@/platform'
 import { cleanTitle, getLyricForTrack, formatLrc } from '@/services/lyrics'
-import { exportTrackMv } from '@/services/mvExport'
+import { exportTrackMv, cancelMvExport } from '@/services/mvExport'
 import { loadAppSettings, saveDownloadRecord } from '@/utils/storage'
 import type { Track, DownloadFormat } from '@/types'
 
@@ -262,9 +262,11 @@ async function run() {
   setState({ running: false, progress: null })
 }
 
-/** 取消下载（当前文件完成后停止后续） */
+/** 取消下载（当前文件完成后停止后续；MV 导出走主进程即时取消，不等它跑完） */
 export function cancelBatchDownload() {
   cancelled = true
+  // mv 格式的当前文件可能是分钟级的 MV 导出，只置标志要等整首跑完才停，直接同步取消
+  cancelMvExport()
 }
 
 /** 隐藏对话框（后台继续下载） */

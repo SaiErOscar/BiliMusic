@@ -82,11 +82,12 @@ function resolveFfmpegPath(): string {
   } catch (e) {
     console.warn('[mvExport] ffmpeg-static require failed:', e)
   }
-  // 策略 2：直接检查常见路径（asar.unpacked 优先）
+  // 策略 2：直接检查常见路径（asar.unpacked 优先；二进制名按平台区分，非 Windows 的 ffmpeg-static 无 .exe）
+  const exeName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
   const candidates = [
-    path.join(process.resourcesPath || '', 'app.asar.unpacked/node_modules/ffmpeg-static/ffmpeg.exe'),
-    path.join(__dirname, '../node_modules/ffmpeg-static/ffmpeg.exe'),
-    path.join(__dirname, '../../node_modules/ffmpeg-static/ffmpeg.exe'),
+    path.join(process.resourcesPath || '', `app.asar.unpacked/node_modules/ffmpeg-static/${exeName}`),
+    path.join(__dirname, `../node_modules/ffmpeg-static/${exeName}`),
+    path.join(__dirname, `../../node_modules/ffmpeg-static/${exeName}`),
   ]
   for (const p of candidates) {
     if (fsSync.existsSync(p)) return p
@@ -235,7 +236,7 @@ async function composeVideo(listPath: string, audioPath: string, outputPath: str
 function probeDuration(filePath: string): Promise<number> {
   return new Promise((resolve) => {
     try {
-      const proc = trackChild(spawn(ffmpegPath, ['-i', filePath, '-f', 'null', '-'], { windowsHide: true }))
+      const proc = trackChild(spawn(ffmpegPath, ['-i', filePath, '-t', '0.2', '-f', 'null', '-'], { windowsHide: true }))
       let stderr = ''
       proc.stderr?.on('data', (c: Buffer) => { stderr += c.toString() })
       proc.on('error', () => resolve(0))
@@ -429,7 +430,20 @@ function sendProgress(sender: Electron.WebContents | null, progress: MvExportPro
   } catch { /* sender 已销毁 */ }
 }
 
-async function runExport(payload: MvExportPayload, sender: Electron.WebContents | null): Promise<{ filePath: string }> {
+function validateExportPayload(payload: MvExportPayload): string | null {
+  if (!payload || typeof payload.audioUrl !== 'string' || !payload.audioUrl) return '缺少音频地址'
+  // 音频/封面直链只允许 http(s)（渲染层被攻破时不至于 spawn 任意协议）
+  if (!/^https?:\/\//i.test(payload.audioUrl)) return '音频地址协议不合法'
+  if (payload.coverUrl && !/^https?:\/\//i.test(payload.coverUrl)) return '封面地址协议不合法'
+  // 输出目录：绝对路径且无空字节/回跳（与 markFolderPurpose 的加固同一防线思路）
+  if (payload.outputDir != null) {
+    if (typeof payload.outputDir !== 'string' || !path.isAbsolute(payload.outputDir)) return '输出目录不合法'
+    if (payload.outputDir.includes('\0') || /(^|[\\/])\.\.([\\/]|$)/.test(payload.outputDir)) return '输出目录不合法'
+  }
+  return null
+}
+
+async function runExport(payload: MvExportPayload, sender: Electron.WebContents | null, job: MvExportJob): Promise<{ filePath: string }> {
   const outDir = path.join(payload.outputDir || path.join(app.getPath('userData'), 'downloads'), 'MV')
   await fs.mkdir(outDir, { recursive: true })
   const safeName = (payload.title || 'mv').replace(/[\\/:*?"<>|]/g, '_').trim() || 'mv'
@@ -441,8 +455,7 @@ async function runExport(payload: MvExportPayload, sender: Electron.WebContents 
 
   const tempDir = path.join(os.tmpdir(), `bilimusic-mv-${Date.now()}`)
   await fs.mkdir(tempDir, { recursive: true })
-  const job: MvExportJob = { cancelRequested: false, tempDir }
-  currentJob = job
+  job.tempDir = tempDir
 
   try {
     // 1. 下载音频
@@ -483,11 +496,14 @@ export function registerMvExportHandlers() {
     if (currentJob) {
       return { ok: false, message: '已有导出任务进行中' }
     }
-    if (!payload || typeof payload.audioUrl !== 'string' || !payload.audioUrl) {
-      return { ok: false, message: '缺少音频地址' }
-    }
+    const invalid = validateExportPayload(payload)
+    if (invalid) return { ok: false, message: invalid }
+    // job 在任何 await 之前同步登记：原实现 currentJob 赋值落在 runExport 内两次 mkdir 之后，
+    // 检查-赋值窗口期内第二个 invoke 可并发通过守卫（且 runFfmpeg 绑定全局 job 会杀错进程）
+    const job: MvExportJob = { cancelRequested: false }
+    currentJob = job
     try {
-      const { filePath } = await runExport(payload, event.sender)
+      const { filePath } = await runExport(payload, event.sender, job)
       return { ok: true, filePath }
     } catch (e) {
       // 取消路径下离屏窗口被 destroy，循环内调用会以「Object has been destroyed」冒泡，归一为「已取消」
