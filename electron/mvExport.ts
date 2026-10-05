@@ -59,16 +59,26 @@ const PROGRESS_Y = 656
 // ===== ffmpeg 路径解析（与 biliApi.ts 同策略：ffmpeg-static 优先，asar.unpacked 回退） =====
 
 function resolveFfmpegPath(): string {
+  // 策略 1：通过 createRequire 解析 ffmpeg-static
+  // 打包后二进制在 app.asar.unpacked（asarUnpack 配置），require 返回的路径还在 asar 内（虚拟路径，
+  // spawn ENOENT），必须改写为 .unpacked 实体路径——与 biliApi.ts 同一策略
   try {
-    const fixedPath = require('ffmpeg-static') as string
-    if (fixedPath && fsSync.existsSync(fixedPath)) return fixedPath
+    const rawPath = require('ffmpeg-static') as string
+    const fixedPath = rawPath.includes('app.asar')
+      ? rawPath.replace('app.asar', 'app.asar.unpacked')
+      : rawPath
+    if (fixedPath && fsSync.existsSync(fixedPath)) {
+      console.log('[mvExport] ffmpeg resolved (ffmpeg-static):', fixedPath)
+      return fixedPath
+    }
     console.warn('[mvExport] ffmpeg-static path not exists:', fixedPath)
   } catch (e) {
     console.warn('[mvExport] ffmpeg-static require failed:', e)
   }
+  // 策略 2：直接检查常见路径（asar.unpacked 优先）
   const candidates = [
-    path.join(__dirname, '../node_modules/ffmpeg-static/ffmpeg.exe'),
     path.join(process.resourcesPath || '', 'app.asar.unpacked/node_modules/ffmpeg-static/ffmpeg.exe'),
+    path.join(__dirname, '../node_modules/ffmpeg-static/ffmpeg.exe'),
     path.join(__dirname, '../../node_modules/ffmpeg-static/ffmpeg.exe'),
   ]
   for (const p of candidates) {
