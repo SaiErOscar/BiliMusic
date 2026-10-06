@@ -8,6 +8,7 @@ import { platform } from '@/platform'
 import { cleanTitle, getLyricForTrack, formatLrc } from '@/services/lyrics'
 import { exportTrackMv, cancelMvExport } from '@/services/mvExport'
 import { loadAppSettings, saveDownloadRecord } from '@/utils/storage'
+import { pathDirname } from '@/utils/paths'
 import type { Track, DownloadFormat } from '@/types'
 
 export type NameMode = 'video' | 'song' | 'custom'
@@ -190,13 +191,17 @@ async function run() {
           const { filePath: mvPath } = await exportTrackMv(track, {
             quality: qualityPref,
             watermark: appSettings.mvWatermark,
+            smoothness: appSettings.mvSmoothness,
             outputDir: dir,
+            // ownerTag（v1.4.7-pre1 修复1）：批量取消只杀批量自己发起的任务
+            ownerTag: 'batch',
             onProgress: (p) => {
               if (!state.running || !state.progress) return
               setState({
                 progress: {
                   ...state.progress,
-                  filePercent: p.phase === 'done' ? 100 : p.percent,
+                  // 失败（phase:'error'）不置 100%，进度保持原值只更新文案（修复7）
+                  filePercent: p.phase === 'error' ? (state.progress.filePercent ?? 0) : p.phase === 'done' ? 100 : p.percent,
                   filePhase: p.message || '',
                 },
               })
@@ -204,7 +209,8 @@ async function run() {
           })
           // 记录与实际产物对齐：MV 落在 <dir>/MV/<名>.mp4，主进程同名防覆盖可能带序号
           const mvName = mvPath.split(/[\\/]/).pop() || filename
-          const mvDir = mvPath.slice(0, mvPath.length - mvName.length - 1).replace(/\//g, '\\')
+          // 目录按路径中实际出现的分隔符解析（v1.4.7-pre1 修复4，不再强制反斜杠）
+          const mvDir = pathDirname(mvPath)
           saveDownloadRecord({
             id: crypto.randomUUID ? crypto.randomUUID() : `dl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
             title: filename,
@@ -265,8 +271,10 @@ async function run() {
 /** 取消下载（当前文件完成后停止后续；MV 导出走主进程即时取消，不等它跑完） */
 export function cancelBatchDownload() {
   cancelled = true
-  // mv 格式的当前文件可能是分钟级的 MV 导出，只置标志要等整首跑完才停，直接同步取消
-  cancelMvExport()
+  // mv 格式的当前文件可能是分钟级的 MV 导出，只置标志要等整首跑完才停，直接同步取消。
+  // 带 'batch' 标签（v1.4.7-pre1 修复1）：只取消批量自己发起的任务，
+  // 不再误杀并发中的无关单曲 MV 导出
+  cancelMvExport('batch')
 }
 
 /** 隐藏对话框（后台继续下载） */

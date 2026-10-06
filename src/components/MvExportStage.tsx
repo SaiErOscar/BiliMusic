@@ -211,7 +211,8 @@ export default function MvExportStage() {
                   currentTime={time}
                   synced
                   onSeek={() => {}}
-                  scrollBehavior="auto"
+                  // v1.4.7-pre1：密网格下捕获滚动中间态，换行滚动在成片里连续而非跳变
+                  scrollBehavior="smooth"
                 />
               ) : (
                 <div className="lyrics-centered">

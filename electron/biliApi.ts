@@ -82,6 +82,18 @@ function sanitizeFilename(filename: string): string {
     .trim()
 }
 
+/**
+ * 下载记录类 IPC 的路径校验（v1.4.7-pre1 修复5）：绝对路径、无空字节、无上跳段，
+ * 与 mvExport.validateExportPayload 对 outputDir 的加固同一防线——渲染层被攻破时
+ * 不至于借这三个 IPC 对任意相对路径做 stat / 打开 / 定位。
+ */
+function isValidRecordPath(p: unknown): p is string {
+  if (typeof p !== 'string' || !p || !path.isAbsolute(p)) return false
+  if (p.includes('\0')) return false
+  if (/(^|[\\/])\.\.([\\/]|$)/.test(p)) return false
+  return true
+}
+
 // ===== 子进程登记与退出清理 =====
 // 正常退出后偶发残留挂死进程（任务管理器内存 12~240KB）：
 // 退出路径未终止 ffmpeg/attrib 子进程，句柄互等待导致主进程无法落盘退出。
@@ -523,7 +535,7 @@ export function registerBiliApiHandlers() {
   // 下载记录：检测文件是否仍存在于记录路径（不存在则 UI 不展示打开按钮）
   ipcMain.handle('bili:pathExists', async (_event, filePath: string) => {
     try {
-      if (!filePath || typeof filePath !== 'string') return false
+      if (!isValidRecordPath(filePath)) return false
       const stat = await fs.stat(filePath)
       return stat.isFile()
     } catch {
@@ -533,14 +545,14 @@ export function registerBiliApiHandlers() {
 
   // 下载记录：用系统默认程序打开文件
   ipcMain.handle('bili:openRecordFile', async (_event, filePath: string) => {
-    if (!filePath || typeof filePath !== 'string') return { success: false }
+    if (!isValidRecordPath(filePath)) return { success: false, message: '路径不合法' }
     const err = await shell.openPath(filePath)
     return { success: !err, message: err || undefined }
   })
 
   // 下载记录：在文件管理器中定位文件
   ipcMain.handle('bili:showRecordInFolder', async (_event, filePath: string) => {
-    if (!filePath || typeof filePath !== 'string') return { success: false }
+    if (!isValidRecordPath(filePath)) return { success: false }
     shell.showItemInFolder(filePath)
     return { success: true }
   })

@@ -22,11 +22,14 @@ export interface MvExportPayload {
   duration: number
   lyrics: { time: number; text: string }[]
   watermark: boolean
+  /** 流畅度档位（快速/标准/流畅/极致），缺省标准 */
+  smoothness?: string
   outputDir?: string
 }
 
 export interface MvExportProgress {
-  phase: 'audio' | 'render' | 'compose' | 'done'
+  /** error：任务失败（与 done 分离，批量侧不会把失败当 100% 完成） */
+  phase: 'audio' | 'render' | 'compose' | 'done' | 'error'
   percent: number
   message?: string
   filePath?: string
@@ -34,8 +37,9 @@ export interface MvExportProgress {
 
 /** v1.4.6 MV 导出能力（桌面端专属，electronAPI 平铺暴露） */
 export interface MvExportApi {
-  exportMvSingle: (payload: MvExportPayload) => Promise<{ ok: boolean; filePath?: string; message?: string }>
-  cancelMvExport: () => Promise<{ ok: boolean }>
+  exportMvSingle: (payload: MvExportPayload, ownerTag?: string) => Promise<{ ok: boolean; filePath?: string; message?: string }>
+  /** ownerTag：批量下载传 'batch'，取消按发起方隔离，不误杀并发中的单曲导出 */
+  cancelMvExport: (ownerTag?: string) => Promise<{ ok: boolean }>
   onMvExportProgress: (callback: (progress: MvExportProgress) => void) => () => void
 }
 

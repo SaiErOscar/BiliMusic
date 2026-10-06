@@ -43,12 +43,15 @@ export interface MvExportPayload {
   lyrics: { time: number; text: string }[]
   /** 是否添加 BiliMusic 角标水印（AppSettings.mvWatermark） */
   watermark: boolean
+  /** 流畅度档位（快速/标准/流畅/极致），缺省取标准 */
+  smoothness?: string
   /** 自定义输出目录（下载目录），MV 落在其下 MV/ 子目录 */
   outputDir?: string
 }
 
 export interface MvExportProgress {
-  phase: 'audio' | 'render' | 'compose' | 'done'
+  /** error：任务失败（与 done 分离，批量侧不会把失败当 100% 完成） */
+  phase: 'audio' | 'render' | 'compose' | 'done' | 'error'
   percent: number
   message?: string
   filePath?: string
@@ -56,10 +59,21 @@ export interface MvExportProgress {
 
 const WIDTH = 1280
 const HEIGHT = 720
-/** 捕获时间网格步长（秒）：进度条/时间数字的刷新粒度 */
-const CAPTURE_STEP = 0.5
-/** 最大关键帧数（超出自动放粗步长），控制渲染耗时上限 */
-const MAX_FRAMES = 720
+/**
+ * 流畅度档位（v1.4.7-pre1，步长为用户定案值）：网格步长即进度条/歌词的视觉更新粒度，
+ * 上限封顶控制渲染耗时与临时盘最坏占用（超出自动放粗步长）。
+ * 快速=0.15s、标准=0.1s（默认）、流畅=0.05s、极致=0.03s（接近 45fps 满视觉流畅）。
+ */
+const SMOOTHNESS_PRESETS: Record<string, { step: number; maxFrames: number }> = {
+  '快速': { step: 0.15, maxFrames: 3600 },
+  '标准': { step: 0.1, maxFrames: 4800 },
+  '流畅': { step: 0.05, maxFrames: 6000 },
+  '极致': { step: 0.03, maxFrames: 9000 },
+}
+const DEFAULT_SMOOTHNESS = '标准'
+/** 并行分段渲染：每窗最多捕获帧数，K 自适应 min(8, ceil(总帧数/400))，失败回退单窗 */
+const FRAMES_PER_WORKER = 400
+const MAX_PARALLEL_WINDOWS = 8
 /** 封面降采样尺寸（CSS 显示 400px，高 DPI 留足余量） */
 const COVER_SIZE = 800
 
@@ -116,9 +130,12 @@ export function killMvExportChildren() {
 // ===== 取消支持 =====
 
 interface MvExportJob {
+  /** 发起方标签：批量下载传 'batch'，单曲导出为 null。取消按标签隔离（修复1） */
+  ownerTag: string | null
   cancelRequested: boolean
   proc?: ReturnType<typeof spawn>
-  window?: BrowserWindow
+  /** 并行捕获的全部离屏窗口（v1.4.7-pre1 K 窗分段渲染） */
+  windows: BrowserWindow[]
   tempDir?: string
 }
 let currentJob: MvExportJob | null = null
@@ -135,10 +152,11 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * 生成捕获时间点：固定网格（进度条/时间数字刷新）∪ 歌词行起点（高亮切换精确落位）。
+ * 步长与帧数上限来自流畅度档位；超出上限自动放粗步长（超长歌降档保护）。
  * 返回升序去重数组，首点恒为 0。
  */
-function buildCaptureTimes(lyrics: { time: number; text: string }[], duration: number): number[] {
-  const step = Math.max(CAPTURE_STEP, duration / MAX_FRAMES)
+function buildCaptureTimes(lyrics: { time: number; text: string }[], duration: number, step0: number, maxFrames: number): number[] {
+  const step = Math.max(step0, duration / maxFrames)
   const round = (t: number) => Math.round(t * 1000) / 1000
   const set = new Set<number>([0])
   for (let t = step; t < duration; t += step) set.add(round(t))
@@ -254,7 +272,10 @@ function probeDuration(filePath: string): Promise<number> {
 // ===== 主流程 =====
 
 async function downloadToFile(url: string, filePath: string, label: string, onPercent?: (p: number) => void): Promise<void> {
-  const response = await net.fetch(url, { headers: { Referer: BILI_REFERER, 'User-Agent': BILI_UA } })
+  // Referer 防盗链只对 https CDN 有意义；Chromium 对 http 目标注入 Referer 直接
+  // ERR_BLOCKED_BY_CLIENT（harness 本地回环音源因此改走无 Referer 分支）
+  const headers = url.startsWith('https://') ? { Referer: BILI_REFERER, 'User-Agent': BILI_UA } : { 'User-Agent': BILI_UA }
+  const response = await net.fetch(url, { headers })
   if (!response.ok) throw new Error(`下载失败: HTTP ${response.status} ${response.statusText}`)
   const total = Number(response.headers.get('content-length') || 0)
   const reader = response.body?.getReader()
@@ -266,17 +287,22 @@ async function downloadToFile(url: string, filePath: string, label: string, onPe
   }
   const writeStream = fsSync.createWriteStream(filePath)
   let received = 0
+  // error 监听常驻（修复2）：只覆盖背压 await 期的话，write() 返回 true 后磁盘异步失败
+  // （磁盘满/权限收回）无人监听，Node 会以 uncaught exception 崩溃主进程。
+  let streamError: Error | null = null
+  const onError = (err: Error) => { streamError = err }
+  writeStream.on('error', onError)
   try {
     for (;;) {
       if (currentJob?.cancelRequested) throw new Error('已取消')
+      if (streamError) throw streamError
       const { done, value } = await reader.read()
       if (done) break
       if (value) {
         received += value.length
         if (!writeStream.write(value)) {
-          await new Promise<void>((resolve, reject) => {
+          await new Promise<void>((resolve) => {
             writeStream.once('drain', resolve)
-            writeStream.once('error', reject)
           })
         }
         if (total > 0) onPercent?.(Math.round((received / total) * 100))
@@ -285,6 +311,7 @@ async function downloadToFile(url: string, filePath: string, label: string, onPe
     }
     await new Promise<void>((resolve, reject) => writeStream.end((err) => (err ? reject(err) : resolve())))
   } finally {
+    writeStream.off('error', onError)
     if (!writeStream.closed) writeStream.destroy()
   }
 }
@@ -333,10 +360,12 @@ function waitForPaint(win: BrowserWindow): Promise<void> {
 /**
  * 驱动真实 UI 舞台逐帧捕获：加载 #/mv-export 舞台 → 注入曲目信息 → 等就绪 →
  * 按捕获时间轴步进「当前播放时间」，每步等一帧 paint 后 capturePage 落盘 JPEG。
+ *
+ * v1.4.7-pre1 并行分段渲染：times 按时间序切 K 片，K 个离屏窗口独立捕获后按序合并；
+ * K = min(8, ceil(总帧数/400))。相邻帧视觉相同（密集采样下进度条亚像素位移不产生新画面）
+ * 时跳过落盘，并入前一帧 duration（writeConcatList 按 keptTimes 计段），削减合成输入。
  */
-async function captureFrames(job: MvExportJob, payload: MvExportPayload, times: number[], duration: number, tempDir: string, sender: Electron.WebContents | null): Promise<string[]> {
-  const coverDataUrl = await fetchCoverDataUrl(payload.coverUrl)
-
+function createCaptureWindow(job: MvExportJob): BrowserWindow {
   const win = new BrowserWindow({
     width: WIDTH,
     height: HEIGHT,
@@ -351,15 +380,30 @@ async function captureFrames(job: MvExportJob, payload: MvExportPayload, times: 
       backgroundThrottling: false,
     },
   })
-  job.window = win
+  job.windows.push(win)
   win.webContents.setBackgroundThrottling(false)
   win.webContents.setFrameRate(60)
+  return win
+}
 
-  const frames: string[] = []
+/** 单个离屏窗口捕获一个连续时间段：返回实际落盘的帧文件与其时间点（相同帧已合并） */
+async function captureChunkWorker(
+  job: MvExportJob,
+  payload: MvExportPayload,
+  duration: number,
+  partIndex: number,
+  chunk: number[],
+  tempDir: string,
+  coverDataUrl: string,
+  sender: Electron.WebContents | null,
+  doneCount: { value: number },
+  totalFrames: number,
+): Promise<{ files: string[]; times: number[] }> {
+  const win = createCaptureWindow(job)
+  const files: string[] = []
+  const keptTimes: number[] = []
   try {
     await win.loadURL(resolveStageUrl())
-
-    // 注入曲目信息，等待字体/封面就绪（舞台置 window.__mvReady）
     await win.webContents.executeJavaScript(
       `window.__mvInit(${JSON.stringify(JSON.stringify({
         title: payload.title,
@@ -378,36 +422,103 @@ async function captureFrames(job: MvExportJob, payload: MvExportPayload, times: 
       await sleep(120)
     }
 
-    // 主题/布局入场是静态的，先空转一帧让首屏稳定
+    // 主题/布局入场是静态的，先空转一帧让首屏稳定（每窗各自稳定一次）
     win.webContents.invalidate()
     await waitForPaint(win)
 
-    for (let i = 0; i < times.length; i++) {
+    let prevJpeg: Buffer | null = null
+    for (let i = 0; i < chunk.length; i++) {
       if (job.cancelRequested || win.isDestroyed()) throw new Error('已取消')
-      await win.webContents.executeJavaScript(`window.__mvSetTime(${times[i].toFixed(3)})`)
+      await win.webContents.executeJavaScript(`window.__mvSetTime(${chunk[i].toFixed(3)})`)
       win.webContents.invalidate()
       await waitForPaint(win)
       if (win.isDestroyed()) throw new Error('已取消')
       const img = await win.webContents.capturePage()
-      const filePath = path.join(tempDir, `kf_${String(i).padStart(4, '0')}.jpg`)
+      const jpeg = img.toJPEG(88)
+      // 相同帧合并：密集采样下相邻帧常完全一致（仅进度条亚像素位移不足产生新像素），
+      // 字节级相同则不落盘，合成段 duration 自动并入前一帧
+      if (prevJpeg && jpeg.equals(prevJpeg)) {
+        doneCount.value++
+        continue
+      }
+      prevJpeg = jpeg
+      const filePath = path.join(tempDir, `p${partIndex}_kf_${String(i).padStart(5, '0')}.jpg`)
       // 离屏缓冲按显示器 DPI 放大（如 175% → 2242×1262），保留原分辨率落盘，
       // 合成阶段由 ffmpeg lanczos 高质量缩回 720p，比 NativeImage 缩放更锐
-      await fs.writeFile(filePath, img.toJPEG(88))
-      frames.push(filePath)
-      if (i % 5 === 0 || i === times.length - 1) {
+      await fs.writeFile(filePath, jpeg)
+      files.push(filePath)
+      keptTimes.push(chunk[i])
+      doneCount.value++
+      if (doneCount.value % 5 === 0 || doneCount.value === totalFrames) {
         sendProgress(sender, {
           phase: 'render',
-          percent: Math.round(((i + 1) / times.length) * 100),
-          message: `渲染播放页 ${i + 1}/${times.length} 帧`,
+          percent: Math.round((doneCount.value / totalFrames) * 100),
+          message: `渲染播放页 ${doneCount.value}/${totalFrames} 帧`,
         })
       }
     }
   } finally {
     if (!win.isDestroyed()) win.destroy()
-    if (job.window === win) job.window = undefined
+    const idx = job.windows.indexOf(win)
+    if (idx >= 0) job.windows.splice(idx, 1)
   }
-  if (!frames.length) throw new Error('未捕获到任何关键帧')
-  return frames
+  return { files, times: keptTimes }
+}
+
+async function captureWithParts(
+  job: MvExportJob,
+  payload: MvExportPayload,
+  times: number[],
+  duration: number,
+  tempDir: string,
+  coverDataUrl: string,
+  parts: number,
+  sender: Electron.WebContents | null,
+): Promise<{ files: string[]; times: number[] }> {
+  // 按时间序切连续片段，各窗负责一段；全局帧序 = 片段序拼接
+  const chunkSize = Math.ceil(times.length / parts)
+  const doneCount = { value: 0 }
+  const workers: Promise<{ files: string[]; times: number[] }>[] = []
+  for (let p = 0; p < parts; p++) {
+    const chunk = times.slice(p * chunkSize, (p + 1) * chunkSize)
+    if (chunk.length) workers.push(captureChunkWorker(job, payload, duration, p, chunk, tempDir, coverDataUrl, sender, doneCount, times.length))
+  }
+  const results = await Promise.all(workers)
+  const files: string[] = []
+  const keptTimes: number[] = []
+  for (const r of results) {
+    files.push(...r.files)
+    keptTimes.push(...r.times)
+  }
+  if (!files.length) throw new Error('未捕获到任何关键帧')
+  return { files, times: keptTimes }
+}
+
+async function captureFrames(
+  job: MvExportJob,
+  payload: MvExportPayload,
+  times: number[],
+  duration: number,
+  tempDir: string,
+  sender: Electron.WebContents | null,
+): Promise<{ files: string[]; times: number[] }> {
+  const coverDataUrl = await fetchCoverDataUrl(payload.coverUrl)
+  const parts = Math.min(MAX_PARALLEL_WINDOWS, Math.max(1, Math.ceil(times.length / FRAMES_PER_WORKER)))
+  try {
+    try {
+      return await captureWithParts(job, payload, times, duration, tempDir, coverDataUrl, parts, sender)
+    } catch (e) {
+      if (job.cancelRequested) throw new Error('已取消')
+      if (parts === 1) throw e
+      // 多窗异常（GPU 争用/资源不足等）回退单窗重试一次
+      console.warn(`[mvExport] ${parts}-window capture failed, retry single window:`, e)
+      return await captureWithParts(job, payload, times, duration, tempDir, coverDataUrl, 1, sender)
+    }
+  } finally {
+    for (const w of job.windows.splice(0)) {
+      try { if (!w.isDestroyed()) w.destroy() } catch { /* 已销毁 */ }
+    }
+  }
 }
 
 /** 生成 concat demuxer 清单：每帧一个条目 + duration（末帧补一次重复行，concat 规范要求） */
@@ -468,19 +579,22 @@ async function runExport(payload: MvExportPayload, sender: Electron.WebContents 
       }
     })
 
-    // 时长兜底：渲染层 track.duration 可能为 0（如 avid/cid 回退源），以音频实测为准
-    let duration = Math.max(1, payload.duration || 0)
-    if (!payload.duration || payload.duration < 1) {
+    // 时长确定：渲染层 track.duration 可能为 0（如 avid/cid 回退源），以音频实测为准。
+    // 探测也拿不到时显式报错中止（修复6）：旧的 max(1,…) 静默兜底会把分钟级音频截成 1 秒成片
+    let duration = payload.duration || 0
+    if (duration < 1) {
       const probed = await probeDuration(audioPath)
       if (probed > 0) duration = probed
     }
+    if (duration < 1) throw new Error('无法确定音频时长（入参缺失且探测失败），已中止导出')
 
-    // 2. 真实 UI 逐帧捕获
-    const times = buildCaptureTimes(payload.lyrics, duration)
-    const frames = await captureFrames(job, payload, times, duration, tempDir, sender)
+    // 2. 真实 UI 逐帧捕获（按流畅度档位定步长，K 窗并行）
+    const preset = SMOOTHNESS_PRESETS[payload.smoothness || ''] || SMOOTHNESS_PRESETS[DEFAULT_SMOOTHNESS]
+    const times = buildCaptureTimes(payload.lyrics, duration, preset.step, preset.maxFrames)
+    const { files: frames, times: keptTimes } = await captureFrames(job, payload, times, duration, tempDir, sender)
 
     // 3. 单遍合成：concat demuxer 按 duration 拼帧 → 一次编码（O(N)，无 overlay 链）
-    await writeConcatList(frames, times, duration, path.join(tempDir, 'list.txt'))
+    await writeConcatList(frames, keptTimes, duration, path.join(tempDir, 'list.txt'))
     await composeVideo(path.join(tempDir, 'list.txt'), audioPath, outputPath, duration, sender)
 
     sendProgress(sender, { phase: 'done', percent: 100, filePath: outputPath })
@@ -492,7 +606,7 @@ async function runExport(payload: MvExportPayload, sender: Electron.WebContents 
 }
 
 export function registerMvExportHandlers() {
-  ipcMain.handle('mv:exportSingle', async (event, payload: MvExportPayload) => {
+  ipcMain.handle('mv:exportSingle', async (event, payload: MvExportPayload, ownerTag?: string) => {
     if (currentJob) {
       return { ok: false, message: '已有导出任务进行中' }
     }
@@ -500,33 +614,38 @@ export function registerMvExportHandlers() {
     if (invalid) return { ok: false, message: invalid }
     // job 在任何 await 之前同步登记：原实现 currentJob 赋值落在 runExport 内两次 mkdir 之后，
     // 检查-赋值窗口期内第二个 invoke 可并发通过守卫（且 runFfmpeg 绑定全局 job 会杀错进程）
-    const job: MvExportJob = { cancelRequested: false }
+    const job: MvExportJob = { ownerTag: ownerTag || null, cancelRequested: false, windows: [] }
     currentJob = job
     try {
       const { filePath } = await runExport(payload, event.sender, job)
       return { ok: true, filePath }
     } catch (e) {
-      // 取消路径下离屏窗口被 destroy，循环内调用会以「Object has been destroyed」冒泡，归一为「已取消」
+      // 取消路径下离屏窗口被 destroy，循环内调用会以「Object has been destroyed」冒泡，归一为「已取消」。
+      // 用局部引用判断（修复3）：runExport 的 finally 先于本 catch 执行并把全局 currentJob 置 null，
+      // 读全局恒 false，渲染阶段取消会把英文原文错误抛给用户
       const raw = e instanceof Error ? e.message : String(e)
-      const message = currentJob?.cancelRequested && raw.includes('Object has been destroyed') ? '已取消' : raw
+      const message = job.cancelRequested && raw.includes('Object has been destroyed') ? '已取消' : raw
       console.warn('[mvExport] export failed:', message)
       if (message !== '已取消') {
-        sendProgress(event.sender, { phase: 'done', percent: 100, message })
+        // 失败与完成分离（修复7）：不再发 phase:'done'/percent:100，批量侧不会把失败瞬间当 100%
+        sendProgress(event.sender, { phase: 'error', percent: 0, message })
       }
       return { ok: false, message }
     } finally {
-      if (currentJob) {
-        // runExport 的 finally 已清理 currentJob（正常路径）；异常路径兜底
-        currentJob = null
-      }
+      if (currentJob === job) currentJob = null
     }
   })
 
-  ipcMain.handle('mv:cancel', () => {
+  ipcMain.handle('mv:cancel', (_event, ownerTag?: string) => {
     if (!currentJob) return { ok: false }
+    // ownerTag 隔离（修复1）：批量下载传 'batch'，只杀批量自己发起的任务，
+    // 不再误杀并发中的无关单曲 MV 导出；无标签（单曲取消按钮）取消当前任务
+    if (ownerTag != null && currentJob.ownerTag !== ownerTag) return { ok: false }
     currentJob.cancelRequested = true
     try { currentJob.proc?.kill() } catch { /* 已退出 */ }
-    try { currentJob.window?.destroy() } catch { /* 已销毁 */ }
+    for (const w of currentJob.windows) {
+      try { if (!w.isDestroyed()) w.destroy() } catch { /* 已销毁 */ }
+    }
     return { ok: true }
   })
 }

@@ -17,7 +17,11 @@ export type { MvExportProgress }
 export interface ExportMvOptions {
   quality?: AudioQualityPreference
   watermark: boolean
+  /** 流畅度档位（快速/标准/流畅/极致），缺省标准（AppSettings.mvSmoothness） */
+  smoothness?: string
   outputDir?: string
+  /** 发起方标签：批量下载传 'batch'，取消按发起方隔离（v1.4.7-pre1 修复1） */
+  ownerTag?: string
   /** 进度回调（下载音频/渲染关键帧/合成视频） */
   onProgress?: (progress: MvExportProgress) => void
 }
@@ -32,8 +36,8 @@ export function subscribeMvExportProgress(callback: (progress: MvExportProgress)
   return subscribe ? subscribe(callback) : (() => {})
 }
 
-export function cancelMvExport(): void {
-  platform.mvExport?.cancelMvExport?.()
+export function cancelMvExport(ownerTag?: string): void {
+  platform.mvExport?.cancelMvExport?.(ownerTag)
 }
 
 /**
@@ -86,8 +90,9 @@ export async function exportTrackMv(
       duration: track.duration || 0,
       lyrics: lines,
       watermark: options.watermark,
+      smoothness: options.smoothness,
       outputDir: options.outputDir,
-    })
+    }, options.ownerTag)
     if (!result.ok || !result.filePath) {
       throw new Error(result.message || 'MV 导出失败')
     }

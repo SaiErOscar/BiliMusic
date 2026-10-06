@@ -11,6 +11,7 @@ import {
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { loadDownloadRecords, clearDownloadRecords, DOWNLOADS_CHANGED_EVENT } from '@/utils/storage'
 import type { DownloadRecord } from '@/types'
+import { joinPath as joinPathNative } from '@/utils/paths'
 import { platform } from '@/platform'
 
 export default function Downloads() {
@@ -303,10 +304,10 @@ function DownloadMetric({
   )
 }
 
-/** 路径拼接（记录层无 path 模块，统一斜杠风格交给系统处理） */
+/** 路径拼接（记录层无 path 模块；分隔符按运行平台，v1.4.7-pre1 修复4，不再恒拼 '\'） */
+const PATH_SEP = platform.runtime?.platform === 'win32' ? '\\' : '/'
 function joinPath(dir: string, name: string): string {
-  if (!dir) return name
-  return `${dir.replace(/[\\/]+$/, '')}\\${name}`
+  return joinPathNative(dir, name, PATH_SEP)
 }
 
 /** 格式标签（音频/视频/MV），与行首图标同色系 */

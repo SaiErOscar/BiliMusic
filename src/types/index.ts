@@ -78,6 +78,8 @@ export interface AppSettings {
   autoLyricControlColor: string
   // v1.4.6 MV 导出：画面角落 BiliMusic 水印开关（默认开）
   mvWatermark: boolean
+  // v1.4.7-pre1 MV 导出：流畅度档位（快速 0.15s/标准 0.1s/流畅 0.05s/极致 0.03s 关键帧步长）
+  mvSmoothness: '快速' | '标准' | '流畅' | '极致'
 }
 
 export type NavItem = {

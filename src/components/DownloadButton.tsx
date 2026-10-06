@@ -7,6 +7,7 @@ import { downloadTrack } from '@/services/api'
 import { cleanTitle, getLyricForTrack, formatLrc } from '@/services/lyrics'
 import { exportTrackMv, isMvExportSupported, cancelMvExport } from '@/services/mvExport'
 import { saveDownloadRecord } from '@/utils/storage'
+import { pathDirname } from '@/utils/paths'
 
 import type { DownloadFormat } from '@/types'
 
@@ -174,6 +175,7 @@ export default function DownloadButton({
       const { filePath } = await exportTrackMv(trackForMv, {
         quality: qualityPref,
         watermark: settings.mvWatermark,
+        smoothness: settings.mvSmoothness,
         outputDir: settings.downloadDir || undefined,
         onProgress: (p) => {
           setMvStatus(p.message ? `${p.message} ${p.percent}%` : `${p.percent}%`)
@@ -189,7 +191,7 @@ export default function DownloadButton({
         format: 'mv',
         quality: qualityPref,
         filename: mvName,
-        downloadDir: filePath.slice(0, filePath.length - mvName.length - 1),
+        downloadDir: pathDirname(filePath),
         filePath,
         downloadedAt: new Date().toISOString(),
       })

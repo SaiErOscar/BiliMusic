@@ -167,11 +167,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   webdavPut: (relPath, content, etag) => ipcRenderer.invoke('webdav:put', relPath, content, etag),
   webdavDelete: (relPath) => ipcRenderer.invoke('webdav:delete', relPath),
   clearWebdav: () => ipcRenderer.invoke('webdav:clear'),
-  // v1.4.6 单首 MV 导出（离屏渲染 + ffmpeg 稀疏合成）
-  exportMvSingle: (payload) =>
-    ipcRenderer.invoke('mv:exportSingle', payload),
-  cancelMvExport: () =>
-    ipcRenderer.invoke('mv:cancel'),
+  // v1.4.6 单首 MV 导出（离屏渲染 + ffmpeg 稀疏合成）；ownerTag 用于取消隔离（v1.4.7-pre1）
+  exportMvSingle: (payload, ownerTag) =>
+    ipcRenderer.invoke('mv:exportSingle', payload, ownerTag),
+  cancelMvExport: (ownerTag) =>
+    ipcRenderer.invoke('mv:cancel', ownerTag),
   onMvExportProgress: (callback) => {
     const listener = (_event, data) => callback(data)
     ipcRenderer.on('mv:export-progress', listener)

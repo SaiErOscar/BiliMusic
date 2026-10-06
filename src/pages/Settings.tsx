@@ -312,9 +312,23 @@ export default function Settings() {
               </button>
             </SettingsRow>
             {isMvExportSupported() && (
-              <SettingsRow label="MV 导出水印" description="导出播放界面 MV 时在画面角落加 BiliMusic 角标">
-                <ToggleSwitch checked={settings.mvWatermark} onChange={() => setAppSettings({ mvWatermark: !settings.mvWatermark })} />
-              </SettingsRow>
+              <>
+                <SettingsRow label="MV 导出水印" description="导出播放界面 MV 时在画面角落加 BiliMusic 角标">
+                  <ToggleSwitch checked={settings.mvWatermark} onChange={() => setAppSettings({ mvWatermark: !settings.mvWatermark })} />
+                </SettingsRow>
+                <SettingsRow label="MV 导出流畅度" description="关键帧密度：档位越高画面越流畅，导出越慢、临时占用越大">
+                  <select
+                    className="settings-select"
+                    value={settings.mvSmoothness}
+                    onChange={(e) => setAppSettings({ mvSmoothness: e.target.value as typeof settings.mvSmoothness })}
+                  >
+                    <option value="快速">快速（0.15 秒/帧）</option>
+                    <option value="标准">标准（0.1 秒/帧）</option>
+                    <option value="流畅">流畅（0.05 秒/帧）</option>
+                    <option value="极致">极致（0.03 秒/帧）</option>
+                  </select>
+                </SettingsRow>
+              </>
             )}
           </SettingsGroup>
 
