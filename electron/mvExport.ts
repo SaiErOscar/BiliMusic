@@ -23,6 +23,7 @@ import os from 'os'
 import { spawn } from 'child_process'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
+import { resolveEncoderCandidates, type EncoderCandidate } from './encoders'
 
 const require = createRequire(import.meta.url)
 const __filename = fileURLToPath(import.meta.url)
@@ -197,27 +198,16 @@ function runFfmpeg(args: string[], options: RunFfmpegOptions = {}): Promise<void
   })
 }
 
-interface EncoderCandidate {
-  codec: string
-  /** 编码质量参数（追加在 -c:v 之后） */
-  qualityArgs: string[]
-}
-
-const ENCODER_CANDIDATES: EncoderCandidate[] = [
-  { codec: 'h264_nvenc', qualityArgs: ['-preset', 'p4', '-cq', '23'] },
-  { codec: 'h264_qsv', qualityArgs: ['-global_quality', '23'] },
-  { codec: 'h264_amf', qualityArgs: ['-quality', 'balanced'] },
-  { codec: 'libx264', qualityArgs: ['-preset', 'veryfast', '-crf', '20'] },
-]
-
 /**
  * 合成视频：编码器不做事前探测。真机实测（v1.4.6-pre3 harness）证明「探测通过 ≠ 能编完」——
  * NVENC 探测直接段错误尚可拦住，但 QSV 能通过 0.1s 试编却在真实任务里中途 device failed (-17)。
- * 所以直接用真实合成当探测：按 NVENC → QSV → AMF → libx264 逐个跑完整任务，失败回退下一个。
+ * 所以直接用真实合成当探测：候选由 GPU 厂商预判给出（encoders.ts，v1.4.7-pre2：厂商不符的
+ * 白跑候选消除，macOS 直达 videotoolbox），按序跑完整合成，失败回退下一个，libx264 保底。
  */
 async function composeVideo(listPath: string, audioPath: string, outputPath: string, duration: number, sender: Electron.WebContents | null): Promise<void> {
+  const candidates: EncoderCandidate[] = await resolveEncoderCandidates(process.platform)
   let lastError = ''
-  for (const candidate of ENCODER_CANDIDATES) {
+  for (const candidate of candidates) {
     if (currentJob?.cancelRequested) throw new Error('已取消')
     const args: string[] = [
       '-y', '-hide_banner', '-nostats',
@@ -410,6 +400,9 @@ async function captureChunkWorker(
         artist: payload.artist,
         cover: coverDataUrl,
         duration,
+        // 并行分段渲染（v1.4.7-pre2）：每窗直接落位到自己片段起点，
+        // 避免从 0 初始化后首个 __mvSetTime 触发歌词从开头滚动到对应位置的跳变入帧
+        startTime: chunk[0] || 0,
         lyrics: payload.lyrics,
         watermark: payload.watermark,
       }))})`,

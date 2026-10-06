@@ -7,8 +7,10 @@ interface LyricsViewProps {
   currentTime: number
   synced: boolean
   onSeek: (time: number) => void
-  /** 滚动动画行为；MV 导出离屏渲染传 'auto' 使换行即时落位，便于逐帧捕获 */
+  /** 滚动动画行为；MV 导出离屏渲染传 'smooth' 捕获滚动中间态 */
   scrollBehavior?: ScrollBehavior
+  /** 挂载后首次定位的行为（v1.4.7-pre2 MV 并行分段：初始即落位，不播从顶部滚入的动画）；缺省同 scrollBehavior */
+  initialScrollBehavior?: ScrollBehavior
 }
 
 // 二分：返回最后一个 time <= t 的下标
@@ -28,12 +30,14 @@ function activeIndexFor(lines: LyricLine[], t: number): number {
   return res
 }
 
-export default function LyricsView({ lines, currentTime, synced, onSeek, scrollBehavior = 'smooth' }: LyricsViewProps) {
+export default function LyricsView({ lines, currentTime, synced, onSeek, scrollBehavior = 'smooth', initialScrollBehavior }: LyricsViewProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const lineRefs = useRef<(HTMLDivElement | null)[]>([])
   const userScrollingRef = useRef(false)
   const userScrollTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [showScrollbar, setShowScrollbar] = useState(false)
+  // 首次自动滚动用 initialScrollBehavior（MV 并行分段初始定位即时），此后恢复 scrollBehavior
+  const firstAutoScrollRef = useRef(true)
 
   const active = synced ? activeIndexFor(lines, currentTime) : -1
   const posIndex = Math.max(active, 0)
@@ -42,8 +46,10 @@ export default function LyricsView({ lines, currentTime, synced, onSeek, scrollB
     const vp = viewportRef.current
     const el = lineRefs.current[posIndex]
     if (!vp || !el) return
+    const behavior = firstAutoScrollRef.current ? (initialScrollBehavior ?? scrollBehavior) : scrollBehavior
+    firstAutoScrollRef.current = false
     const nextTop = el.offsetTop + el.offsetHeight / 2 - vp.clientHeight / 2
-    vp.scrollTo({ top: Math.max(0, nextTop), behavior: scrollBehavior })
+    vp.scrollTo({ top: Math.max(0, nextTop), behavior })
   }
 
   // 当前行变化 → 自动滚动到视口中间；用户手动滚动时短暂让出控制权。

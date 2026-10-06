@@ -23,6 +23,8 @@ interface MvStagePayload {
   artist: string
   cover: string
   duration: number
+  /** 并行分段渲染：本窗起始时间（v1.4.7-pre2），舞台直接落位到该处，歌词不从开头滚入 */
+  startTime?: number
   lyrics: LyricLine[]
   watermark: boolean
 }
@@ -64,7 +66,8 @@ function parsePayload(json: string | null): MvStagePayload | null {
 
 export default function MvExportStage() {
   const [payload, setPayload] = useState<MvStagePayload | null>(() => parsePayload(pendingPayloadJson))
-  const [time, setTime] = useState(0)
+  // 初始时间来自 startTime（并行分段每窗各自起点），不是 0——避免首个 __mvSetTime 触发歌词整页跳滚
+  const [time, setTime] = useState(() => parsePayload(pendingPayloadJson)?.startTime || 0)
 
   useEffect(() => {
     timeSink = setTime
@@ -213,6 +216,9 @@ export default function MvExportStage() {
                   onSeek={() => {}}
                   // v1.4.7-pre1：密网格下捕获滚动中间态，换行滚动在成片里连续而非跳变
                   scrollBehavior="smooth"
+                  // v1.4.7-pre2：挂载后首次定位即时落位（从 startTime 直接站到位），
+                  // 不播放从顶部滚到起始行的动画——否则每窗前几帧都会把滚动过程收进成片
+                  initialScrollBehavior="auto"
                 />
               ) : (
                 <div className="lyrics-centered">
