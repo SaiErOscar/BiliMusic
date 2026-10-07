@@ -5,6 +5,27 @@
 
 ---
 
+## v1.4.7-pre6 — 24 小时变更风险审查修正 + 设置页布局（预览版）
+
+**发布日期：2026-10-07**（pre1~pre5 全量变更审查后的三项 Android 修正）
+
+### 修正（Android，均附审查证据）
+
+- **下载失败遗留 MediaStore 孤儿行**：`MediaDownloadPlugin.resolveToMediaStore` 先插入 `IS_PENDING=1` 占位行再写流，写流中途异常（网络断/磁盘问题）时外层 catch 只 `call.reject`，占位行永不清理——系统要等约一周才回收 pending 条目，连续失败会堆积不可见残留。现失败路径显式 `delete(uri)` 后再抛出。
+- **通知栏封面下载连接不释放**：`MediaNotificationService.fetchCover` 的 `HttpURLConnection` 无 `disconnect`（finally 缺失），每次切曲加载封面都泄漏一条连接。现 finally 中释放。
+- **后台启动前台服务异常穿透**：`MediaSessionPlugin.doUpdate` 直接 `ContextCompat.startForegroundService`——API 31+ 应用退后台（锁屏自动切歌）时后台启动前台服务受限，可能抛 `ForegroundServiceStartNotAllowedException`。现捕获后 `call.reject` 优雅降级（JS 侧本就 catch 吞掉，通知栏静默失效但不崩）。
+
+### 界面
+
+- 设置页「账号」板块改为与「关于」同款横跨两栏（移出左栏 flex 容器成为 grid 直接子元素并加 `settings-span`，原位置在栏内 `grid-column` 不生效）。
+
+### 审查结论（未发现问题项）
+
+- 权限面：POST_NOTIFICATIONS/前台服务类型声明齐备，下载走 MediaStore 无需存储权限，无权限绕过；桌面侧 pre1 七项修复（写盘 error 常驻监听、ownerTag 取消隔离、IPC 路径校验、error 阶段分离等）在 diff 中逐项核实到位。
+- 已知限制维持原判：Android WebDAV 密码存 localStorage 明文（无 safeStorage，注释与 CHANGELOG 已声明）；`resolveToAppDir`（API<29）同名文件覆盖——fileName 由自家 JS 构造，非外部攻击面。
+
+---
+
 ## v1.4.7-pre5 — 补齐 pre4 TS 桥 + 歌词动画时间驱动根修（预览版）
 
 **发布日期：2026-10-07**（pre4 遗留清偿 + 桌面端两项修复）

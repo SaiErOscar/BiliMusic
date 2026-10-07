@@ -135,8 +135,9 @@ public class MediaNotificationService extends Service {
     }
 
     private void fetchCover() {
+        HttpURLConnection conn = null;
         try {
-            HttpURLConnection conn = (HttpURLConnection) new URL(coverUrl).openConnection();
+            conn = (HttpURLConnection) new URL(coverUrl).openConnection();
             conn.setConnectTimeout(10_000);
             conn.setReadTimeout(15_000);
             conn.connect();
@@ -157,7 +158,10 @@ public class MediaNotificationService extends Service {
                     });
                 }
             }
-        } catch (Exception ignored) { }
+        } catch (Exception ignored) { } finally {
+            // 连接必须释放（pre6）：封面随每次切曲加载，不 disconnect 会持续占用 socket 池
+            if (conn != null) conn.disconnect();
+        }
     }
 
     private Notification buildNotification() {

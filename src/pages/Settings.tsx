@@ -412,8 +412,9 @@ export default function Settings() {
               {playlistTransferMessage && <span>{playlistTransferMessage}</span>}
             </div>
           </SettingsGroup>
+        </div>
 
-          <SettingsGroup title="账号" icon={<UserRound size={20} />}>
+          <SettingsGroup title="账号" icon={<UserRound size={20} />} className="settings-span">
             <div className="settings-account">
               <div className="settings-account__avatar">
                 {isLoggedIn && avatar ? <img src={avatar} alt="" /> : <UserRound size={22} />}
@@ -428,7 +429,6 @@ export default function Settings() {
               </button>
             </div>
           </SettingsGroup>
-        </div>
 
           <SettingsGroup title="关于" icon={<Info size={20} />} className="settings-span">
             <SettingsRow label="版本">

@@ -56,7 +56,15 @@ public class MediaSessionPlugin extends Plugin implements MediaNotificationServi
         i.putExtra("positionSec", (double) call.getFloat("positionSec", 0f));
         i.putExtra("durationSec", (double) call.getFloat("durationSec", 0f));
         i.putExtra("coverUrl", call.getString("coverUrl", ""));
-        ContextCompat.startForegroundService(getContext(), i);
+        try {
+            ContextCompat.startForegroundService(getContext(), i);
+        } catch (Exception e) {
+            // API 31+ 应用退后台（锁屏自动切歌）时后台启动前台服务受限，可能抛
+            // ForegroundServiceStartNotAllowedException：会话指令失效属可降级场景，
+            // 捕获后 reject，不让异常穿透 Capacitor 桥（pre6）
+            call.reject("前台服务启动失败（应用可能在后台）：" + e.getMessage());
+            return;
+        }
         call.resolve();
     }
 

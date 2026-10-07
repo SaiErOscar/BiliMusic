@@ -90,9 +90,16 @@ public class MediaDownloadPlugin extends Plugin {
             return;
         }
         long total;
-        try (InputStream in = conn.getInputStream(); OutputStream out = getContext().getContentResolver().openOutputStream(uri)) {
-            if (out == null) throw new Exception("打开输出流失败");
-            total = copy(in, out);
+        try {
+            try (InputStream in = conn.getInputStream(); OutputStream out = getContext().getContentResolver().openOutputStream(uri)) {
+                if (out == null) throw new Exception("打开输出流失败");
+                total = copy(in, out);
+            }
+        } catch (Exception e) {
+            // 失败必须删掉 IS_PENDING=1 的占位行（pre6）：不删则留孤儿行，
+            // 系统要等一周才回收 pending 条目，连续失败会堆积不可见残留
+            try { getContext().getContentResolver().delete(uri, null, null); } catch (Exception ignored) { }
+            throw e;
         }
         ContentValues done = new ContentValues();
         done.put(MediaStore.MediaColumns.IS_PENDING, 0);
