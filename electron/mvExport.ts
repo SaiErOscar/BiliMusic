@@ -477,6 +477,68 @@ async function captureChunkWorker(
   return { files, times: keptTimes }
 }
 
+/**
+ * 分片边界吸附（v1.4.7-pre4 多窗衔接跳变根修）：
+ * 接缝两侧必须呈现同一句歌词的「已稳定」画面——前片末帧（平滑滚动已落定）与
+ * 后片首帧（窗口以 startTime 即时定位到同一行）才会逐帧连续。
+ * 安全区 = 距上一次歌词行起点 ≥0.55s（滚动动画约 0.3~0.45s 已完成）且距下一次行起点
+ * > 1.5×步长（后片首帧仍是同一行，随后的换行动画在后片窗口内自然发生）。
+ * 均分目标点就近吸附到安全区；无任何安全区（歌词极密）时回退均分。
+ */
+function splitTimesAtQuietPoints(
+  times: number[],
+  lyrics: { time: number; text: string }[],
+  parts: number,
+): number[][] {
+  if (parts <= 1 || times.length < parts * 2) return evenSplit(times, parts)
+  const lineStarts = [...new Set(lyrics.map((l) => l.time).filter((t) => Number.isFinite(t) && t >= 0))].sort((a, b) => a - b)
+  const step = times.length > 1 ? (times[times.length - 1] - times[0]) / (times.length - 1) : 0.1
+  const lastStartBefore = (t: number): number | null => {
+    let res: number | null = null
+    for (const s of lineStarts) { if (s <= t) res = s; else break }
+    return res
+  }
+  const nextStartAfter = (t: number): number | null => {
+    for (const s of lineStarts) { if (s > t) return s }
+    return null
+  }
+  const valid: number[] = []
+  for (let i = 1; i < times.length - 1; i++) {
+    const t = times[i]
+    const last = lastStartBefore(t)
+    if (last != null && t - last < 0.55) continue
+    const next = nextStartAfter(t)
+    if (next != null && next - t <= step * 1.5) continue
+    valid.push(i)
+  }
+  if (valid.length < parts - 1) return evenSplit(times, parts)
+  const bounds: number[] = [0]
+  for (let j = 1; j < parts; j++) {
+    const target = Math.round(times.length * j / parts)
+    let best = valid[0]
+    for (const i of valid) if (Math.abs(i - target) < Math.abs(best - target)) best = i
+    if (best <= bounds[bounds.length - 1]) return evenSplit(times, parts)
+    bounds.push(best)
+  }
+  bounds.push(times.length)
+  const chunks: number[][] = []
+  for (let j = 0; j < parts; j++) {
+    const chunk = times.slice(bounds[j], bounds[j + 1])
+    if (chunk.length) chunks.push(chunk)
+  }
+  return chunks
+}
+
+function evenSplit(times: number[], parts: number): number[][] {
+  const chunkSize = Math.ceil(times.length / parts)
+  const chunks: number[][] = []
+  for (let p = 0; p < parts; p++) {
+    const chunk = times.slice(p * chunkSize, (p + 1) * chunkSize)
+    if (chunk.length) chunks.push(chunk)
+  }
+  return chunks
+}
+
 async function captureWithParts(
   job: MvExportJob,
   payload: MvExportPayload,
@@ -487,13 +549,14 @@ async function captureWithParts(
   parts: number,
   sender: Electron.WebContents | null,
 ): Promise<{ files: string[]; times: number[] }> {
-  // 按时间序切连续片段，各窗负责一段；全局帧序 = 片段序拼接
-  const chunkSize = Math.ceil(times.length / parts)
+  // v1.4.7-pre4：分片边界吸附到歌词安静区（接缝两侧同一句已稳定画面，消除衔接跳变）；
+  // 首窗起点为 0 无需落位处理，后续窗以 startTime 即时定位
+  const chunks = splitTimesAtQuietPoints(times, payload.lyrics, parts)
   const doneCount = { value: 0 }
   const workers: Promise<{ files: string[]; times: number[] }>[] = []
-  for (let p = 0; p < parts; p++) {
-    const chunk = times.slice(p * chunkSize, (p + 1) * chunkSize)
-    if (chunk.length) workers.push(captureChunkWorker(job, payload, duration, p, chunk, tempDir, coverDataUrl, sender, doneCount, times.length))
+  for (let p = 0; p < chunks.length; p++) {
+    const chunk = chunks[p]
+    workers.push(captureChunkWorker(job, payload, duration, p, chunk, tempDir, coverDataUrl, sender, doneCount, times.length))
   }
   const results = await Promise.all(workers)
   const files: string[] = []
