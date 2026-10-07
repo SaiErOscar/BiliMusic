@@ -392,6 +392,7 @@ async function captureChunkWorker(
   const win = createCaptureWindow(job)
   const files: string[] = []
   const keptTimes: number[] = []
+  let mergedInChunk = 0
   try {
     await win.loadURL(resolveStageUrl())
     await win.webContents.executeJavaScript(
@@ -422,15 +423,31 @@ async function captureChunkWorker(
     let prevJpeg: Buffer | null = null
     for (let i = 0; i < chunk.length; i++) {
       if (job.cancelRequested || win.isDestroyed()) throw new Error('已取消')
-      await win.webContents.executeJavaScript(`window.__mvSetTime(${chunk[i].toFixed(3)})`)
+      // v1.4.7-pre3 卡顿修复：原 waitForPaint 等的是「任意一次绘制」，常把 React 新状态
+      // 上屏前的旧帧捕走（诊断实测约半数帧与前一帧相同 → 有效更新率比档位设计值减半）。
+      // 改为页内双 rAF：钉住「新状态已提交并至少完成一次上屏」后再捕获。
       win.webContents.invalidate()
-      await waitForPaint(win)
+      await Promise.race([
+        win.webContents.executeJavaScript(
+          `window.__mvSetTime(${chunk[i].toFixed(3)}); new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))`,
+        ),
+        sleep(500),
+      ])
       if (win.isDestroyed()) throw new Error('已取消')
-      const img = await win.webContents.capturePage()
-      const jpeg = img.toJPEG(88)
+      let jpeg = (await win.webContents.capturePage()).toJPEG(88)
+      if (prevJpeg && jpeg.equals(prevJpeg)) {
+        // 相同帧：可能 React 尚未上屏（而非真实静态），补一轮 rAF 后重捕获一次
+        await Promise.race([
+          win.webContents.executeJavaScript('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))'),
+          sleep(400),
+        ]).catch(() => {})
+        if (win.isDestroyed()) throw new Error('已取消')
+        jpeg = (await win.webContents.capturePage()).toJPEG(88)
+      }
       // 相同帧合并：密集采样下相邻帧常完全一致（仅进度条亚像素位移不足产生新像素），
       // 字节级相同则不落盘，合成段 duration 自动并入前一帧
       if (prevJpeg && jpeg.equals(prevJpeg)) {
+        mergedInChunk++
         doneCount.value++
         continue
       }
@@ -455,6 +472,8 @@ async function captureChunkWorker(
     const idx = job.windows.indexOf(win)
     if (idx >= 0) job.windows.splice(idx, 1)
   }
+  // 卡顿诊断指标（pre3）：合并占比高 = 离屏窗口漏重绘（预期应远低于半数）
+  console.log(`[mvExport] part${partIndex}: captured=${files.length} merged(identical)=${mergedInChunk}`)
   return { files, times: keptTimes }
 }
 

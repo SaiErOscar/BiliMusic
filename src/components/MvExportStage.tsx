@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Play, SkipBack, SkipForward, Volume2, Repeat } from 'lucide-react'
+import { Pause, SkipBack, SkipForward, Volume2, Repeat } from 'lucide-react'
 import LyricsView from '@/components/LyricsView'
 import PlayerSlider from '@/components/PlayerSlider'
 import type { LyricLine } from '@/services/lyrics'
@@ -68,6 +68,8 @@ export default function MvExportStage() {
   const [payload, setPayload] = useState<MvStagePayload | null>(() => parsePayload(pendingPayloadJson))
   // 初始时间来自 startTime（并行分段每窗各自起点），不是 0——避免首个 __mvSetTime 触发歌词整页跳滚
   const [time, setTime] = useState(() => parsePayload(pendingPayloadJson)?.startTime || 0)
+  // 字体就绪后翻 1 → LyricsView 立即重定位（初始定位发生在字体加载前，行高会变，pre3 跳变残余根因）
+  const [layoutSettled, setLayoutSettled] = useState(0)
 
   useEffect(() => {
     timeSink = setTime
@@ -88,7 +90,9 @@ export default function MvExportStage() {
       document.fonts.ready,
       cover?.decode().catch(() => {}),
     ]).then(() => {
-      if (!cancelled) window.__mvReady = true
+      if (cancelled) return
+      setLayoutSettled((n) => n + 1)
+      window.__mvReady = true
     })
     return () => { cancelled = true }
   }, [payload])
@@ -189,7 +193,8 @@ export default function MvExportStage() {
                 <SkipBack size={27} />
               </button>
               <button type="button" className="now-playing-play" style={{ cursor: 'default' }}>
-                <Play size={30} fill="currentColor" style={{ marginLeft: 3 }} />
+                {/* 成片语义为「播放中」（pre3）：显示暂停态图标 ⏸，此前误用播放三角呈暂停观感 */}
+                <Pause size={30} fill="currentColor" />
               </button>
               <button type="button" className="now-playing-round" style={{ cursor: 'default' }}>
                 <SkipForward size={27} />
@@ -218,7 +223,9 @@ export default function MvExportStage() {
                   scrollBehavior="smooth"
                   // v1.4.7-pre2：挂载后首次定位即时落位（从 startTime 直接站到位），
                   // 不播放从顶部滚到起始行的动画——否则每窗前几帧都会把滚动过程收进成片
-                  initialScrollBehavior="auto"
+                  initialScrollBehavior="instant"
+                  // v1.4.7-pre3：字体就绪后强制重定位，消除字体度量变化导致的残余跳变
+                  repositionSignal={layoutSettled}
                 />
               ) : (
                 <div className="lyrics-centered">

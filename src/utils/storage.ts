@@ -91,6 +91,15 @@ export function clearDownloadRecords() {
   } catch { /* ignore */ }
 }
 
+/** 删除单条下载记录（pre3）：仅移除记录本身，不触碰磁盘文件 */
+export function deleteDownloadRecord(id: string) {
+  try {
+    const records = loadDownloadRecords().filter((r) => r.id !== id)
+    safeSetItem(DOWNLOADS_KEY, JSON.stringify(records))
+    window.dispatchEvent(new CustomEvent(DOWNLOADS_CHANGED_EVENT))
+  } catch { /* ignore */ }
+}
+
 export function addRecentTrack(track: Track) {
   const recent = loadRecentTracks().filter(t => t.id !== track.id)
   recent.unshift({ ...track, isLiked: track.isLiked })

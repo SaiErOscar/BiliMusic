@@ -9,7 +9,7 @@ import {
   MusicSection,
 } from '@/components/AppleMusicPage'
 import { useAppSettings } from '@/hooks/useAppSettings'
-import { loadDownloadRecords, clearDownloadRecords, DOWNLOADS_CHANGED_EVENT } from '@/utils/storage'
+import { loadDownloadRecords, clearDownloadRecords, deleteDownloadRecord, DOWNLOADS_CHANGED_EVENT } from '@/utils/storage'
 import type { DownloadRecord } from '@/types'
 import { joinPath as joinPathNative } from '@/utils/paths'
 import { platform } from '@/platform'
@@ -251,6 +251,27 @@ export default function Downloads() {
                     onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
                   >
                     <ExternalLink size={14} />
+                  </button>
+                  {/* 单条记录删除（pre3）：仅移除记录，不删除磁盘文件 */}
+                  <button
+                    type="button"
+                    title="删除这条下载记录（不删除文件）"
+                    onClick={() => deleteDownloadRecord(record.id)}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--color-muted)',
+                      cursor: 'pointer',
+                      padding: 6,
+                      borderRadius: 6,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--glass-bg)'; (e.currentTarget as HTMLElement).style.color = 'var(--color-destructive)' }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'var(--color-muted)' }}
+                  >
+                    <Trash2 size={14} />
                   </button>
                 </div>
               </div>

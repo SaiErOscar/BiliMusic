@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowDownAZ, CheckSquare, ListMusic, Music, Pencil, Play, Square, Trash2, X, FolderHeart, Download, GripVertical, Clock } from 'lucide-react'
+import { ArrowDownAZ, CheckSquare, ListMusic, Music, Pencil, Play, Square, Trash2, X, FolderHeart, Download, Clock } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import AddToPlaylistButton from '@/components/AddToPlaylistButton'
 import BatchDownloadDialog from '@/components/BatchDownloadDialog'
@@ -366,12 +366,18 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
                   ) : (
                     <button
                       type="button"
-                      className="playlist-drag-handle"
-                      title="拖动排序"
-                      onDragStart={(e) => { e.stopPropagation(); handleDragStart(index) }}
-                      style={{ background: 'transparent', border: 'none', color: 'var(--color-muted)', cursor: 'grab', display: 'flex', alignItems: 'center', padding: 4 }}
+                      className="playlist-select-button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        // 正常模式点击行首选择框 = 进入选择模式并选中该曲（pre3 修复：此前
+                        // 行首是灰色拖拽把手，点击无任何作用，被当成失效的选择按钮；
+                        // 拖拽排序不受影响，整行仍可拖动）
+                        setEditing(true)
+                        setSelectedIds(new Set([track.id]))
+                      }}
+                      title="选择歌曲"
                     >
-                      <GripVertical size={16} />
+                      <Square size={17} />
                     </button>
                   )}
                   extra={(

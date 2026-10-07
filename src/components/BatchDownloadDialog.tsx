@@ -3,6 +3,7 @@ import { Download, Loader2, Check, X, FolderOpen, Music, FileText, Edit3, FileMu
 import { motion, AnimatePresence } from 'framer-motion'
 import { selectDownloadFolder } from '@/services/api'
 import { isMvExportSupported } from '@/services/mvExport'
+import { platform } from '@/platform'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import {
   batchSubscribe,
@@ -61,6 +62,10 @@ export default function BatchDownloadDialog({ tracks, onClose }: BatchDownloadDi
     const dir = await selectDownloadFolder()
     if (dir) setDownloadDir(dir)
   }, [])
+
+  // 目录选择器为桌面能力（pre3）：缺失平台（Android 等）隐藏「选择」按钮，
+  // 避免出现点了没反应的死按钮；目录留空即用平台默认下载目录
+  const canSelectDir = !!platform.download?.selectDownloadFolder
 
   const handleStart = useCallback(() => {
     if (tracks.length === 0) return
@@ -394,27 +399,29 @@ export default function BatchDownloadDialog({ tracks, onClose }: BatchDownloadDi
                         fontFamily: 'inherit',
                       }}
                     />
-                    <button
-                      type="button"
-                      onClick={handleSelectDir}
-                      style={{
-                        padding: '8px 12px',
-                        border: '1px solid var(--glass-border)',
-                        borderRadius: 10,
-                        background: 'var(--glass-bg)',
-                        color: 'var(--color-foreground)',
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        fontSize: 12,
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      <FolderOpen size={14} />
-                      选择
-                    </button>
+                    {canSelectDir && (
+                      <button
+                        type="button"
+                        onClick={handleSelectDir}
+                        style={{
+                          padding: '8px 12px',
+                          border: '1px solid var(--glass-border)',
+                          borderRadius: 10,
+                          background: 'var(--glass-bg)',
+                          color: 'var(--color-foreground)',
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          fontSize: 12,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        <FolderOpen size={14} />
+                        选择
+                      </button>
+                    )}
                   </div>
                 </div>
 

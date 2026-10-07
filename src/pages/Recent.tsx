@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Clock, Play, Trash2 } from 'lucide-react'
+import { Clock, Play, Trash2, X } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import { loadRecentTracks, saveRecentTracks } from '@/utils/storage'
 import {
@@ -32,6 +32,13 @@ export default function Recent() {
   const handleClear = useCallback(() => {
     saveRecentTracks([])
     setTracks([])
+  }, [])
+
+  // 单条记录删除（pre3）：按 id 从最近播放移除
+  const handleRemoveOne = useCallback((trackId: string) => {
+    const next = loadRecentTracks().filter((t) => t.id !== trackId)
+    saveRecentTracks(next)
+    setTracks(next)
   }, [])
 
   const handlePlayAll = useCallback(() => {
@@ -75,6 +82,15 @@ export default function Recent() {
                 isCurrent={player.currentTrack?.id === track.id}
                 isPlaying={player.isPlaying}
                 onPlay={() => player.playNow(track)}
+                extra={(
+                  <button
+                    className="am-icon-danger"
+                    onClick={(e) => { e.stopPropagation(); handleRemoveOne(track.id) }}
+                    title="删除这条播放记录"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
               />
             ))}
           </TrackList>

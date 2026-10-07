@@ -11,6 +11,12 @@ interface LyricsViewProps {
   scrollBehavior?: ScrollBehavior
   /** 挂载后首次定位的行为（v1.4.7-pre2 MV 并行分段：初始即落位，不播从顶部滚入的动画）；缺省同 scrollBehavior */
   initialScrollBehavior?: ScrollBehavior
+  /**
+   * 重定位信号（v1.4.7-pre3）：值变化时立即以 'instant' 重新滚动到当前行。
+   * MV 导出舞台在字体就绪后翻信号——初始定位发生在字体加载前，行高按回退字体测量，
+   * 字体就绪后 offsetTop 变化，不重定位则首个换行会平滑滚一段残余距离（真机可见跳变）。
+   */
+  repositionSignal?: number
 }
 
 // 二分：返回最后一个 time <= t 的下标
@@ -30,7 +36,7 @@ function activeIndexFor(lines: LyricLine[], t: number): number {
   return res
 }
 
-export default function LyricsView({ lines, currentTime, synced, onSeek, scrollBehavior = 'smooth', initialScrollBehavior }: LyricsViewProps) {
+export default function LyricsView({ lines, currentTime, synced, onSeek, scrollBehavior = 'smooth', initialScrollBehavior, repositionSignal }: LyricsViewProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const lineRefs = useRef<(HTMLDivElement | null)[]>([])
   const userScrollingRef = useRef(false)
@@ -38,6 +44,7 @@ export default function LyricsView({ lines, currentTime, synced, onSeek, scrollB
   const [showScrollbar, setShowScrollbar] = useState(false)
   // 首次自动滚动用 initialScrollBehavior（MV 并行分段初始定位即时），此后恢复 scrollBehavior
   const firstAutoScrollRef = useRef(true)
+  const lastRepositionRef = useRef(repositionSignal)
 
   const active = synced ? activeIndexFor(lines, currentTime) : -1
   const posIndex = Math.max(active, 0)
@@ -51,6 +58,17 @@ export default function LyricsView({ lines, currentTime, synced, onSeek, scrollB
     const nextTop = el.offsetTop + el.offsetHeight / 2 - vp.clientHeight / 2
     vp.scrollTo({ top: Math.max(0, nextTop), behavior })
   }
+
+  // 字体/布局就绪后的强制重定位（v1.4.7-pre3）：跳过用户滚动态判定，'instant' 不经 CSS 平滑
+  useLayoutEffect(() => {
+    if (repositionSignal === lastRepositionRef.current) return
+    lastRepositionRef.current = repositionSignal
+    const vp = viewportRef.current
+    const el = lineRefs.current[posIndex]
+    if (!vp || !el) return
+    vp.scrollTo({ top: Math.max(0, el.offsetTop + el.offsetHeight / 2 - vp.clientHeight / 2), behavior: 'instant' as ScrollBehavior })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repositionSignal])
 
   // 当前行变化 → 自动滚动到视口中间；用户手动滚动时短暂让出控制权。
   useLayoutEffect(() => {
