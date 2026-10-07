@@ -33,7 +33,9 @@ public class MediaSessionPlugin extends Plugin implements MediaNotificationServi
     @PluginMethod
     public void updateSession(PluginCall call) {
         if (Build.VERSION.SDK_INT >= 33 && !hasRequiredPermissions()) {
-            requestPermissionForAlias("notifications", call, "notificationsPermCallback");
+            // 第三参必须与 @PermissionCallback 方法名一致，否则授权回调后 call 永不 resolve，
+            // updateSession 挂死、通知栏前台服务不启动（pre4 真机遗留 bug）
+            requestPermissionForAlias("notifications", call, "onNotificationsPerm");
             return;
         }
         doUpdate(call);
@@ -60,9 +62,9 @@ public class MediaSessionPlugin extends Plugin implements MediaNotificationServi
 
     @PluginMethod
     public void stopSession(PluginCall call) {
-        Intent i = new Intent(getContext(), MediaNotificationService.class);
-        i.setAction(MediaNotificationService.ACTION_STOP);
-        getContext().startService(i);
+        // 直接 stopService：服务在跑即停，没跑为 no-op。不走 startService——
+        // 应用退后台时 API 26+ 后台启动服务限制会抛 IllegalStateException
+        getContext().stopService(new Intent(getContext(), MediaNotificationService.class));
         call.resolve();
     }
 
@@ -70,7 +72,8 @@ public class MediaSessionPlugin extends Plugin implements MediaNotificationServi
     public void onCommand(String action, double value) {
         JSObject d = new JSObject();
         d.put("action", action);
-        if (value != 0) d.put("value", value);
+        // value 恒带：seek 到 0（回开头）时丢弃 value 会让 JS 侧拿不到位置
+        d.put("value", value);
         notifyListeners("mediaCommand", d);
     }
 }

@@ -17,6 +17,14 @@ interface LyricsViewProps {
    * 字体就绪后 offsetTop 变化，不重定位则首个换行会平滑滚一段残余距离（真机可见跳变）。
    */
   repositionSignal?: number
+  /**
+   * 时间驱动模式（v1.4.7-pre5 MV 导出歌词动画根修）：滚动位置与行样式全部改为
+   * currentTime 的纯函数插值，不经浏览器 smooth 滚动 / framer-motion spring（两者按
+   * 墙钟演化，离屏窗口按歌曲时间步进采样，动画进度与时间线解耦——成片里歌词滑动
+   * 时快时慢、换行没滚完就切句；且多窗并行时各窗实际执行速度不同，接缝两侧动画
+   * 状态不齐）。纯函数化后任意采样节奏下动画匀速精确，多窗接缝天然连续。
+   */
+  timeDriven?: boolean
 }
 
 // 二分：返回最后一个 time <= t 的下标
@@ -36,7 +44,7 @@ function activeIndexFor(lines: LyricLine[], t: number): number {
   return res
 }
 
-export default function LyricsView({ lines, currentTime, synced, onSeek, scrollBehavior = 'smooth', initialScrollBehavior, repositionSignal }: LyricsViewProps) {
+export default function LyricsView({ lines, currentTime, synced, onSeek, scrollBehavior = 'smooth', initialScrollBehavior, repositionSignal, timeDriven = false }: LyricsViewProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const lineRefs = useRef<(HTMLDivElement | null)[]>([])
   const userScrollingRef = useRef(false)
@@ -73,16 +81,55 @@ export default function LyricsView({ lines, currentTime, synced, onSeek, scrollB
   // 当前行变化 → 自动滚动到视口中间；用户手动滚动时短暂让出控制权。
   useLayoutEffect(() => {
     if (!synced) return
+    if (timeDriven) return
     if (userScrollingRef.current) return
     scrollActiveLineIntoView()
-  }, [posIndex, lines, synced])
+  }, [posIndex, lines, synced, timeDriven])
 
   useEffect(() => {
     if (!synced) return
+    if (timeDriven) return
     const recompute = () => scrollActiveLineIntoView()
     window.addEventListener('resize', recompute)
     return () => window.removeEventListener('resize', recompute)
-  }, [posIndex, synced])
+  }, [posIndex, synced, timeDriven])
+
+  // ===== 时间驱动滚动（v1.4.7-pre5）：滚动位置 = currentTime 的分段线性函数 =====
+  //
+  // 设每行起点 t_i，换行动画时长 D=0.45s、可用缓动 easeOutCubic：
+  // 目标滚动位 target_i = 行 i 居中位置。在 [t_i, t_i+D] 区间从 target_{i-1} 向 target_i
+  // 按 easeOutCubic(p) 插值，其余时间停在 target_i。滚动位置只依赖 currentTime，
+  // 采样节奏（0.03s 网格/多窗分段/掉帧）只影响采样密度不影响动画形状，成片里滑动
+  // 匀速可期，多窗接缝两侧同时间参数同位置。
+  const D_SCROLL = 0.45
+  const easeOutCubic = (p: number) => 1 - Math.pow(1 - p, 3)
+
+  const timeDrivenTop = (): number | null => {
+    const vp = viewportRef.current
+    if (!vp || !lines.length) return null
+    const targetOf = (idx: number): number => {
+      const el = lineRefs.current[idx]
+      if (!el) return 0
+      return Math.max(0, el.offsetTop + el.offsetHeight / 2 - vp.clientHeight / 2)
+    }
+    const cur = Math.max(0, posIndex)
+    const from = targetOf(Math.max(0, cur - 1))
+    const to = targetOf(cur)
+    if (cur === 0) return to
+    const lineStart = lines[cur]?.time ?? 0
+    const p = Math.min(1, Math.max(0, (currentTime - lineStart) / D_SCROLL))
+    return from + (to - from) * easeOutCubic(p)
+  }
+
+  useLayoutEffect(() => {
+    if (!synced || !timeDriven) return
+    const top = timeDrivenTop()
+    if (top == null) return
+    const vp = viewportRef.current
+    if (!vp) return
+    vp.scrollTo({ top, behavior: 'instant' as ScrollBehavior })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTime, lines, synced, timeDriven])
 
   useEffect(() => {
     return () => {
@@ -156,27 +203,49 @@ export default function LyricsView({ lines, currentTime, synced, onSeek, scrollB
       }}
     >
       <motion.div
-        initial={{ opacity: 0, y: 18 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
+        initial={timeDriven ? false : { opacity: 0, y: 18 }}
+        animate={timeDriven ? undefined : { opacity: 1, y: 0 }}
+        transition={timeDriven ? undefined : { duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
         style={{ padding: '36% 0' }}
       >
         {lines.map((l, i) => {
           const isActive = i === active
           const dist = Math.abs(i - posIndex)
           const isNear = dist === 1
+          // 时间驱动模式：行样式 = currentTime 的分段线性插值（与滚动同一套缓动），
+          // 覆盖行 i 的 [t_i, t_i+D_STYLE] 区间从「非活跃」渐入「活跃」；D_STYLE 与
+          // spring 观感时长接近，动画进度只由歌曲时间决定。
+          let tdStyle: React.CSSProperties | null = null
+          if (timeDriven) {
+            const D_STYLE = 0.4
+            const start = l.time ?? 0
+            const p = Math.min(1, Math.max(0, (currentTime - start) / D_STYLE))
+            const e = easeOutCubic(p)
+            const prevActive = i === posIndex - 1
+            const opPrev = 0.46, opNear = 0.22, scPrev = 1.015, scNear = 0.985, xPrev = 4
+            const opacity = isActive ? opPrev + (1 - opPrev) * e : prevActive ? opPrev - (opPrev - opNear) * e : opNear
+            const scale = isActive ? scNear + (1.075 - scNear) * e : prevActive ? scPrev - (scPrev - scNear) * e : scNear
+            const x = isActive ? xPrev * e : prevActive ? xPrev * (1 - e) : 0
+            const blur = isActive ? 0.5 * (1 - e) : prevActive ? 0.5 + (1.5 - 0.5) * e : 1.5
+            tdStyle = {
+              opacity,
+              transform: `translateX(${x}px) scale(${scale})`,
+              filter: `blur(${blur}px)`,
+              transformOrigin: 'left center',
+            }
+          }
           return (
             <motion.div
               key={i}
               ref={(el) => { lineRefs.current[i] = el }}
               onClick={() => onSeek(l.time)}
-              animate={{
+              animate={timeDriven ? undefined : {
                 opacity: isActive ? 1 : isNear ? 0.46 : 0.22,
                 scale: isActive ? 1.075 : isNear ? 1.015 : 0.985,
                 x: isActive ? 14 : isNear ? 4 : 0,
                 filter: isActive ? 'blur(0px)' : isNear ? 'blur(0.5px)' : 'blur(1.5px)',
               }}
-              transition={{
+              transition={timeDriven ? undefined : {
                 type: 'spring',
                 stiffness: 150,
                 damping: 24,
@@ -193,6 +262,7 @@ export default function LyricsView({ lines, currentTime, synced, onSeek, scrollB
                 padding: '10px 8px',
                 margin: 0,
                 textShadow: isActive ? '0 8px 34px rgba(0,0,0,0.44), 0 0 26px rgba(255,255,255,0.1)' : 'none',
+                ...(tdStyle || {}),
               }}
             >
               {l.text}

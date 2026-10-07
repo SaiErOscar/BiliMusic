@@ -5,6 +5,31 @@
 
 ---
 
+## v1.4.7-pre5 — 补齐 pre4 TS 桥 + 歌词动画时间驱动根修（预览版）
+
+**发布日期：2026-10-07**（pre4 遗留清偿 + 桌面端两项修复）
+
+### 修复（桌面端）
+
+- **MV 歌词滑动动画根修（时间驱动）**：此前歌词滚动走浏览器 smooth 滚动、行样式走 framer-motion spring，均按墙钟演化，而离屏窗口按歌曲时间逐帧捕获，动画进度与时间线解耦——成片里滑动时快时慢、换行没滚完就切句，多窗并行时接缝两侧动画状态不齐。现 LyricsView 新增时间驱动模式（仅导出舞台启用）：滚动位置与行的透明度/缩放/位移/模糊全部改为 currentTime 的纯函数插值（easeOutCubic），动画形状只由歌曲时间决定，采样节奏只影响密度，多窗接缝天然连续；普通播放页行为不变。
+- **歌单「选择」按钮无法点击**：hero 区装饰模糊泡（340px 圆面，底部溢出容器约 210px）盖住下方 editbar 的「选择」按钮，指针事件全被拦截。现给 `.am-hero__image/__grain/__blob` 三个纯装饰层统一 `pointer-events: none`，实测点击正常进入选择模式。
+- **MV 水印改版**：文案改为「音乐源自Bilibili，由BiliMusic进行渲染」，字体换 Poppins（加字距、半透明、柔影），任意封面可读。
+
+### 修复（Android）
+
+- **通知栏权限回调名不匹配**：`MediaSessionPlugin` 的 `requestPermissionForAlias` 回调名与 `@PermissionCallback` 方法名不一致，API 33+ 首次授权后 `updateSession` 永不回调，前台服务不启动、通知栏整体失效。已改为一致。
+- **stopSession 后台启动限制**：改用 `stopService`（服务在跑即停），避免应用退后台时 `startService` 抛 IllegalStateException；媒体指令 seek 到 0 秒不再丢 value。
+
+### 补齐
+
+- **pre4 tag 缺失的 TS 桥随本版入库**：capacitor 平台 download/mediaNotify capability、`useMediaSessionRemote` 挂载 MainLayout、歌单行首把手回退——pre4 提交时五个 TS 文件遗留在工作区，CI 从 tag 构建的 pre4 产物实际不含上述功能。
+
+### 测试
+
+- vitest 118 全绿、tsc/eslint 0 error；Android `compileReleaseJavaWithJavac` 本地编译通过；时间驱动滚动曲线经浏览器采样验证与理论插值吻合。
+
+---
+
 ## v1.4.7-pre4 — 多窗衔接根修 + Android 下载入库与媒体控制（预览版）
 
 **发布日期：2026-10-07**（pre3 真机反馈两项 + Android 下载/通知栏伴生项）

@@ -6,6 +6,7 @@ import PlayerBar from './PlayerBar'
 import NowPlaying from '@/components/NowPlaying'
 import { useMiniWindowSync } from '@/hooks/useMiniWindowSync'
 import { useAppFonts } from '@/hooks/useAppFonts'
+import { useMediaSessionRemote } from '@/hooks/useMediaSessionRemote'
 import { useNowPlaying } from '@/contexts/NowPlayingContext'
 import { platform } from '@/platform'
 
@@ -14,6 +15,8 @@ export default function MainLayout() {
   useMiniWindowSync()
   // v1.3.8 主窗口字体 CSS 变量（标题栏+播放条 / 播放页歌词）
   useAppFonts()
+  // v1.4.7-pre4 Android 通知栏媒体控制（Capacitor 原生；桌面缺失能力自然跳过）
+  useMediaSessionRemote()
   const { expanded, open } = useNowPlaying()
 
   // v1.3.1：向主进程上报播放页开关状态，桌面歌词的隐藏/恢复

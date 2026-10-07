@@ -134,13 +134,16 @@ export default function MvExportStage() {
             top: 20,
             right: 24,
             zIndex: 5,
-            fontSize: 17,
-            fontWeight: 800,
-            letterSpacing: 0.5,
-            color: 'rgba(255,255,255,0.32)',
+            fontSize: 12.5,
+            fontWeight: 500,
+            fontFamily: "'Poppins', 'PingFang SC', 'Microsoft YaHei', sans-serif",
+            letterSpacing: 1.6,
+            color: 'rgba(255,255,255,0.42)',
+            textShadow: '0 1px 12px rgba(0,0,0,0.45)',
+            userSelect: 'none',
           }}
         >
-          BiliMusic
+          音乐源自Bilibili，由BiliMusic进行渲染
         </div>
       )}
 
@@ -219,11 +222,10 @@ export default function MvExportStage() {
                   currentTime={time}
                   synced
                   onSeek={() => {}}
-                  // v1.4.7-pre1：密网格下捕获滚动中间态，换行滚动在成片里连续而非跳变
-                  scrollBehavior="smooth"
-                  // v1.4.7-pre2：挂载后首次定位即时落位（从 startTime 直接站到位），
-                  // 不播放从顶部滚到起始行的动画——否则每窗前几帧都会把滚动过程收进成片
-                  initialScrollBehavior="instant"
+                  // v1.4.7-pre5 时间驱动根修：滚动与行样式全部由 currentTime 纯函数插值，
+                  // 不依赖浏览器 smooth 滚动/spring 的墙钟演化——离屏按歌曲时间步进采样，
+                  // 动画匀速精确、掉帧只降采样密度不改变形状，多窗接缝两侧状态天然连续。
+                  timeDriven
                   // v1.4.7-pre3：字体就绪后强制重定位，消除字体度量变化导致的残余跳变
                   repositionSignal={layoutSettled}
                 />

@@ -165,6 +165,26 @@ export type PlatformMvExport = Pick<
 >
 
 /**
+ * 通知栏媒体控制能力（v1.4.7-pre4，Android 专属）。
+ * JS 把播放状态推给原生前台服务（MediaSession + 通知），系统媒体控件的用户
+ * 指令经 onCommand 回抛；WebView 内 audio 仍是真正播放器。
+ * 桌面端走 navigator.mediaSession（PlayerContext 已有），不实现此能力。
+ */
+export interface PlatformMediaNotify {
+  updateSession: (meta: {
+    title: string
+    artist: string
+    coverUrl?: string
+    isPlaying: boolean
+    positionSec: number
+    durationSec: number
+  }) => Promise<void>
+  stopSession: () => Promise<void>
+  /** 返回取消订阅函数；action ∈ play/pause/next/previous/seek（seek 的 value 为秒） */
+  onCommand: (cb: (action: 'play' | 'pause' | 'next' | 'previous' | 'seek', value?: number) => void) => () => void
+}
+
+/**
  * 平台能力聚合。每个 capability 可选，缺失即代表当前平台不支持该能力，
  * 调用方按现有 `if (platform.xxx)` 模式做能力探测与降级。
  */
@@ -185,4 +205,5 @@ export interface Platform {
   backup?: PlatformBackup
   webdavConfig?: PlatformWebdavConfig
   mvExport?: PlatformMvExport
+  mediaNotify?: PlatformMediaNotify
 }

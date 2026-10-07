@@ -3191,6 +3191,9 @@ body {
   opacity: 0.34;
   filter: blur(38px) saturate(1.35);
   transform: scale(1.12);
+  /* 溢出 hero 边界约 18% 的装饰层，不关掉指针事件会盖住下方工具条按钮
+     （歌单页「选择」按钮被 blob 拦截无法点击，v1.4.7-pre5 实测定位） */
+  pointer-events: none;
 }
 
 .am-hero__grain {
@@ -3198,6 +3201,7 @@ body {
   inset: 0;
   opacity: 0.14;
   mix-blend-mode: overlay;
+  pointer-events: none;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
@@ -3209,6 +3213,8 @@ body {
   filter: blur(90px);
   opacity: 0.34;
   animation: am-hero-float 10s ease-in-out infinite;
+  /* blob--b 底边溢出 hero 约 210px，命中区是整个圆面；不穿透则盖死下方内容区按钮 */
+  pointer-events: none;
 }
 
 .am-hero__blob--a {

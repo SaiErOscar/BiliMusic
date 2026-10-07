@@ -10,10 +10,10 @@
  * 本地明文（仅本机可读、不进备份数据），后续可换 Android Keystore。
  */
 
-import { Capacitor, CapacitorHttp } from '@capacitor/core'
-import type { HttpResponse } from '@capacitor/core'
+import { Capacitor, CapacitorHttp, registerPlugin } from '@capacitor/core'
+import type { HttpResponse, PluginListenerHandle } from '@capacitor/core'
 import { readStoredItemSync } from '@/utils/persistentStorage'
-import type { PlatformStorage, PlatformWebdavConfig } from './types'
+import type { PlatformStorage, PlatformWebdavConfig, PlatformDownload, PlatformMediaNotify } from './types'
 import type { WebdavResult, WebdavConfigInput, WebdavConfigInfo } from '@/types/electron'
 
 const SYNC_DIR = 'bilimusic' // dav 根下的集合目录，与 electron/webdav.ts 保持一致
@@ -121,6 +121,87 @@ async function webdavDelete(relPath: string): Promise<WebdavResult> {
 
 const storage: PlatformStorage = { webdavGet, webdavPut, webdavDelete }
 
+// ===== v1.4.7-pre4 下载（MediaStore 入库）与通知栏媒体控制（原生插件桥） =====
+
+/** B 站 CDN 需要 Referer/UA（MediaDownloadPlugin 经 HttpURLConnection 逐个透传） */
+const BILI_DL_HEADERS = {
+  Referer: 'https://www.bilibili.com',
+  'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 BiliMusic-Agent',
+}
+
+const BiliMusicDownload = registerPlugin<{
+  downloadToMediaStore: (opts: { url: string; fileName: string; headers: Record<string, string> }) => Promise<{ filePath: string; size: number }>
+}>('BiliMusicDownload')
+
+const BiliMusicMedia = registerPlugin<{
+  updateSession: (meta: { title: string; artist: string; coverUrl?: string; isPlaying: boolean; positionSec: number; durationSec: number }) => Promise<void>
+  stopSession: () => Promise<void>
+  addListener: (event: 'mediaCommand', cb: (d: { action: string; value?: number }) => void) => Promise<PluginListenerHandle>
+}>('BiliMusicMedia')
+
+/**
+ * Android 下载能力（音频优先）：音频经原生插件写入 MediaStore Downloads 的
+ * Music/BiliMusic/，系统文件管理器与音乐 App 可见；视频合并依赖 ffmpeg，暂不支持。
+ * customDir 在 Android 上忽略（MediaStore 相对路径由插件固定）。
+ */
+const download: PlatformDownload = {
+  async downloadAudio(audioUrl: string, filename: string) {
+    const res = await BiliMusicDownload.downloadToMediaStore({
+      url: audioUrl,
+      fileName: filename,
+      headers: BILI_DL_HEADERS,
+    })
+    return { filePath: res.filePath, size: res.size }
+  },
+  async downloadVideo() {
+    throw new Error('Android 端暂不支持视频下载')
+  },
+  async openDownloadDir() {
+    return { success: false }
+  },
+  async pathExists() {
+    return false
+  },
+  async openRecordFile() {
+    return { success: false, message: 'Android 暂不支持从记录打开文件' }
+  },
+  async showRecordInFolder() {
+    return { success: false }
+  },
+  async getDefaultDownloadDir() {
+    return 'Music/BiliMusic'
+  },
+  async selectDownloadFolder() {
+    // Android 无系统目录选择器（调用方已按能力隐藏按钮）
+    return null
+  },
+  async saveLyricFile() {
+    return { success: false, filePath: '' }
+  },
+  onDownloadProgress() {
+    // Android 下载进度暂无原生字节级回调（MediaStore 插件直写），订阅返回空退订
+    return () => {}
+  },
+}
+
+const mediaNotify: PlatformMediaNotify = {
+  async updateSession(meta) {
+    await BiliMusicMedia.updateSession(meta)
+  },
+  async stopSession() {
+    await BiliMusicMedia.stopSession()
+  },
+  onCommand(cb) {
+    const handle: Promise<PluginListenerHandle> = BiliMusicMedia.addListener('mediaCommand', (d: { action: string; value?: number }) => {
+      const a = d.action as 'play' | 'pause' | 'next' | 'previous' | 'seek'
+      cb(a, d.value)
+    })
+    return () => {
+      void handle.then((h) => h.remove())
+    }
+  },
+}
+
 const webdavConfig: PlatformWebdavConfig = {
   // 与 electron/webdav.ts 同语义：密码不回填，只回 url/username/configured
   async getWebdavConfig(): Promise<WebdavConfigInfo> {
@@ -163,4 +244,6 @@ export function isCapacitorNative(): boolean {
 export const capacitorPlatform = {
   storage,
   webdavConfig,
+  download,
+  mediaNotify,
 }
