@@ -40,3 +40,10 @@ platform/HarmonyOS/oh_modules
 
 # 本地记忆导出副本（灵犀工作区记忆，不纳入版本控制）
 /memory/
+
+# AI / Agent Harness 过程性文件与会话记忆（不纳入版本控制）
+/.zcode/
+/.lingxi/
+/.memsearch/
+/.mimosa/
+/.video_agent/
