@@ -15,6 +15,22 @@ function shuffleArray<T>(arr: T[]): T[] {
   return result
 }
 
+/** v1.4.8-pre1 倍速档位（0.5~2.0x，点击循环） */
+export const PLAYBACK_RATE_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const
+
+/** 把任意输入归一到合法倍速档位；非法/缺失回退 1。纯函数，便于单测。 */
+export function normalizePlaybackRate(raw: unknown): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return 1
+  const hit = PLAYBACK_RATE_STEPS.find((s) => s === raw)
+  return hit ?? 1
+}
+
+/** 给定当前倍速，返回循环切换后的下一档。纯函数。 */
+export function nextPlaybackRate(current: number): number {
+  const idx = PLAYBACK_RATE_STEPS.indexOf(normalizePlaybackRate(current) as (typeof PLAYBACK_RATE_STEPS)[number])
+  return PLAYBACK_RATE_STEPS[(idx + 1) % PLAYBACK_RATE_STEPS.length]
+}
+
 function shouldIgnoreSpaceShortcut(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null
   if (!el) return false
@@ -74,6 +90,17 @@ interface PlayerContextValue {
   toggleLike: (trackId: string) => void
   playAll: (tracks: Track[]) => void
   playFromQueue: (index: number) => void
+  /** v1.4.8-pre1 当前倍速（0.5~2.0） */
+  playbackRate: number
+  /** v1.4.8-pre1 设置倍速（同步 audio、持久化、切歌后重设） */
+  setPlaybackRate: (r: number) => void
+  /** v1.4.8-pre1 睡眠定时：倒计时到点时刻（毫秒时间戳），null=未设倒计时 */
+  sleepEndsAt: number | null
+  /** v1.4.8-pre1 睡眠定时：是否播完当前曲后停止 */
+  sleepAfterCurrent: boolean
+  startSleepCountdown: (minutes: number) => void
+  startSleepAfterCurrent: () => void
+  cancelSleepTimer: () => void
 }
 
 interface PlayerProgress {
@@ -146,7 +173,7 @@ function loadPersistedPlayerState(): PersistedPlayerState {
 }
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
-  const { settings } = useAppSettings()
+  const { settings, setAppSettings } = useAppSettings()
   const qualityPreference =
     settings.playQuality === '标准' ? 'standard' :
     settings.playQuality === '高品质' ? 'high' : 'lossless'
@@ -161,6 +188,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [queue, setQueue] = useState<Track[]>(() => restoredRef.current.queue)
   const [loadingAudio, setLoadingAudio] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  // v1.4.8-pre1 倍速：初值从持久化 settings 归一读取，非法值回退 1
+  const [playbackRate, setPlaybackRateState] = useState<number>(() => normalizePlaybackRate(settings.playbackRate))
+  const playbackRateRef = useRef(playbackRate)
+  // v1.4.8-pre1 睡眠定时：倒计时结束时刻（绝对时间戳，跨切歌不重置）+ 播完当前曲停
+  const [sleepEndsAt, setSleepEndsAt] = useState<number | null>(null)
+  const [sleepAfterCurrent, setSleepAfterCurrent] = useState(false)
+  // handleTrackEnd 内用 ref 读 afterCurrent 态，避免把 setState 引入依赖数组触发 TDZ
+  const sleepAfterCurrentRef = useRef(sleepAfterCurrent)
 
   // 派生：isShuffled 从 repeatMode 推导
   const isShuffled = repeatMode === 'shuffle'
@@ -245,6 +280,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [duration])
 
   const handleTrackEnd = useCallback(() => {
+    // v1.4.8-pre1 睡眠定时「播完当前曲停」：优先于续播逻辑，停在当前
+    if (sleepAfterCurrentRef.current) {
+      audioRef.current?.pause()
+      setIsPlaying(false)
+      setSleepAfterCurrent(false)
+      showToast('睡眠定时：播放已停止')
+      return
+    }
     const displayQueue = isShuffled ? shuffledQueueRef.current : queue
     if (!settings.autoPlay && repeatMode !== 'one') {
       setIsPlaying(false)
@@ -341,6 +384,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         playableUrlRef.current = playableUrl
         audio.src = playableUrl
         audio.load()
+        // 换 src 会重置 playbackRate，必须在 play 前重设当前倍速
+        audio.playbackRate = playbackRateRef.current
 
         if (shouldAutoplayRef.current) {
           await audio.play().catch((e) => {
@@ -370,6 +415,61 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       cancelled = true
     }
   }, [currentTrack?.bvid, currentTrack?.id, qualityPreference])
+
+  // v1.4.8-pre1 倍速：state 变同步 audio + 持久化 settings，playbackRateRef 供 loadAndPlay 重设时使用
+  useEffect(() => {
+    playbackRateRef.current = playbackRate
+    if (audioRef.current) audioRef.current.playbackRate = playbackRate
+    if (settings.playbackRate !== playbackRate) {
+      setAppSettings({ playbackRate })
+    }
+  }, [playbackRate, settings.playbackRate, setAppSettings])
+
+  const setPlaybackRate = useCallback((r: number) => {
+    setPlaybackRateState(normalizePlaybackRate(r))
+  }, [])
+
+  // v1.4.8-pre1 睡眠定时：state 变化回同步 ref（handleTrackEnd 内读 ref 避免 TDZ）
+  useEffect(() => {
+    sleepAfterCurrentRef.current = sleepAfterCurrent
+  }, [sleepAfterCurrent])
+
+  // v1.4.8-pre1 睡眠定时：倒计时到点则暂停 + 清态（基于绝对时间戳 sleepEndsAt，跨切歌不重置）
+  useEffect(() => {
+    if (sleepEndsAt === null) return
+    const ms = sleepEndsAt - Date.now()
+    if (ms <= 0) {
+      audioRef.current?.pause()
+      setIsPlaying(false)
+      setSleepEndsAt(null)
+      showToast('睡眠定时：播放已停止')
+      return
+    }
+    const timer = setTimeout(() => {
+      audioRef.current?.pause()
+      setIsPlaying(false)
+      setSleepEndsAt(null)
+      showToast('睡眠定时：播放已停止')
+    }, ms)
+    return () => clearTimeout(timer)
+  }, [sleepEndsAt, showToast])
+
+  const startSleepCountdown = useCallback((minutes: number) => {
+    const m = Math.max(0, Math.floor(minutes))
+    if (m <= 0) return
+    setSleepEndsAt(Date.now() + m * 60_000)
+    showToast(`睡眠定时：${m} 分钟后停止`)
+  }, [showToast])
+
+  const startSleepAfterCurrent = useCallback(() => {
+    setSleepAfterCurrent(true)
+    showToast('将播完当前曲目后停止')
+  }, [showToast])
+
+  const cancelSleepTimer = useCallback(() => {
+    setSleepEndsAt(null)
+    setSleepAfterCurrent(false)
+  }, [])
 
   const play = useCallback((track: Track) => {
     shouldAutoplayRef.current = true
@@ -646,6 +746,27 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     })
   }, [next, prev, togglePlay])
 
+  // v1.4.8-pre1 桌面全局媒体键：主进程投递命令后映射到播放控制；非桌面 platform.mediaKeys 缺失自然跳过
+  useEffect(() => {
+    return platform.mediaKeys?.onCommand?.((command) => {
+      if (command === 'toggle-play') togglePlay()
+      else if (command === 'next') next()
+      else if (command === 'prev') prev()
+      else if (command === 'stop') pause()
+    })
+  }, [next, prev, togglePlay, pause])
+
+  // v1.4.8-pre1 全局媒体键开关：settings 变化同步到主进程（仅当 platform.mediaKeys 存在时）
+  useEffect(() => {
+    const setEnabled = platform.mediaKeys?.setEnabled
+    if (!setEnabled) return
+    setEnabled(Boolean(settings.globalMediaKeys)).then((res) => {
+      if (settings.globalMediaKeys && !res.ok) {
+        console.warn('[mediaKeys] 开启失败：', res.reason)
+      }
+    }).catch(() => { /* ignore */ })
+  }, [settings.globalMediaKeys])
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat || event.code !== 'Space' || shouldIgnoreSpaceShortcut(event.target)) return
@@ -727,11 +848,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     toggleLike,
     playAll,
     playFromQueue,
+    playbackRate,
+    setPlaybackRate,
+    sleepEndsAt,
+    sleepAfterCurrent,
+    startSleepCountdown,
+    startSleepAfterCurrent,
+    cancelSleepTimer,
   }), [
     currentTrack, isPlaying, volume, isMuted, repeatMode, isShuffled, queue, loadingAudio,
     play, pause, togglePlay, next, prev, handleSetVolume, setIsMuted, setRepeatMode, setIsShuffled,
     addToQueue, addTracksToQueue, removeFromQueue, removeMultipleFromQueue, moveInQueue,
     playNow, playNext, clearQueue, toggleLike, playAll, playFromQueue,
+    playbackRate, setPlaybackRate, sleepEndsAt, sleepAfterCurrent,
+    startSleepCountdown, startSleepAfterCurrent, cancelSleepTimer,
   ])
 
   const progressValue = useMemo<PlayerProgress>(() => ({

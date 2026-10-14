@@ -41,6 +41,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   mvWatermark: true,
   // v1.4.7-pre1 MV 导出：流畅度档位（默认标准 0.1s 关键帧步长）
   mvSmoothness: '标准',
+  // v1.4.8-pre1 播放三件套：倍速默认 1x，全局媒体键默认关（避抢占其他播放器）
+  playbackRate: 1,
+  globalMediaKeys: false,
 }
 
 function notifySettingsChanged() {

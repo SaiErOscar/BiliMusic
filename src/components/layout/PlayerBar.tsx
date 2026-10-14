@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode } from 'react'
+import { useState, useRef, type CSSProperties, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import {
   Play,
@@ -16,8 +16,10 @@ import {
   Music,
   Maximize2,
   TextCursorInput,
+  Gauge,
+  Timer,
 } from 'lucide-react'
-import { usePlayer, usePlayerProgress } from '@/contexts/PlayerContext'
+import { usePlayer, usePlayerProgress, nextPlaybackRate } from '@/contexts/PlayerContext'
 import { useNowPlaying } from '@/contexts/NowPlayingContext'
 import { useAddToPlaylist } from '@/contexts/AddToPlaylistContext'
 import PlayQueue from '@/components/PlayQueue'
@@ -44,6 +46,9 @@ export default function PlayerBar() {
   const { open } = useNowPlaying()
   const { openAddToPlaylist } = useAddToPlaylist()
   const [queueOpen, setQueueOpen] = useState(false)
+  // v1.4.8-pre1 睡眠定时弹层开关
+  const [sleepMenuOpen, setSleepMenuOpen] = useState(false)
+  const sleepMenuRef = useRef<HTMLDivElement | null>(null)
   const trackDuration = duration || player.currentTrack?.duration || 0
   const remaining = Math.max(trackDuration - progress, 0)
 
@@ -276,6 +281,17 @@ export default function PlayerBar() {
           <TransportButton onClick={player.next} ariaLabel="下一首">
             <SkipForward size={21} />
           </TransportButton>
+          {/* v1.4.8-pre1 倍速循环按钮 */}
+          <TransportButton
+            active={player.playbackRate !== 1}
+            ariaLabel={`倍速 ${formatRateLabel(player.playbackRate)}`}
+            onClick={() => player.setPlaybackRate(nextPlaybackRate(player.playbackRate))}
+          >
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 11, fontWeight: 700 }}>
+              <Gauge size={16} />
+              {formatRateLabel(player.playbackRate)}
+            </span>
+          </TransportButton>
           <TransportButton
             active={player.repeatMode !== 'none'}
             onClick={() => {
@@ -353,6 +369,127 @@ export default function PlayerBar() {
         >
           <TextCursorInput size={18} />
         </IconButton>
+
+        {/* v1.4.8-pre1 睡眠定时按钮 + 弹出菜单 */}
+        <div style={{ position: 'relative' }} ref={sleepMenuRef}>
+          <IconButton
+            active={player.sleepEndsAt !== null || player.sleepAfterCurrent}
+            ariaLabel="睡眠定时"
+            onClick={() => setSleepMenuOpen(o => !o)}
+          >
+            <Timer size={18} />
+            {(player.sleepEndsAt !== null || player.sleepAfterCurrent) && (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: 3,
+                  right: 1,
+                  minWidth: 14,
+                  height: 14,
+                  padding: '0 3px',
+                  borderRadius: 999,
+                  background: '#ff375f',
+                  color: '#fff',
+                  border: '2px solid var(--color-background)',
+                  fontSize: 8,
+                  fontWeight: 800,
+                  lineHeight: '10px',
+                  textAlign: 'center',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {player.sleepAfterCurrent ? '1' : '⏱'}
+              </span>
+            )}
+          </IconButton>
+          {sleepMenuOpen && (
+            <div
+              style={{
+                position: 'absolute',
+                right: 0,
+                bottom: 42,
+                minWidth: 200,
+                padding: '10px 12px',
+                borderRadius: 12,
+                background: 'var(--glass-bg-heavy)',
+                backdropFilter: 'blur(20px)',
+                WebkitBackdropFilter: 'blur(20px)',
+                border: '1px solid var(--glass-border)',
+                boxShadow: 'var(--shadow-lg)',
+                color: 'var(--player-text)',
+                fontSize: 12,
+                zIndex: 60,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+              } as CSSProperties}
+            >
+              <div style={{ fontWeight: 700, opacity: 0.85 }}>睡眠定时</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {[15, 30, 45, 60, 90].map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => { player.startSleepCountdown(m); setSleepMenuOpen(false) }}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 999,
+                      border: '1px solid var(--glass-border)',
+                      background: 'transparent',
+                      color: 'var(--player-text)',
+                      fontSize: 12,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {m} 分钟
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => { player.startSleepAfterCurrent(); setSleepMenuOpen(false) }}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: 8,
+                  border: '1px solid var(--glass-border)',
+                  background: 'transparent',
+                  color: 'var(--player-text)',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+              >
+                播完当前曲目后停止
+              </button>
+              {(player.sleepEndsAt !== null || player.sleepAfterCurrent) && (
+                <button
+                  type="button"
+                  onClick={() => { player.cancelSleepTimer(); setSleepMenuOpen(false) }}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: 8,
+                    border: 'none',
+                    background: 'rgba(255, 55, 95, 0.15)',
+                    color: '#ff375f',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  取消定时
+                </button>
+              )}
+              {player.sleepEndsAt !== null && (
+                <div style={{ opacity: 0.6, fontSize: 11 }}>
+                  剩余 {formatTime(Math.max(0, (player.sleepEndsAt - Date.now()) / 1000))}
+                </div>
+              )}
+              {player.sleepAfterCurrent && (
+                <div style={{ opacity: 0.6, fontSize: 11 }}>将在本首结束后自动停止</div>
+              )}
+            </div>
+          )}
+        </div>
 
         <IconButton
           active={queueOpen}
@@ -560,6 +697,12 @@ function TimeLabel({ children, align = 'left' }: { children: ReactNode; align?: 
       {children}
     </span>
   )
+}
+
+/** v1.4.8-pre1 倍速标签：1 → '1x'，1.5 → '1.5x'，去尾零 */
+function formatRateLabel(r: number): string {
+  const s = (Math.round(r * 100) / 100).toString()
+  return `${s}x`
 }
 
 function formatTime(seconds: number): string {

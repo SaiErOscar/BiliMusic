@@ -119,6 +119,17 @@ export const electronPlatform: Platform = {
     }
   },
   /** v1.4.6：MV 导出（离屏渲染 + ffmpeg 稀疏合成），桌面端专属 */
+  /** v1.4.8-pre1：桌面全局媒体键（globalShortcut），仅 Electron 提供，移动端无 */
+  get mediaKeys() {
+    const a = api()
+    const setEnabled = a?.setMediaKeysEnabled
+    if (!setEnabled) return undefined
+    return {
+      setEnabled,
+      getEnabled: a?.getMediaKeysEnabled ?? (async () => false),
+      onCommand: a?.onMediaKeyCommand ?? (() => () => {}),
+    }
+  },
   get mvExport() {
     const a = api()
     return a?.exportMvSingle || a?.onMvExportProgress

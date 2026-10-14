@@ -7,6 +7,9 @@ export interface DesktopLyricState {
   suppressed: boolean
 }
 
+/** v1.4.8-pre1 主进程投递给渲染层的媒体键命令名 */
+export type MediaKeyCommand = 'toggle-play' | 'next' | 'prev' | 'stop'
+
 export interface DownloadOptions {
   artist?: string
   title?: string
@@ -286,6 +289,10 @@ declare global {
       persistentStorage?: PersistentStorageApi
       biliApi: BiliApi
       lyricsApi: LyricsApi
+      /** v1.4.8-pre1 全局媒体键（globalShortcut，桌面专属） */
+      setMediaKeysEnabled?: (enabled: boolean) => Promise<{ ok: boolean; reason?: string }>
+      getMediaKeysEnabled?: () => Promise<boolean>
+      onMediaKeyCommand?: (callback: (command: MediaKeyCommand) => void) => () => void
       exportMvSingle?: MvExportApi['exportMvSingle']
       cancelMvExport?: MvExportApi['cancelMvExport']
       onMvExportProgress?: MvExportApi['onMvExportProgress']

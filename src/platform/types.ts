@@ -188,6 +188,16 @@ export interface PlatformMediaNotify {
  * 平台能力聚合。每个 capability 可选，缺失即代表当前平台不支持该能力，
  * 调用方按现有 `if (platform.xxx)` 模式做能力探测与降级。
  */
+/** v1.4.8-pre1 桌面全局媒体键（仅 Electron，移动端无） */
+export interface PlatformMediaKeys {
+  /** 开启/关闭全局媒体键注册，返回 { ok, reason? } */
+  setEnabled: (enabled: boolean) => Promise<{ ok: boolean; reason?: string }>
+  /** 当前是否已注册（主进程权威态） */
+  getEnabled: () => Promise<boolean>
+  /** 订阅来自主进程的媒体键命令，返回取消订阅函数 */
+  onCommand: (cb: (command: 'toggle-play' | 'next' | 'prev' | 'stop') => void) => () => void
+}
+
 export interface Platform {
   download?: PlatformDownload
   auth?: PlatformAuth
@@ -206,4 +216,6 @@ export interface Platform {
   webdavConfig?: PlatformWebdavConfig
   mvExport?: PlatformMvExport
   mediaNotify?: PlatformMediaNotify
+  /** v1.4.8-pre1 桌面全局媒体键 */
+  mediaKeys?: PlatformMediaKeys
 }

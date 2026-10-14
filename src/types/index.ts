@@ -80,6 +80,11 @@ export interface AppSettings {
   mvWatermark: boolean
   // v1.4.7-pre1 MV 导出：流畅度档位（快速 0.15s/标准 0.1s/流畅 0.05s/极致 0.03s 关键帧步长）
   mvSmoothness: '快速' | '标准' | '流畅' | '极致'
+  // v1.4.8-pre1 播放三件套：倍速播放档位（0.5/0.75/1/1.25/1.5/1.75/2.0）
+  playbackRate: number
+  // v1.4.8-pre1 桌面全局媒体键开关（Electron globalShortcut，失焦也生效）
+  // 默认关闭，避免抢占其他播放器的系统媒体键
+  globalMediaKeys: boolean
 }
 
 export type NavItem = {

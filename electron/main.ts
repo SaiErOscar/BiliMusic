@@ -11,6 +11,7 @@ import { registerSystemFontsHandlers } from './systemFonts'
 import { registerColorPickerHandlers } from './colorPicker'
 import { registerBackupHandlers } from './backup'
 import { registerMvExportHandlers, killMvExportChildren } from './mvExport'
+import { registerMediaKeysIpc, unregisterAllMediaKeys } from './mediaKeys'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -681,6 +682,7 @@ app.whenReady().then(() => {
   registerColorPickerHandlers()
   registerBackupHandlers()
   registerMvExportHandlers()
+  registerMediaKeysIpc(() => mainWindow)
   registerMiniWindowHandlers({
     getMainWindow: () => mainWindow,
     // 歌词可见性变化 → 刷新托盘状态的 lyricVisible 并回推托盘窗口
@@ -751,6 +753,7 @@ app.on('will-quit', (event) => {
   try {
     killAllChildren()
     killMvExportChildren()
+    unregisterAllMediaKeys()
   } catch (err) {
     console.log('[quit] 子进程清理异常：', err instanceof Error ? err.message : String(err))
   }

@@ -47,3 +47,10 @@ platform/HarmonyOS/oh_modules
 /.memsearch/
 /.mimosa/
 /.video_agent/
+/.workbuddy-ai/
+
+# 工作区临时探针与分析产物（发版暂存排除项）
+/_mvharness.out.txt
+/_probe.py
+/output/design/
+/output/bilimusic-*.md

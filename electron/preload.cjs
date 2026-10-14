@@ -181,6 +181,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveBackupFile: (content) => ipcRenderer.invoke('backup:saveFile', content),
   openBackupFile: () => ipcRenderer.invoke('backup:openFile'),
   deleteBackupFile: (filePath) => ipcRenderer.invoke('backup:deleteFile', filePath),
+  // v1.4.8-pre1 桌面全局媒体键（globalShortcut）
+  setMediaKeysEnabled: (enabled) => ipcRenderer.invoke('mediaKeys:set-enabled', enabled),
+  getMediaKeysEnabled: () => ipcRenderer.invoke('mediaKeys:get-enabled'),
+  onMediaKeyCommand: (callback) => {
+    const listener = (_event, command) => callback(command)
+    ipcRenderer.on('mediaKeys:command', listener)
+    return () => ipcRenderer.removeListener('mediaKeys:command', listener)
+  },
   platform: process.platform,
   persistentStorage,
   biliApi,
