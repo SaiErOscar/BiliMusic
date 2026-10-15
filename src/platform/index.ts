@@ -22,4 +22,14 @@ export const platform: Platform = hasElectron()
     ? capacitorPlatform
     : {}
 
+/**
+ * v1.4.8-pre1 原生容器判定（Android WebView）。
+ * 设置页按此隐藏桌面专属项（桌面歌词外观：文字色/按钮色/字号/粗细/字体）。
+ * 口径取 Capacitor.isNativePlatform()：鸿蒙端（web_engine + electronAPI 适配层）支持桌面歌词窗，
+ * 不能按「miniWindow 缺失」判定为原生；web 构建恒 false。
+ */
+export function isNativeApp(): boolean {
+  return isCapacitorNative()
+}
+
 export type { Platform } from './types'

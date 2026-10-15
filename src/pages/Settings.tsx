@@ -32,7 +32,9 @@ import { useTheme } from '@/hooks/useTheme'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { selectDownloadFolder } from '@/services/api'
 import { isMvExportSupported } from '@/services/mvExport'
-import { platform } from '@/platform'
+import { platform, isNativeApp } from '@/platform'
+import { usePlayer, useSleepRemainingText } from '@/contexts/PlayerContext'
+import { SLEEP_PRESET_MINUTES } from '@/utils/sleepTimer'
 import { useAuth } from '@/contexts/AuthContext'
 import { createPlaylistsExport, importPlaylistsFromText } from '@/utils/storage'
 import { runSync, forceUpload, forceDownload, getLastSync, SYNC_STATE_EVENT, WEBDAV_CONFIGURED_EVENT, type SyncResult } from '@/utils/sync'
@@ -43,6 +45,16 @@ export default function Settings() {
   const { mode, setMode } = useTheme()
   const { settings, setAppSettings } = useAppSettings()
   const { isLoggedIn, username, avatar, logout, setShowLogin } = useAuth()
+  // v1.4.8-pre1 睡眠定时：与 PlayerBar 弹层共用 PlayerContext 接口
+  const {
+    sleepEndsAt,
+    sleepAfterCurrent,
+    startSleepCountdown,
+    startSleepAfterCurrent,
+    cancelSleepTimer,
+  } = usePlayer()
+  const sleepRemaining = useSleepRemainingText()
+  const sleepActive = sleepEndsAt !== null || sleepAfterCurrent
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const [playlistTransferMessage, setPlaylistTransferMessage] = useState('')
   const [appVersion, setAppVersion] = useState('1.0.0')
@@ -245,34 +257,104 @@ export default function Settings() {
             <SettingsRow label="自动播放" description="播放结束时自动播放推荐">
               <ToggleSwitch checked={settings.autoPlay} onChange={() => setAppSettings({ autoPlay: !settings.autoPlay })} />
             </SettingsRow>
+            {platform.mediaKeys && (
+              <SettingsRow label="全局媒体键" description="应用切到后台时系统媒体键仍控制 BiliMusic（开启后会占用其他播放器的媒体键）">
+                <ToggleSwitch checked={settings.globalMediaKeys} onChange={() => setAppSettings({ globalMediaKeys: !settings.globalMediaKeys })} />
+              </SettingsRow>
+            )}
+            <SettingsRow label="睡眠定时" description="到点或播完当前曲后自动停止播放">
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+                {SLEEP_PRESET_MINUTES.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => startSleepCountdown(m)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 999,
+                      border: '1px solid var(--glass-border)',
+                      background: 'transparent',
+                      color: 'var(--color-foreground)',
+                      fontSize: 12,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {m} 分钟
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={startSleepAfterCurrent}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 999,
+                    border: '1px solid var(--glass-border)',
+                    background: 'transparent',
+                    color: 'var(--color-foreground)',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                  }}
+                >
+                  播完当前曲
+                </button>
+                {sleepActive && (
+                  <button
+                    type="button"
+                    onClick={cancelSleepTimer}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 999,
+                      border: 'none',
+                      background: 'rgba(255, 55, 95, 0.15)',
+                      color: '#ff375f',
+                      fontSize: 12,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    取消定时
+                  </button>
+                )}
+                {sleepActive && (
+                  <span style={{ fontSize: 12, opacity: 0.7 }}>
+                    {sleepAfterCurrent && '播完当前曲后停止'}
+                    {sleepAfterCurrent && sleepEndsAt !== null && '；'}
+                    {sleepEndsAt !== null && `倒计时剩余 ${sleepRemaining ?? '0:00'}`}
+                  </span>
+                )}
+              </div>
+            </SettingsRow>
             <SettingsRow label="歌词显示" description="播放页自动显示歌词">
               <ToggleSwitch checked={settings.showLyrics} onChange={() => setAppSettings({ showLyrics: !settings.showLyrics })} />
             </SettingsRow>
-            <SettingsRow label="歌词文字颜色" description="桌面歌词的文字颜色（自动：从视频封面提主色）">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
-                <ToggleSwitch checked={settings.autoTextColor} onChange={() => setAppSettings({ autoTextColor: !settings.autoTextColor })} />
-                <ColorField value={settings.autoTextColor && settings.autoLyricTextColor ? settings.autoLyricTextColor : settings.lyricTextColor} onChange={(lyricTextColor) => setAppSettings({ lyricTextColor })} title={settings.autoTextColor ? '已启用自动颜色（封面提色）' : '点击从屏幕拾取文字颜色'} disabled={settings.autoTextColor} />
-              </div>
-            </SettingsRow>
-            <SettingsRow label="歌词按钮颜色" description="桌面歌词的播放/上一首等按钮颜色（自动：每 5 秒采样窗周围背景取对比色）">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
-                <ToggleSwitch checked={settings.autoControlColor} onChange={() => setAppSettings({ autoControlColor: !settings.autoControlColor })} />
-                <ColorField value={settings.autoControlColor && settings.autoLyricControlColor ? settings.autoLyricControlColor : settings.lyricControlColor} onChange={(lyricControlColor) => setAppSettings({ lyricControlColor })} title={settings.autoControlColor ? '已启用自动颜色（背景采样）' : '点击从屏幕拾取按钮颜色'} disabled={settings.autoControlColor} />
-              </div>
-            </SettingsRow>
-            <SettingsRow label="歌词字号" description="桌面歌词的文字大小（18-60px，桌面歌词窗内也可调）">
-              <input type="range" min={18} max={60} step={1} value={settings.lyricFontSize} onChange={(e) => setAppSettings({ lyricFontSize: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
-              <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontSize}</span>
-            </SettingsRow>
-            <SettingsRow label="歌词粗细" description="桌面歌词的文字粗细（400-900，桌面歌词窗内也可调）">
-              <input type="range" min={400} max={900} step={20} value={settings.lyricFontWeight} onChange={(e) => setAppSettings({ lyricFontWeight: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
-              <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontWeight}</span>
-            </SettingsRow>
-            <SettingsRow label="歌词字体" description="桌面歌词使用的字体（桌面歌词窗内也可调）">
-              <FontSelect value={settings.lyricFontFamily} onChange={(lyricFontFamily) => setAppSettings({ lyricFontFamily })} />
-            </SettingsRow>
+            {!isNativeApp() && (
+              <>
+                <SettingsRow label="歌词文字颜色" description="桌面歌词的文字颜色（自动：从视频封面提主色）">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
+                    <ToggleSwitch checked={settings.autoTextColor} onChange={() => setAppSettings({ autoTextColor: !settings.autoTextColor })} />
+                    <ColorField value={settings.autoTextColor && settings.autoLyricTextColor ? settings.autoLyricTextColor : settings.lyricTextColor} onChange={(lyricTextColor) => setAppSettings({ lyricTextColor })} title={settings.autoTextColor ? '已启用自动颜色（封面提色）' : '点击从屏幕拾取文字颜色'} disabled={settings.autoTextColor} />
+                  </div>
+                </SettingsRow>
+                <SettingsRow label="歌词按钮颜色" description="桌面歌词的播放/上一首等按钮颜色（自动：每 5 秒采样窗周围背景取对比色）">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
+                    <ToggleSwitch checked={settings.autoControlColor} onChange={() => setAppSettings({ autoControlColor: !settings.autoControlColor })} />
+                    <ColorField value={settings.autoControlColor && settings.autoLyricControlColor ? settings.autoLyricControlColor : settings.lyricControlColor} onChange={(lyricControlColor) => setAppSettings({ lyricControlColor })} title={settings.autoControlColor ? '已启用自动颜色（背景采样）' : '点击从屏幕拾取按钮颜色'} disabled={settings.autoControlColor} />
+                  </div>
+                </SettingsRow>
+                <SettingsRow label="歌词字号" description="桌面歌词的文字大小（18-60px，桌面歌词窗内也可调）">
+                  <input type="range" min={18} max={60} step={1} value={settings.lyricFontSize} onChange={(e) => setAppSettings({ lyricFontSize: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
+                  <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontSize}</span>
+                </SettingsRow>
+                <SettingsRow label="歌词粗细" description="桌面歌词的文字粗细（400-900，桌面歌词窗内也可调）">
+                  <input type="range" min={400} max={900} step={20} value={settings.lyricFontWeight} onChange={(e) => setAppSettings({ lyricFontWeight: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
+                  <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontWeight}</span>
+                </SettingsRow>
+                <SettingsRow label="歌词字体" description="桌面歌词使用的字体（桌面歌词窗内也可调）">
+                  <FontSelect value={settings.lyricFontFamily} onChange={(lyricFontFamily) => setAppSettings({ lyricFontFamily })} />
+                </SettingsRow>
+              </>
+            )}
           </SettingsGroup>
 
         </div>

@@ -63,7 +63,7 @@ const HEIGHT = 720
 /**
  * 流畅度档位（v1.4.7-pre1，步长为用户定案值）：网格步长即进度条/歌词的视觉更新粒度，
  * 上限封顶控制渲染耗时与临时盘最坏占用（超出自动放粗步长）。
- * 快速=0.15s、标准=0.1s（默认）、流畅=0.05s、极致=0.03s（接近 45fps 满视觉流畅）。
+ * 快速=0.15s、标准=0.1s（默认）、流畅=0.05s、极致=0.03s（v1.4.8-pre1 输出帧率提至 60fps，步长仍为最密网格）。
  */
 const SMOOTHNESS_PRESETS: Record<string, { step: number; maxFrames: number }> = {
   '快速': { step: 0.15, maxFrames: 3600 },
@@ -217,7 +217,7 @@ async function composeVideo(listPath: string, audioPath: string, outputPath: str
       '-map', '0:v', '-map', '1:a',
       '-c:v', candidate.codec, ...candidate.qualityArgs,
       '-c:a', 'aac', '-b:a', '192k',
-      '-r', '45',
+      '-r', '60',
       '-t', duration.toFixed(3),
       '-movflags', '+faststart',
       '-progress', 'pipe:1',
@@ -602,7 +602,9 @@ async function writeConcatList(frames: string[], times: number[], duration: numb
   const lines: string[] = ['ffconcat version 1.0']
   for (let i = 0; i < frames.length; i++) {
     const segEnd = i + 1 < frames.length ? times[i + 1] : duration
-    const segDuration = Math.max(0.04, segEnd - times[i])
+    // v1.4.8-pre1：下限从 0.04 收到 1/60，与 60fps 输出对齐；原 0.04 会把极致档 30ms 段
+    // 抬到 40ms，累积导致成片总时长（进度条/歌词时间轴）比源明显拉长
+    const segDuration = Math.max(1 / 60, segEnd - times[i])
     lines.push(`file '${escapeConcat(frames[i])}'`)
     lines.push(`duration ${segDuration.toFixed(3)}`)
   }

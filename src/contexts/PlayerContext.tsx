@@ -4,6 +4,8 @@ import type { Track, RepeatMode } from '@/types'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { toggleFavoriteTrack, loadFavoriteTracks, addRecentTrack } from '@/utils/storage'
 import { resolveAudioPlayableUrl, releaseAudioPlayableUrl } from '@/services/http'
+import { normalizePlaybackRate } from '@/utils/playbackRate'
+import { applySleepAction, formatSleepRemaining } from '@/utils/sleepTimer'
 import { platform } from '@/platform'
 
 function shuffleArray<T>(arr: T[]): T[] {
@@ -15,21 +17,8 @@ function shuffleArray<T>(arr: T[]): T[] {
   return result
 }
 
-/** v1.4.8-pre1 倍速档位（0.5~2.0x，点击循环） */
-export const PLAYBACK_RATE_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const
-
-/** 把任意输入归一到合法倍速档位；非法/缺失回退 1。纯函数，便于单测。 */
-export function normalizePlaybackRate(raw: unknown): number {
-  if (typeof raw !== 'number' || !Number.isFinite(raw)) return 1
-  const hit = PLAYBACK_RATE_STEPS.find((s) => s === raw)
-  return hit ?? 1
-}
-
-/** 给定当前倍速，返回循环切换后的下一档。纯函数。 */
-export function nextPlaybackRate(current: number): number {
-  const idx = PLAYBACK_RATE_STEPS.indexOf(normalizePlaybackRate(current) as (typeof PLAYBACK_RATE_STEPS)[number])
-  return PLAYBACK_RATE_STEPS[(idx + 1) % PLAYBACK_RATE_STEPS.length]
-}
+// v1.4.8-pre1 倍速纯函数抽至 utils/playbackRate（单测直测纯函数）；此处再导出保持既有引用面
+export { PLAYBACK_RATE_STEPS, normalizePlaybackRate, nextPlaybackRate } from '@/utils/playbackRate'
 
 function shouldIgnoreSpaceShortcut(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null
@@ -194,7 +183,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // v1.4.8-pre1 睡眠定时：倒计时结束时刻（绝对时间戳，跨切歌不重置）+ 播完当前曲停
   const [sleepEndsAt, setSleepEndsAt] = useState<number | null>(null)
   const [sleepAfterCurrent, setSleepAfterCurrent] = useState(false)
-  // handleTrackEnd 内用 ref 读 afterCurrent 态，避免把 setState 引入依赖数组触发 TDZ
+  // handleTrackEnd / 迁移入口内用 ref 读睡眠态，避免把 setState 引入依赖数组触发 TDZ
+  const sleepEndsAtRef = useRef<number | null>(sleepEndsAt)
   const sleepAfterCurrentRef = useRef(sleepAfterCurrent)
 
   // 派生：isShuffled 从 repeatMode 推导
@@ -280,11 +270,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [duration])
 
   const handleTrackEnd = useCallback(() => {
-    // v1.4.8-pre1 睡眠定时「播完当前曲停」：优先于续播逻辑，停在当前
-    if (sleepAfterCurrentRef.current) {
+    // v1.4.8-pre1 睡眠定时「播完当前曲停」：优先于续播逻辑；命中即整态清空（含可能并存的倒计时）
+    const sleepHit = applySleepAction(
+      { sleepEndsAt: sleepEndsAtRef.current, sleepAfterCurrent: sleepAfterCurrentRef.current },
+      { type: 'track-end', now: Date.now() },
+    )
+    if (sleepHit.shouldStop) {
       audioRef.current?.pause()
       setIsPlaying(false)
-      setSleepAfterCurrent(false)
+      setSleepEndsAt(sleepHit.next.sleepEndsAt)
+      setSleepAfterCurrent(sleepHit.next.sleepAfterCurrent)
       showToast('睡眠定时：播放已停止')
       return
     }
@@ -429,46 +424,64 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setPlaybackRateState(normalizePlaybackRate(r))
   }, [])
 
-  // v1.4.8-pre1 睡眠定时：state 变化回同步 ref（handleTrackEnd 内读 ref 避免 TDZ）
+  // v1.4.8-pre1 睡眠定时：state 变化回同步 ref（handleTrackEnd 与迁移入口读 ref 避免 TDZ）
   useEffect(() => {
+    sleepEndsAtRef.current = sleepEndsAt
     sleepAfterCurrentRef.current = sleepAfterCurrent
-  }, [sleepAfterCurrent])
+  }, [sleepEndsAt, sleepAfterCurrent])
 
-  // v1.4.8-pre1 睡眠定时：倒计时到点则暂停 + 清态（基于绝对时间戳 sleepEndsAt，跨切歌不重置）
+  // v1.4.8-pre1 睡眠定时：倒计时到点则暂停 + 整态清空（基于绝对时间戳 sleepEndsAt，跨切歌不重置）
   useEffect(() => {
     if (sleepEndsAt === null) return
+    const fire = () => {
+      const hit = applySleepAction(
+        { sleepEndsAt, sleepAfterCurrent: sleepAfterCurrentRef.current },
+        { type: 'tick', now: Date.now() },
+      )
+      if (!hit.shouldStop) return
+      audioRef.current?.pause()
+      setIsPlaying(false)
+      setSleepEndsAt(hit.next.sleepEndsAt)
+      setSleepAfterCurrent(hit.next.sleepAfterCurrent)
+      showToast('睡眠定时：播放已停止')
+    }
     const ms = sleepEndsAt - Date.now()
     if (ms <= 0) {
-      audioRef.current?.pause()
-      setIsPlaying(false)
-      setSleepEndsAt(null)
-      showToast('睡眠定时：播放已停止')
+      fire()
       return
     }
-    const timer = setTimeout(() => {
-      audioRef.current?.pause()
-      setIsPlaying(false)
-      setSleepEndsAt(null)
-      showToast('睡眠定时：播放已停止')
-    }, ms)
+    const timer = setTimeout(fire, ms)
     return () => clearTimeout(timer)
   }, [sleepEndsAt, showToast])
 
   const startSleepCountdown = useCallback((minutes: number) => {
-    const m = Math.max(0, Math.floor(minutes))
-    if (m <= 0) return
-    setSleepEndsAt(Date.now() + m * 60_000)
+    const m = Math.floor(minutes)
+    if (!Number.isFinite(m) || m <= 0) return
+    const t = applySleepAction(
+      { sleepEndsAt: sleepEndsAtRef.current, sleepAfterCurrent: sleepAfterCurrentRef.current },
+      { type: 'start-countdown', minutes: m, now: Date.now() },
+    )
+    setSleepEndsAt(t.next.sleepEndsAt)
+    setSleepAfterCurrent(t.next.sleepAfterCurrent)
     showToast(`睡眠定时：${m} 分钟后停止`)
   }, [showToast])
 
   const startSleepAfterCurrent = useCallback(() => {
-    setSleepAfterCurrent(true)
+    const t = applySleepAction(
+      { sleepEndsAt: sleepEndsAtRef.current, sleepAfterCurrent: sleepAfterCurrentRef.current },
+      { type: 'start-after-current' },
+    )
+    setSleepAfterCurrent(t.next.sleepAfterCurrent)
     showToast('将播完当前曲目后停止')
   }, [showToast])
 
   const cancelSleepTimer = useCallback(() => {
-    setSleepEndsAt(null)
-    setSleepAfterCurrent(false)
+    const t = applySleepAction(
+      { sleepEndsAt: sleepEndsAtRef.current, sleepAfterCurrent: sleepAfterCurrentRef.current },
+      { type: 'cancel' },
+    )
+    setSleepEndsAt(t.next.sleepEndsAt)
+    setSleepAfterCurrent(t.next.sleepAfterCurrent)
   }, [])
 
   const play = useCallback((track: Track) => {
@@ -811,13 +824,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     try {
       navigator.mediaSession.setPositionState({
         duration,
-        playbackRate: 1,
+        // v1.4.8-pre1 修复：原写死 1，倍速播放时系统媒体面板进度条会算错
+        playbackRate: playbackRate,
         position: Math.min(Math.max(progress, 0), duration),
       })
     } catch {
       // Invalid transient durations/progress values should not affect playback.
     }
-  }, [currentTrack, duration, progress])
+  }, [currentTrack, duration, progress, playbackRate])
 
   const value = useMemo<PlayerContextValue>(() => ({
     currentTrack,
@@ -914,4 +928,22 @@ export function usePlayerProgress(): PlayerProgress {
   const ctx = useContext(PlayerProgressContext)
   if (!ctx) throw new Error('usePlayerProgress must be used within PlayerProvider')
   return ctx
+}
+
+/**
+ * v1.4.8-pre1 睡眠倒计时剩余文案（m:ss）。
+ * 1 秒定时器驱动，暂停/失焦时也照常走表（原先依赖播放进度渲染刷新，暂停时会冻结）；
+ * 未设倒计时返回 null。PlayerBar 弹层与设置页睡眠定时行共用。
+ */
+export function useSleepRemainingText(): string | null {
+  const { sleepEndsAt } = usePlayer()
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (sleepEndsAt === null) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [sleepEndsAt])
+  if (sleepEndsAt === null) return null
+  return formatSleepRemaining(sleepEndsAt, now)
 }

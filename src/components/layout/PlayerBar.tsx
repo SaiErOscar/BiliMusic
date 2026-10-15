@@ -19,7 +19,8 @@ import {
   Gauge,
   Timer,
 } from 'lucide-react'
-import { usePlayer, usePlayerProgress, nextPlaybackRate } from '@/contexts/PlayerContext'
+import { usePlayer, usePlayerProgress, nextPlaybackRate, useSleepRemainingText } from '@/contexts/PlayerContext'
+import { SLEEP_PRESET_MINUTES } from '@/utils/sleepTimer'
 import { useNowPlaying } from '@/contexts/NowPlayingContext'
 import { useAddToPlaylist } from '@/contexts/AddToPlaylistContext'
 import PlayQueue from '@/components/PlayQueue'
@@ -49,6 +50,8 @@ export default function PlayerBar() {
   // v1.4.8-pre1 睡眠定时弹层开关
   const [sleepMenuOpen, setSleepMenuOpen] = useState(false)
   const sleepMenuRef = useRef<HTMLDivElement | null>(null)
+  // 倒计时剩余文案：1 秒定时器驱动，暂停时也走表
+  const sleepRemaining = useSleepRemainingText()
   const trackDuration = duration || player.currentTrack?.duration || 0
   const remaining = Math.max(trackDuration - progress, 0)
 
@@ -426,7 +429,7 @@ export default function PlayerBar() {
             >
               <div style={{ fontWeight: 700, opacity: 0.85 }}>睡眠定时</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {[15, 30, 45, 60, 90].map((m) => (
+                {SLEEP_PRESET_MINUTES.map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -481,7 +484,7 @@ export default function PlayerBar() {
               )}
               {player.sleepEndsAt !== null && (
                 <div style={{ opacity: 0.6, fontSize: 11 }}>
-                  剩余 {formatTime(Math.max(0, (player.sleepEndsAt - Date.now()) / 1000))}
+                  剩余 {sleepRemaining ?? '0:00'}
                 </div>
               )}
               {player.sleepAfterCurrent && (
