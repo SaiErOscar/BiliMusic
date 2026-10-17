@@ -54,3 +54,12 @@ platform/HarmonyOS/oh_modules
 /_probe.py
 /output/design/
 /output/bilimusic-*.md
+
+# v1.4.8-pre2 MV 导出 harness（一次性过程文件）
+/_mvh6.cjs
+/_mvh6/
+/_mvh6.out.txt
+/_mvh6-prefix.out.txt
+/_mvh7.cjs
+/_mvh7/
+/_mvh7.out.txt

@@ -354,6 +354,9 @@ function waitForPaint(win: BrowserWindow): Promise<void> {
  * v1.4.7-pre1 并行分段渲染：times 按时间序切 K 片，K 个离屏窗口独立捕获后按序合并；
  * K = min(8, ceil(总帧数/400))。相邻帧视觉相同（密集采样下进度条亚像素位移不产生新画面）
  * 时跳过落盘，并入前一帧 duration（writeConcatList 按 keptTimes 计段），削减合成输入。
+ *
+ * v1.4.8-pre2 上屏确认：合并判断只在「两侧采样都已确认上屏」时生效（见下方注释），
+ * 消除把「回读拿到旧帧」误判为静态帧、从而吞掉歌词切换的缺陷。
  */
 function createCaptureWindow(job: MvExportJob): BrowserWindow {
   const win = new BrowserWindow({
@@ -393,6 +396,10 @@ async function captureChunkWorker(
   const files: string[] = []
   const keptTimes: number[] = []
   let mergedInChunk = 0
+  let prevJpeg: Buffer | null = null
+  // 上一帧是否为「上屏已确认」的采样（v1.4.8-pre2）：只有两侧都确认过，字节相同才是真静态
+  let prevConfirmed = false
+  let unconfirmedFrames = 0
   try {
     await win.loadURL(resolveStageUrl())
     await win.webContents.executeJavaScript(
@@ -420,38 +427,34 @@ async function captureChunkWorker(
     win.webContents.invalidate()
     await waitForPaint(win)
 
-    let prevJpeg: Buffer | null = null
     for (let i = 0; i < chunk.length; i++) {
       if (job.cancelRequested || win.isDestroyed()) throw new Error('已取消')
       // v1.4.7-pre3 卡顿修复：原 waitForPaint 等的是「任意一次绘制」，常把 React 新状态
       // 上屏前的旧帧捕走（诊断实测约半数帧与前一帧相同 → 有效更新率比档位设计值减半）。
-      // 改为页内双 rAF：钉住「新状态已提交并至少完成一次上屏」后再捕获。
+      // v1.4.8-pre2 上屏确认：__mvSetTime 返回本次版本号，页内双 rAF 后写回 __mvPaintedVersion，
+      // 主进程等到该版本已上屏才回读；确认失败（超时）的采样不参与合并，避免把旧帧当静态帧。
       win.webContents.invalidate()
-      await Promise.race([
+      const painted = await Promise.race([
         win.webContents.executeJavaScript(
-          `window.__mvSetTime(${chunk[i].toFixed(3)}); new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))`,
-        ),
-        sleep(500),
+          `(() => { const v = window.__mvSetTime(${chunk[i].toFixed(3)}); return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(window.__mvPaintedVersion >= v ? v : -1)))) })()`,
+        ) as Promise<number>,
+        sleep(500).then(() => -1),
       ])
       if (win.isDestroyed()) throw new Error('已取消')
-      let jpeg = (await win.webContents.capturePage()).toJPEG(88)
-      if (prevJpeg && jpeg.equals(prevJpeg)) {
-        // 相同帧：可能 React 尚未上屏（而非真实静态），补一轮 rAF 后重捕获一次
-        await Promise.race([
-          win.webContents.executeJavaScript('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))'),
-          sleep(400),
-        ]).catch(() => {})
-        if (win.isDestroyed()) throw new Error('已取消')
-        jpeg = (await win.webContents.capturePage()).toJPEG(88)
-      }
-      // 相同帧合并：密集采样下相邻帧常完全一致（仅进度条亚像素位移不足产生新像素），
-      // 字节级相同则不落盘，合成段 duration 自动并入前一帧
-      if (prevJpeg && jpeg.equals(prevJpeg)) {
+      const jpeg = (await win.webContents.capturePage()).toJPEG(88)
+      const confirmed = typeof painted === 'number' && painted > 0
+      if (!confirmed) unconfirmedFrames++
+      // 相同帧合并（v1.4.8-pre2 收窄条件）：两侧采样都确认过已上屏时，字节相同才等价于
+      // 画面确实没变（密集采样下进度条亚像素位移不足产生新像素），此时不落盘、
+      // 合成段 duration 自动并入前一帧。旧实现无条件比较字节，把「新帧还没合成完、
+      // 回读拿到旧帧」误判为静态，正好落在歌词切换点时该次切换被吞、成片歌词晚于音乐。
+      if (prevJpeg && prevConfirmed && confirmed && jpeg.equals(prevJpeg)) {
         mergedInChunk++
         doneCount.value++
         continue
       }
       prevJpeg = jpeg
+      prevConfirmed = confirmed
       const filePath = path.join(tempDir, `p${partIndex}_kf_${String(i).padStart(5, '0')}.jpg`)
       // 离屏缓冲按显示器 DPI 放大（如 175% → 2242×1262），保留原分辨率落盘，
       // 合成阶段由 ffmpeg lanczos 高质量缩回 720p，比 NativeImage 缩放更锐
@@ -473,7 +476,8 @@ async function captureChunkWorker(
     if (idx >= 0) job.windows.splice(idx, 1)
   }
   // 卡顿诊断指标（pre3）：合并占比高 = 离屏窗口漏重绘（预期应远低于半数）
-  console.log(`[mvExport] part${partIndex}: captured=${files.length} merged(identical)=${mergedInChunk}`)
+  // v1.4.8-pre2 增 unconfirmed：上屏确认超时的采样数（>0 说明该窗存在掉帧，这些帧不参与合并）
+  console.log(`[mvExport] part${partIndex}: captured=${files.length} merged(identical)=${mergedInChunk} unconfirmed=${unconfirmedFrames}`)
   return { files, times: keptTimes }
 }
 
@@ -656,14 +660,13 @@ async function runExport(payload: MvExportPayload, sender: Electron.WebContents 
       }
     })
 
-    // 时长确定：渲染层 track.duration 可能为 0（如 avid/cid 回退源），以音频实测为准。
-    // 探测也拿不到时显式报错中止（修复6）：旧的 max(1,…) 静默兜底会把分钟级音频截成 1 秒成片
-    let duration = payload.duration || 0
-    if (duration < 1) {
-      const probed = await probeDuration(audioPath)
-      if (probed > 0) duration = probed
-    }
-    if (duration < 1) throw new Error('无法确定音频时长（入参缺失且探测失败），已中止导出')
+    // v1.4.8-pre2 时间尺统一：以实测音频长度为准。B 站元数据 track.duration 与真实音频
+    // 不一致时（元数据偏长/偏短），网格、ffmpeg -t 与舞台进度条会各走一尺，歌词越往后偏得越多。
+    // 探测失败才回退入参；两者都拿不到仍显式报错中止（修复6）：旧的 max(1,…) 静默兜底
+    // 会把分钟级音频截成 1 秒成片
+    const probedDuration = await probeDuration(audioPath)
+    const duration = probedDuration > 0 ? probedDuration : (payload.duration || 0)
+    if (duration < 1) throw new Error('无法确定音频时长（探测失败且入参缺失），已中止导出')
 
     // 2. 真实 UI 逐帧捕获（按流畅度档位定步长，K 窗并行）
     const preset = SMOOTHNESS_PRESETS[payload.smoothness || ''] || SMOOTHNESS_PRESETS[DEFAULT_SMOOTHNESS]
