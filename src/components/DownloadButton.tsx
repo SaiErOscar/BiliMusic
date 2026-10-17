@@ -138,6 +138,8 @@ export default function DownloadButton({
         filename: actualName,
         downloadDir: filePath.slice(0, filePath.length - actualName.length - 1),
         filePath,
+        // v1.4.8-pre4：记录封面，下载列表不再是无封面的占位
+        coverUrl: actualTrack?.coverUrl || '',
         downloadedAt: new Date().toISOString(),
       })
       setDone(true)
@@ -193,6 +195,7 @@ export default function DownloadButton({
         filename: mvName,
         downloadDir: pathDirname(filePath),
         filePath,
+        coverUrl: trackForMv.coverUrl || '',
         downloadedAt: new Date().toISOString(),
       })
       setDone(true)

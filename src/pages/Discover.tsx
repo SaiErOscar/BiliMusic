@@ -20,6 +20,7 @@ import {
 } from '@/utils/storage'
 import { MusicHero, MusicPageShell, LibraryCard, type LibraryItem } from '@/components/AppleMusicPage'
 import type { DownloadRecord, Track } from '@/types'
+import { resolveDownloadCover } from '@/utils/downloadCovers'
 import { platform } from '@/platform'
 
 /** 每张卡片横向展示的最大条数 */
@@ -35,12 +36,13 @@ function trackToItem(track: Track): LibraryItem {
   }
 }
 
-/** 下载记录无封面，映射为卡片单元（封面位显示占位图标） */
-function downloadToItem(record: DownloadRecord): LibraryItem {
+/** 下载记录映射为卡片单元；封面优先用记录里存的，旧记录按 bvid 懒加载补齐 */
+function downloadToItem(record: DownloadRecord, covers: Record<string, string>): LibraryItem {
   return {
     id: record.id,
     title: record.title,
     subtitle: record.artist || (record.format === 'video' ? '视频' : '音频'),
+    coverUrl: record.coverUrl || covers[record.bvid] || undefined,
   }
 }
 
@@ -70,6 +72,8 @@ export default function Discover() {
   const [recent, setRecent] = useState<Track[]>([])
   const [favorites, setFavorites] = useState<Track[]>([])
   const [downloads, setDownloads] = useState<DownloadRecord[]>([])
+  // v1.4.8-pre4：旧下载记录没有封面，按 bvid 懒加载后存这里
+  const [downloadCovers, setDownloadCovers] = useState<Record<string, string>>({})
   const [biliFolderTracks, setBiliFolderTracks] = useState<Track[]>([])
   const [biliFolderId, setBiliFolderId] = useState<number | null>(null)
   const [biliLoading, setBiliLoading] = useState(false)
@@ -142,6 +146,24 @@ export default function Discover() {
     }
   }, [refreshLocal])
 
+  // v1.4.8-pre4：为缺封面的下载记录按 bvid 取 B 站视频封面（只补首屏可见的几条，
+  // 结果有 localStorage 缓存，第二次进页面不再请求）
+  useEffect(() => {
+    let cancelled = false
+    const missing = downloads
+      .filter((d) => !d.coverUrl && d.bvid && !downloadCovers[d.bvid])
+      .slice(0, PREVIEW_COUNT)
+    if (!missing.length) return
+    void (async () => {
+      for (const record of missing) {
+        const url = await resolveDownloadCover(record.bvid)
+        if (cancelled || !url) continue
+        setDownloadCovers((prev) => (prev[record.bvid] ? prev : { ...prev, [record.bvid]: url }))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [downloads, downloadCovers])
+
   // 条目播放：三张曲目型卡片按 id 回查 Track 后 playNow
   const playItemByTrack = useCallback((items: Track[]) => (item: LibraryItem) => {
     const track = items.find((t) => t.id === item.id)
@@ -212,7 +234,7 @@ export default function Discover() {
         title="本地下载"
         count={downloads.length}
         unit="个"
-        items={downloads.slice(0, PREVIEW_COUNT).map(downloadToItem)}
+        items={downloads.slice(0, PREVIEW_COUNT).map((d) => downloadToItem(d, downloadCovers))}
         emptyText="还没有下载，在播放页或控制栏点击下载按钮。"
         onMore={() => navigate('/downloads')}
         onItemPlay={openDownload}

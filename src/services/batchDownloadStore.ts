@@ -221,6 +221,7 @@ async function run() {
             filename: mvName,
             downloadDir: mvDir,
             filePath: mvPath,
+            coverUrl: track.coverUrl || '',
             downloadedAt: new Date().toISOString(),
           })
           setState({ completedCount: state.completedCount + 1 })
@@ -248,6 +249,7 @@ async function run() {
           filename: dlName,
           downloadDir: dlPath.slice(0, dlPath.length - dlName.length - 1),
           filePath: dlPath,
+          coverUrl: track.coverUrl || '',
           downloadedAt: new Date().toISOString(),
         })
 

@@ -470,13 +470,7 @@ async function captureAndEncode(
       '-movflags', '+faststart',
       '-progress', 'pipe:1',
       outputPath,
-    ], (seconds) => {
-      sendProgress(sender, {
-        phase: 'compose',
-        percent: Math.min(99, Math.round((seconds / duration) * 100)),
-        message: label,
-      })
-    })
+    ])
     pipe = encoder
 
     // 编码器可能中途失败（QSV 实测 device failed -17）：必须接管 done 的拒绝，
@@ -536,7 +530,11 @@ async function captureAndEncode(
       }
     }
 
+    // v1.4.8-pre4 进度显示：编码与渲染是重叠进行的，若同时上报「合成视频」的百分比，
+    // 界面会在两个阶段文案之间反复跳动。这里帧全部写完后才切到合成阶段，
+    // 进度停在 99% 直到出片，文案与进度条都保持连贯。
     encoder.stdin.end()
+    sendProgress(sender, { phase: 'compose', percent: 99, message: label })
     await encoder.done
   } finally {
     if (pipe) {
