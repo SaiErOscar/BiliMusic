@@ -1,18 +1,27 @@
 /**
- * v1.4.6 播放页 MV 视频导出（桌面端专属）—— pre3 方案 A 整改版
+ * 播放页 MV 视频导出（桌面端专属）
  *
  * 真实 UI 离屏渲染：隐藏窗口加载真实渲染层（打包 app://local / 开发 dev server），
  * 路由到 #/mv-export 导出态舞台（复用真实 NowPlaying 的 CSS 与 LyricsView/PlayerSlider
- * 组件与主题），主进程只按时间轴步进「当前播放时间」并逐帧捕获。进度条/时间数字/
- * 水印全部由真实组件画进帧内，ffmpeg 不再有任何 drawbox/drawtext 叠画。
+ * 组件与主题），主进程只按时间轴步进「当前播放时间」。进度条/时间数字/水印全部由
+ * 真实组件画进帧内，ffmpeg 不做任何 drawbox/drawtext 叠画。
  *
- * 合成（O(N)）：关键帧按时间点连成 concat demuxer 清单（每帧带 duration），
- * 单个 ffmpeg 进程一次编码完成，替代 pre2 的 N 层 overlay 链（O(总帧数×关键帧数)）。
- * 编码器探测链：NVENC → QSV → AMF → libx264，全部以真实试编退出码为准。
+ * v1.4.8-pre3 路径 A（帧获取与合成重写）：
+ * - 帧源改为离屏窗口原生的 paint 事件。paint 触发即代表渲染器产出了一帧新画面，
+ *   事件附带 NativeImage，因此不需要 capturePage 回读，也不需要「等双 rAF 再猜是否上屏」。
+ * - 帧不再编 JPEG、不落盘，以 BGRA 直送 ffmpeg stdin，由 ffmpeg 一次完成缩放与编码，
+ *   渲染与编码天然重叠。
+ * - 时间轴按绝对时间量化到 60fps 输出帧（round(t*60)），同一张位图重复写入对应帧数；
+ *   边界按绝对时间算，总帧数恒等于 round(duration*60)，不累积舍入误差。
+ * - 未产生新画面（paint 超时）时该段帧数并入上一帧，语义等同旧的「相同帧合并」，
+ *   但不再依赖字节比对，也就不存在把旧帧误判为静态帧的问题。
+ * - 音频源是 AAC 时直接 -c:a copy，免二次编码并消掉编码器延迟。
  *
- * 进度：合成阶段用 ffmpeg `-progress pipe:1` 结构化输出，每秒至少一次回调。
+ * 编码器：候选按 GPU 厂商预判排序，仍以真实任务为探测（不做事前试编）；失败过的候选
+ * 记入会话内缓存，同一进程内不再重试。libx264 保底。
  *
- * 内存约束：每帧 NativeImage 立即 JPEG 编码写盘，内存峰值恒定；临时目录用完即删。
+ * 进度：渲染按已写入帧数推进，编码按 ffmpeg `-progress pipe:1` 的 out_time 推进，
+ * 两者取较大值，避免渲染先跑满而编码仍在追赶时进度虚高。
  */
 
 import { ipcMain, BrowserWindow, net, app, nativeImage } from 'electron'
@@ -60,9 +69,16 @@ export interface MvExportProgress {
 
 const WIDTH = 1280
 const HEIGHT = 720
+/** 输出帧率（v1.4.8-pre1 定案 60） */
+const FPS = 60
+/**
+ * 等 paint 的超时。超时代表该采样没有产生新画面（静态帧），按「并入上一帧」处理。
+ * 取值兼顾慢机器：离屏软件渲染下单次绘制实测 13~16ms，250ms 足够覆盖抖动。
+ */
+const PAINT_TIMEOUT_MS = 250
 /**
  * 流畅度档位（v1.4.7-pre1，步长为用户定案值）：网格步长即进度条/歌词的视觉更新粒度，
- * 上限封顶控制渲染耗时与临时盘最坏占用（超出自动放粗步长）。
+ * 上限封顶控制渲染耗时（超出自动放粗步长）。
  * 快速=0.15s、标准=0.1s（默认）、流畅=0.05s、极致=0.03s（v1.4.8-pre1 输出帧率提至 60fps，步长仍为最密网格）。
  */
 const SMOOTHNESS_PRESETS: Record<string, { step: number; maxFrames: number }> = {
@@ -72,11 +88,10 @@ const SMOOTHNESS_PRESETS: Record<string, { step: number; maxFrames: number }> = 
   '极致': { step: 0.03, maxFrames: 9000 },
 }
 const DEFAULT_SMOOTHNESS = '标准'
-/** 并行分段渲染：每窗最多捕获帧数，K 自适应 min(8, ceil(总帧数/400))，失败回退单窗 */
-const FRAMES_PER_WORKER = 400
-const MAX_PARALLEL_WINDOWS = 8
 /** 封面降采样尺寸（CSS 显示 400px，高 DPI 留足余量） */
 const COVER_SIZE = 800
+/** 会话内失败的编码器：同一进程内不再重试，避免每次导出都白跑一遍捕获 */
+const failedEncoders = new Set<string>()
 
 // ===== ffmpeg 路径解析（与 biliApi.ts 同策略：ffmpeg-static 优先，asar.unpacked 回退） =====
 
@@ -135,7 +150,7 @@ interface MvExportJob {
   ownerTag: string | null
   cancelRequested: boolean
   proc?: ReturnType<typeof spawn>
-  /** 并行捕获的全部离屏窗口（v1.4.7-pre1 K 窗分段渲染） */
+  /** 当前存活的离屏窗口（编码器回退时会重建，取消时逐个销毁） */
   windows: BrowserWindow[]
   tempDir?: string
 }
@@ -169,26 +184,35 @@ function buildCaptureTimes(lyrics: { time: number; text: string }[], duration: n
 
 // ===== ffmpeg 辅助 =====
 
-interface RunFfmpegOptions {
-  /** stdout `-progress pipe:1` 的 out_time（秒）回调 */
-  onOutTime?: (seconds: number) => void
+interface EncoderPipe {
+  stdin: NodeJS.WritableStream
+  /** ffmpeg 退出即结算；非 0 退出以错误 reject */
+  done: Promise<void>
+  /** 管道写入错误（编码器中途失败时 EPIPE 会走这里，不能让它变成未捕获异常） */
+  getError: () => Error | null
 }
 
-function runFfmpeg(args: string[], options: RunFfmpegOptions = {}): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const proc = trackChild(spawn(ffmpegPath, args, { windowsHide: true }))
-    if (currentJob) currentJob.proc = proc
-    let stderr = ''
-    proc.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString()
-      if (stderr.length > 64 * 1024) stderr = stderr.slice(-32 * 1024)
-    })
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      if (!options.onOutTime) return
-      // -progress 输出形如 out_time_ms=1234567（实为微秒）
-      const matches = chunk.toString().matchAll(/out_time_ms=(\d+)/g)
-      for (const m of matches) options.onOutTime(Number(m[1]) / 1e6)
-    })
+/**
+ * 启动一个流式编码进程（rawvideo 从 stdin 进）。编码器仍以真实任务为探测，
+ * 候选由 GPU 厂商预判给出（encoders.ts），失败回退下一个，libx264 保底。
+ */
+function spawnEncoder(args: string[], onOutTime?: (seconds: number) => void): EncoderPipe {
+  const proc = trackChild(spawn(ffmpegPath, args, { windowsHide: true }))
+  if (currentJob) currentJob.proc = proc
+  let stderr = ''
+  let pipeError: Error | null = null
+  proc.stderr?.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString()
+    if (stderr.length > 64 * 1024) stderr = stderr.slice(-32 * 1024)
+  })
+  proc.stdout?.on('data', (chunk: Buffer) => {
+    if (!onOutTime) return
+    // -progress 输出形如 out_time_ms=1234567（实为微秒）
+    for (const m of chunk.toString().matchAll(/out_time_ms=(\d+)/g)) onOutTime(Number(m[1]) / 1e6)
+  })
+  // 编码器中途失败时写入会 EPIPE；必须常驻监听，否则 Node 以未捕获异常崩主进程
+  proc.stdin?.on('error', (err) => { pipeError = err })
+  const done = new Promise<void>((resolve, reject) => {
     proc.on('error', (err) => reject(new Error(`ffmpeg 启动失败: ${err.message}. ffmpegPath=${ffmpegPath}`)))
     proc.on('exit', (code) => {
       if (currentJob?.cancelRequested) reject(new Error('已取消'))
@@ -196,65 +220,26 @@ function runFfmpeg(args: string[], options: RunFfmpegOptions = {}): Promise<void
       else reject(new Error(`ffmpeg 失败 (exit ${code}): ${stderr.slice(-500)}`))
     })
   })
+  return { stdin: proc.stdin as NodeJS.WritableStream, done, getError: () => pipeError }
 }
 
-/**
- * 合成视频：编码器不做事前探测。真机实测（v1.4.6-pre3 harness）证明「探测通过 ≠ 能编完」——
- * NVENC 探测直接段错误尚可拦住，但 QSV 能通过 0.1s 试编却在真实任务里中途 device failed (-17)。
- * 所以直接用真实合成当探测：候选由 GPU 厂商预判给出（encoders.ts，v1.4.7-pre2：厂商不符的
- * 白跑候选消除，macOS 直达 videotoolbox），按序跑完整合成，失败回退下一个，libx264 保底。
- */
-async function composeVideo(listPath: string, audioPath: string, outputPath: string, duration: number, sender: Electron.WebContents | null): Promise<void> {
-  const candidates: EncoderCandidate[] = await resolveEncoderCandidates(process.platform)
-  let lastError = ''
-  for (const candidate of candidates) {
-    if (currentJob?.cancelRequested) throw new Error('已取消')
-    const args: string[] = [
-      '-y', '-hide_banner', '-nostats',
-      '-f', 'concat', '-safe', '0', '-i', listPath,
-      '-i', audioPath,
-      '-vf', `scale=${WIDTH}:${HEIGHT}:flags=lanczos,format=yuv420p`,
-      '-map', '0:v', '-map', '1:a',
-      '-c:v', candidate.codec, ...candidate.qualityArgs,
-      '-c:a', 'aac', '-b:a', '192k',
-      '-r', '60',
-      '-t', duration.toFixed(3),
-      '-movflags', '+faststart',
-      '-progress', 'pipe:1',
-      outputPath,
-    ]
-    try {
-      const label = candidate.codec === 'libx264' ? '合成视频' : `合成视频（${candidate.codec.replace('h264_', '').toUpperCase()}）`
-      await runFfmpeg(args, {
-        onOutTime: (seconds) => {
-          sendProgress(sender, { phase: 'compose', percent: Math.min(99, Math.round((seconds / duration) * 100)), message: label })
-        },
-      })
-      return
-    } catch (e) {
-      if (currentJob?.cancelRequested) throw e
-      lastError = e instanceof Error ? e.message : String(e)
-      console.warn(`[mvExport] encoder ${candidate.codec} failed on real task, falling back:`, lastError)
-    }
-  }
-  throw new Error(`视频合成失败（已尝试全部编码器）：${lastError}`)
-}
-
-/** 用 ffmpeg 读媒体文件时长（秒）；失败返回 0 */
-function probeDuration(filePath: string): Promise<number> {
+/** 读媒体时长与音频编码（秒/编码名）；失败返回 0 与空串 */
+function probeMedia(filePath: string): Promise<{ duration: number; audioCodec: string }> {
   return new Promise((resolve) => {
     try {
       const proc = trackChild(spawn(ffmpegPath, ['-i', filePath, '-t', '0.2', '-f', 'null', '-'], { windowsHide: true }))
       let stderr = ''
       proc.stderr?.on('data', (c: Buffer) => { stderr += c.toString() })
-      proc.on('error', () => resolve(0))
-      // 退出码非 0 是预期的（无输出文件），从 stderr 的 Duration= 行解析
+      proc.on('error', () => resolve({ duration: 0, audioCodec: '' }))
+      // 退出码非 0 是预期的（无输出文件），从 stderr 的 Duration= 与 Stream 行解析
       proc.on('exit', () => {
-        const m = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/)
-        resolve(m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : 0)
+        const d = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/)
+        const duration = d ? Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3]) : 0
+        const a = stderr.match(/Audio:\s*([a-z0-9_]+)/i)
+        resolve({ duration, audioCodec: a ? a[1].toLowerCase() : '' })
       })
     } catch {
-      resolve(0)
+      resolve({ duration: 0, audioCodec: '' })
     }
   })
 }
@@ -331,33 +316,37 @@ function resolveStageUrl(): string {
   return 'app://local/index.html#/mv-export'
 }
 
-/** 等待离屏 paint（兜底定时器先判 isDestroyed，防止「Object has been destroyed」） */
-function waitForPaint(win: BrowserWindow): Promise<void> {
+/**
+ * 等待离屏窗口的下一次 paint。paint 触发即代表渲染器产出了一帧新画面，
+ * 事件附带的图像就是该次状态对应的帧，不需要再比对版本号或字节。
+ * 超时返回 null，调用方按「该采样没有产生新画面」处理。
+ */
+function waitNextPaint(win: BrowserWindow, timeoutMs: number): Promise<Electron.NativeImage | null> {
   return new Promise((resolve) => {
-    const finish = () => {
+    let done = false
+    const finish = (image: Electron.NativeImage | null) => {
+      if (done) return
+      done = true
       clearTimeout(timer)
       try {
         if (!win.isDestroyed()) win.webContents.off('paint', onPaint)
       } catch { /* 窗口已销毁 */ }
-      resolve()
+      resolve(image)
     }
-    const timer = setTimeout(finish, 150)
-    const onPaint = () => finish()
+    const onPaint = (_event: Electron.Event, _dirty: Electron.Rectangle, image: Electron.NativeImage) => finish(image)
+    const timer = setTimeout(() => finish(null), timeoutMs)
     win.webContents.on('paint', onPaint)
   })
 }
 
-/**
- * 驱动真实 UI 舞台逐帧捕获：加载 #/mv-export 舞台 → 注入曲目信息 → 等就绪 →
- * 按捕获时间轴步进「当前播放时间」，每步等一帧 paint 后 capturePage 落盘 JPEG。
- *
- * v1.4.7-pre1 并行分段渲染：times 按时间序切 K 片，K 个离屏窗口独立捕获后按序合并；
- * K = min(8, ceil(总帧数/400))。相邻帧视觉相同（密集采样下进度条亚像素位移不产生新画面）
- * 时跳过落盘，并入前一帧 duration（writeConcatList 按 keptTimes 计段），削减合成输入。
- *
- * v1.4.8-pre2 上屏确认：合并判断只在「两侧采样都已确认上屏」时生效（见下方注释），
- * 消除把「回读拿到旧帧」误判为静态帧、从而吞掉歌词切换的缺陷。
- */
+/** 步进时间并等待该次状态对应的 paint 帧；超时返回 null */
+async function captureAt(win: BrowserWindow, t: number): Promise<Electron.NativeImage | null> {
+  // 监听必须先挂上：paint 是同步回调，挂在 executeJavaScript 之后可能漏掉本次帧
+  const pending = waitNextPaint(win, PAINT_TIMEOUT_MS)
+  await win.webContents.executeJavaScript(`window.__mvSetTime(${t.toFixed(3)})`)
+  return pending
+}
+
 function createCaptureWindow(job: MvExportJob): BrowserWindow {
   const win = new BrowserWindow({
     width: WIDTH,
@@ -375,245 +364,229 @@ function createCaptureWindow(job: MvExportJob): BrowserWindow {
   })
   job.windows.push(win)
   win.webContents.setBackgroundThrottling(false)
-  win.webContents.setFrameRate(60)
+  win.webContents.setFrameRate(FPS)
   return win
 }
 
-/** 单个离屏窗口捕获一个连续时间段：返回实际落盘的帧文件与其时间点（相同帧已合并） */
-async function captureChunkWorker(
+/** 加载导出舞台并等待字体/封面就绪；返回窗口与就绪时的稳定帧（即 t=0 的首帧） */
+async function openStage(
   job: MvExportJob,
   payload: MvExportPayload,
   duration: number,
-  partIndex: number,
-  chunk: number[],
-  tempDir: string,
   coverDataUrl: string,
-  sender: Electron.WebContents | null,
-  doneCount: { value: number },
-  totalFrames: number,
-): Promise<{ files: string[]; times: number[] }> {
+): Promise<{ win: BrowserWindow; settledFrame: Electron.NativeImage | null }> {
   const win = createCaptureWindow(job)
-  const files: string[] = []
-  const keptTimes: number[] = []
-  let mergedInChunk = 0
-  let prevJpeg: Buffer | null = null
-  // 上一帧是否为「上屏已确认」的采样（v1.4.8-pre2）：只有两侧都确认过，字节相同才是真静态
-  let prevConfirmed = false
-  let unconfirmedFrames = 0
-  try {
-    await win.loadURL(resolveStageUrl())
-    await win.webContents.executeJavaScript(
-      `window.__mvInit(${JSON.stringify(JSON.stringify({
-        title: payload.title,
-        artist: payload.artist,
-        cover: coverDataUrl,
-        duration,
-        // 并行分段渲染（v1.4.7-pre2）：每窗直接落位到自己片段起点，
-        // 避免从 0 初始化后首个 __mvSetTime 触发歌词从开头滚动到对应位置的跳变入帧
-        startTime: chunk[0] || 0,
-        lyrics: payload.lyrics,
-        watermark: payload.watermark,
-      }))})`,
-    )
-    const readyDeadline = Date.now() + 20_000
-    for (;;) {
-      if (job.cancelRequested || win.isDestroyed()) throw new Error('已取消')
-      if (await win.webContents.executeJavaScript('window.__mvReady === true')) break
-      if (Date.now() > readyDeadline) throw new Error('导出页面加载超时')
-      await sleep(120)
-    }
-
-    // 主题/布局入场是静态的，先空转一帧让首屏稳定（每窗各自稳定一次）
+  await win.loadURL(resolveStageUrl())
+  await win.webContents.executeJavaScript(
+    `window.__mvInit(${JSON.stringify(JSON.stringify({
+      title: payload.title,
+      artist: payload.artist,
+      cover: coverDataUrl,
+      duration,
+      startTime: 0,
+      lyrics: payload.lyrics,
+      watermark: payload.watermark,
+    }))})`,
+  )
+  const readyDeadline = Date.now() + 20_000
+  for (;;) {
+    if (job.cancelRequested || win.isDestroyed()) throw new Error('已取消')
+    if (await win.webContents.executeJavaScript('window.__mvReady === true')) break
+    if (Date.now() > readyDeadline) throw new Error('导出页面加载超时')
+    await sleep(120)
+  }
+  // 首屏入场是静态的，先强制重绘并等这一帧：它同时就是 t=0 的首帧
+  // （舞台初始 time 为 0，再调 __mvSetTime(0) 不会触发重绘）。
+  // 监听必须先挂上再 invalidate，否则同步触发的 paint 会被漏掉
+  const pending = waitNextPaint(win, 500)
+  win.webContents.invalidate()
+  let settledFrame = await pending
+  if (!settledFrame) {
+    const retry = waitNextPaint(win, 500)
     win.webContents.invalidate()
-    await waitForPaint(win)
+    settledFrame = await retry
+  }
+  if (!settledFrame) {
+    // 最后兜底：单次回读。仅首帧走这条路，逐帧路径仍全部走 paint
+    const img = await win.webContents.capturePage()
+    settledFrame = img && !img.isEmpty() ? img : null
+  }
+  return { win, settledFrame }
+}
 
-    for (let i = 0; i < chunk.length; i++) {
+/**
+ * 捕获 + 流式编码：paint 事件取帧，BGRA 直送 ffmpeg stdin，渲染与编码重叠。
+ * 时间轴按绝对时间量化到 60fps（round(t*60)），同一张位图重复写入对应帧数，
+ * 总帧数恒等于 round(duration*60)，歌词切换落点误差不超过半帧。
+ */
+async function captureAndEncode(
+  job: MvExportJob,
+  payload: MvExportPayload,
+  times: number[],
+  duration: number,
+  audioPath: string,
+  audioArgs: string[],
+  coverDataUrl: string,
+  outputPath: string,
+  candidate: EncoderCandidate,
+  sender: Electron.WebContents | null,
+): Promise<void> {
+  const { win, settledFrame } = await openStage(job, payload, duration, coverDataUrl)
+  let pipe: EncoderPipe | null = null
+  try {
+    const frameAt = (t: number) => Math.round(t * FPS)
+    const totalFrames = Math.max(1, frameAt(duration))
+
+    // 每个采样负责的输出帧数：边界按绝对时间量化，末段补到总帧数
+    const plan: { time: number; copies: number }[] = []
+    for (let i = 0; i < times.length; i++) {
+      const start = frameAt(times[i])
+      const end = i + 1 < times.length ? frameAt(times[i + 1]) : totalFrames
+      const copies = end - start
+      if (copies > 0) plan.push({ time: times[i], copies })
+    }
+    if (!plan.length) throw new Error('捕获时间轴为空')
+
+    // 先取首帧：编码器的 -s 必须与实际离屏缓冲尺寸一致（DPI 缩放后常为 2242×1262）。
+    // t=0 的首帧用就绪时的稳定帧，因为舞台本来就停在 0，重复步进不会触发重绘
+    const firstImage = plan[0].time <= 0 && settledFrame && !settledFrame.isEmpty()
+      ? settledFrame
+      : await captureAt(win, plan[0].time)
+    if (!firstImage || firstImage.isEmpty()) throw new Error('首帧未产生（舞台未渲染）')
+    const { width, height } = firstImage.getSize()
+    const expectBytes = width * height * 4
+
+    const label = candidate.codec === 'libx264' ? '合成视频' : `合成视频（${candidate.codec.replace('h264_', '').toUpperCase()}）`
+    const encoder = spawnEncoder([
+      '-y', '-hide_banner', '-nostats',
+      // 位图来自 NativeImage.toBitmap()，Skia 原生 N32 在小端平台即 BGRA
+      '-f', 'rawvideo', '-pix_fmt', 'bgra', '-s', `${width}x${height}`, '-r', String(FPS), '-i', '-',
+      '-i', audioPath,
+      '-vf', `scale=${WIDTH}:${HEIGHT}:flags=lanczos,format=yuv420p`,
+      '-map', '0:v', '-map', '1:a',
+      '-c:v', candidate.codec, ...candidate.qualityArgs,
+      ...audioArgs,
+      '-t', duration.toFixed(3),
+      '-movflags', '+faststart',
+      '-progress', 'pipe:1',
+      outputPath,
+    ], (seconds) => {
+      sendProgress(sender, {
+        phase: 'compose',
+        percent: Math.min(99, Math.round((seconds / duration) * 100)),
+        message: label,
+      })
+    })
+    pipe = encoder
+
+    // 编码器可能中途失败（QSV 实测 device failed -17）：必须接管 done 的拒绝，
+    // 否则无人 await 会变成未捕获拒绝；同时让写循环能立刻感知失败退出
+    let encoderError: Error | null = null
+    encoder.done.catch((e) => { encoderError = e instanceof Error ? e : new Error(String(e)) })
+
+    let written = 0
+    let lastBitmap: Buffer | null = null
+    for (let i = 0; i < plan.length; i++) {
       if (job.cancelRequested || win.isDestroyed()) throw new Error('已取消')
-      // v1.4.7-pre3 卡顿修复：原 waitForPaint 等的是「任意一次绘制」，常把 React 新状态
-      // 上屏前的旧帧捕走（诊断实测约半数帧与前一帧相同 → 有效更新率比档位设计值减半）。
-      // v1.4.8-pre2 上屏确认：__mvSetTime 返回本次版本号，页内双 rAF 后写回 __mvPaintedVersion，
-      // 主进程等到该版本已上屏才回读；确认失败（超时）的采样不参与合并，避免把旧帧当静态帧。
-      win.webContents.invalidate()
-      const painted = await Promise.race([
-        win.webContents.executeJavaScript(
-          `(() => { const v = window.__mvSetTime(${chunk[i].toFixed(3)}); return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(window.__mvPaintedVersion >= v ? v : -1)))) })()`,
-        ) as Promise<number>,
-        sleep(500).then(() => -1),
-      ])
-      if (win.isDestroyed()) throw new Error('已取消')
-      const jpeg = (await win.webContents.capturePage()).toJPEG(88)
-      const confirmed = typeof painted === 'number' && painted > 0
-      if (!confirmed) unconfirmedFrames++
-      // 相同帧合并（v1.4.8-pre2 收窄条件）：两侧采样都确认过已上屏时，字节相同才等价于
-      // 画面确实没变（密集采样下进度条亚像素位移不足产生新像素），此时不落盘、
-      // 合成段 duration 自动并入前一帧。旧实现无条件比较字节，把「新帧还没合成完、
-      // 回读拿到旧帧」误判为静态，正好落在歌词切换点时该次切换被吞、成片歌词晚于音乐。
-      if (prevJpeg && prevConfirmed && confirmed && jpeg.equals(prevJpeg)) {
-        mergedInChunk++
-        doneCount.value++
-        continue
+      if (encoderError) throw encoderError
+      const pipeErr = encoder.getError()
+      if (pipeErr) {
+        // 管道已断（通常是编码器先退出），稍等退出事件以拿到真实错误再抛
+        await Promise.race([encoder.done.catch(() => {}), sleep(2000)])
+        throw encoderError ?? pipeErr
       }
-      prevJpeg = jpeg
-      prevConfirmed = confirmed
-      const filePath = path.join(tempDir, `p${partIndex}_kf_${String(i).padStart(5, '0')}.jpg`)
-      // 离屏缓冲按显示器 DPI 放大（如 175% → 2242×1262），保留原分辨率落盘，
-      // 合成阶段由 ffmpeg lanczos 高质量缩回 720p，比 NativeImage 缩放更锐
-      await fs.writeFile(filePath, jpeg)
-      files.push(filePath)
-      keptTimes.push(chunk[i])
-      doneCount.value++
-      if (doneCount.value % 5 === 0 || doneCount.value === totalFrames) {
+
+      const item = plan[i]
+      let bitmap: Buffer | null = null
+      if (i === 0) {
+        bitmap = firstImage.toBitmap()
+      } else {
+        const image = await captureAt(win, item.time)
+        bitmap = image && !image.isEmpty() ? image.toBitmap() : null
+      }
+
+      if (bitmap) {
+        if (bitmap.length !== expectBytes) {
+          throw new Error(`帧尺寸不一致：位图 ${bitmap.length} 字节，期望 ${expectBytes}（${width}×${height}）`)
+        }
+        lastBitmap = bitmap
+      } else {
+        // 该采样没有产生新画面（paint 超时），沿用上一帧，帧数并入上一段
+        if (!lastBitmap) throw new Error('未捕获到任何可用的帧')
+        bitmap = lastBitmap
+      }
+
+      for (let c = 0; c < item.copies; c++) {
+        if (!encoder.stdin.write(bitmap)) {
+          // 背压等待必须与编码器退出赛跑：ffmpeg 退出后 stdin 被销毁，drain 永不触发，
+          // 单纯 await drain 会把导出挂死（实测挂到超时）
+          await Promise.race([
+            new Promise<void>((resolve) => encoder.stdin.once('drain', resolve)),
+            encoder.done.catch(() => {}),
+          ])
+        }
+      }
+      written += item.copies
+      if (written % 5 === 0 || written >= totalFrames) {
         sendProgress(sender, {
           phase: 'render',
-          percent: Math.round((doneCount.value / totalFrames) * 100),
-          message: `渲染播放页 ${doneCount.value}/${totalFrames} 帧`,
+          percent: Math.min(99, Math.round((written / totalFrames) * 100)),
+          message: `渲染播放页 ${written}/${totalFrames} 帧`,
         })
       }
     }
+
+    encoder.stdin.end()
+    await encoder.done
   } finally {
+    if (pipe) {
+      try { pipe.stdin.end() } catch { /* 已结束 */ }
+    }
     if (!win.isDestroyed()) win.destroy()
     const idx = job.windows.indexOf(win)
     if (idx >= 0) job.windows.splice(idx, 1)
   }
-  // 卡顿诊断指标（pre3）：合并占比高 = 离屏窗口漏重绘（预期应远低于半数）
-  // v1.4.8-pre2 增 unconfirmed：上屏确认超时的采样数（>0 说明该窗存在掉帧，这些帧不参与合并）
-  console.log(`[mvExport] part${partIndex}: captured=${files.length} merged(identical)=${mergedInChunk} unconfirmed=${unconfirmedFrames}`)
-  return { files, times: keptTimes }
 }
 
 /**
- * 分片边界吸附（v1.4.7-pre4 多窗衔接跳变根修）：
- * 接缝两侧必须呈现同一句歌词的「已稳定」画面——前片末帧（平滑滚动已落定）与
- * 后片首帧（窗口以 startTime 即时定位到同一行）才会逐帧连续。
- * 安全区 = 距上一次歌词行起点 ≥0.55s（滚动动画约 0.3~0.45s 已完成）且距下一次行起点
- * > 1.5×步长（后片首帧仍是同一行，随后的换行动画在后片窗口内自然发生）。
- * 均分目标点就近吸附到安全区；无任何安全区（歌词极密）时回退均分。
+ * 编码器候选循环：真实任务即探测，失败记入会话内缓存。
+ * 流式管道的代价是候选失败要重新捕获，所以缓存比 JPEG 时代更重要。
+ * 捕获阶段的错误与编码器无关，直接抛出，不再换候选重跑。
  */
-function splitTimesAtQuietPoints(
-  times: number[],
-  lyrics: { time: number; text: string }[],
-  parts: number,
-): number[][] {
-  if (parts <= 1 || times.length < parts * 2) return evenSplit(times, parts)
-  const lineStarts = [...new Set(lyrics.map((l) => l.time).filter((t) => Number.isFinite(t) && t >= 0))].sort((a, b) => a - b)
-  const step = times.length > 1 ? (times[times.length - 1] - times[0]) / (times.length - 1) : 0.1
-  const lastStartBefore = (t: number): number | null => {
-    let res: number | null = null
-    for (const s of lineStarts) { if (s <= t) res = s; else break }
-    return res
-  }
-  const nextStartAfter = (t: number): number | null => {
-    for (const s of lineStarts) { if (s > t) return s }
-    return null
-  }
-  const valid: number[] = []
-  for (let i = 1; i < times.length - 1; i++) {
-    const t = times[i]
-    const last = lastStartBefore(t)
-    if (last != null && t - last < 0.55) continue
-    const next = nextStartAfter(t)
-    if (next != null && next - t <= step * 1.5) continue
-    valid.push(i)
-  }
-  if (valid.length < parts - 1) return evenSplit(times, parts)
-  const bounds: number[] = [0]
-  for (let j = 1; j < parts; j++) {
-    const target = Math.round(times.length * j / parts)
-    let best = valid[0]
-    for (const i of valid) if (Math.abs(i - target) < Math.abs(best - target)) best = i
-    if (best <= bounds[bounds.length - 1]) return evenSplit(times, parts)
-    bounds.push(best)
-  }
-  bounds.push(times.length)
-  const chunks: number[][] = []
-  for (let j = 0; j < parts; j++) {
-    const chunk = times.slice(bounds[j], bounds[j + 1])
-    if (chunk.length) chunks.push(chunk)
-  }
-  return chunks
-}
-
-function evenSplit(times: number[], parts: number): number[][] {
-  const chunkSize = Math.ceil(times.length / parts)
-  const chunks: number[][] = []
-  for (let p = 0; p < parts; p++) {
-    const chunk = times.slice(p * chunkSize, (p + 1) * chunkSize)
-    if (chunk.length) chunks.push(chunk)
-  }
-  return chunks
-}
-
-async function captureWithParts(
+async function encodeWithFallback(
   job: MvExportJob,
   payload: MvExportPayload,
   times: number[],
   duration: number,
-  tempDir: string,
+  audioPath: string,
+  audioArgs: string[],
   coverDataUrl: string,
-  parts: number,
+  outputPath: string,
   sender: Electron.WebContents | null,
-): Promise<{ files: string[]; times: number[] }> {
-  // v1.4.7-pre4：分片边界吸附到歌词安静区（接缝两侧同一句已稳定画面，消除衔接跳变）；
-  // 首窗起点为 0 无需落位处理，后续窗以 startTime 即时定位
-  const chunks = splitTimesAtQuietPoints(times, payload.lyrics, parts)
-  const doneCount = { value: 0 }
-  const workers: Promise<{ files: string[]; times: number[] }>[] = []
-  for (let p = 0; p < chunks.length; p++) {
-    const chunk = chunks[p]
-    workers.push(captureChunkWorker(job, payload, duration, p, chunk, tempDir, coverDataUrl, sender, doneCount, times.length))
-  }
-  const results = await Promise.all(workers)
-  const files: string[] = []
-  const keptTimes: number[] = []
-  for (const r of results) {
-    files.push(...r.files)
-    keptTimes.push(...r.times)
-  }
-  if (!files.length) throw new Error('未捕获到任何关键帧')
-  return { files, times: keptTimes }
-}
-
-async function captureFrames(
-  job: MvExportJob,
-  payload: MvExportPayload,
-  times: number[],
-  duration: number,
-  tempDir: string,
-  sender: Electron.WebContents | null,
-): Promise<{ files: string[]; times: number[] }> {
-  const coverDataUrl = await fetchCoverDataUrl(payload.coverUrl)
-  const parts = Math.min(MAX_PARALLEL_WINDOWS, Math.max(1, Math.ceil(times.length / FRAMES_PER_WORKER)))
-  try {
+): Promise<void> {
+  const all = await resolveEncoderCandidates(process.platform)
+  const candidates = all.filter((c) => !failedEncoders.has(c.codec))
+  if (!candidates.length) throw new Error('没有可用编码器（本次会话内候选均已失败），请重启应用后重试')
+  let lastError = ''
+  for (const candidate of candidates) {
+    if (job.cancelRequested) throw new Error('已取消')
     try {
-      return await captureWithParts(job, payload, times, duration, tempDir, coverDataUrl, parts, sender)
+      await captureAndEncode(job, payload, times, duration, audioPath, audioArgs, coverDataUrl, outputPath, candidate, sender)
+      return
     } catch (e) {
-      if (job.cancelRequested) throw new Error('已取消')
-      if (parts === 1) throw e
-      // 多窗异常（GPU 争用/资源不足等）回退单窗重试一次
-      console.warn(`[mvExport] ${parts}-window capture failed, retry single window:`, e)
-      return await captureWithParts(job, payload, times, duration, tempDir, coverDataUrl, 1, sender)
-    }
-  } finally {
-    for (const w of job.windows.splice(0)) {
-      try { if (!w.isDestroyed()) w.destroy() } catch { /* 已销毁 */ }
+      if (job.cancelRequested) throw e
+      lastError = e instanceof Error ? e.message : String(e)
+      // 编码器失败（ffmpeg 非 0 退出，或管道被编码器带断）才换候选；捕获阶段的错误直接抛
+      const encoderFailure = lastError.startsWith('ffmpeg') || lastError.includes('EPIPE') || lastError.includes('ERR_STREAM')
+      if (encoderFailure) {
+        failedEncoders.add(candidate.codec)
+        console.warn(`[mvExport] encoder ${candidate.codec} failed on real task, falling back:`, lastError)
+      } else {
+        throw e
+      }
     }
   }
-}
-
-/** 生成 concat demuxer 清单：每帧一个条目 + duration（末帧补一次重复行，concat 规范要求） */
-async function writeConcatList(frames: string[], times: number[], duration: number, listPath: string): Promise<void> {
-  const escapeConcat = (p: string) => p.replace(/\\/g, '/').replace(/'/g, "'\\''")
-  const lines: string[] = ['ffconcat version 1.0']
-  for (let i = 0; i < frames.length; i++) {
-    const segEnd = i + 1 < frames.length ? times[i + 1] : duration
-    // v1.4.8-pre1：下限从 0.04 收到 1/60，与 60fps 输出对齐；原 0.04 会把极致档 30ms 段
-    // 抬到 40ms，累积导致成片总时长（进度条/歌词时间轴）比源明显拉长
-    const segDuration = Math.max(1 / 60, segEnd - times[i])
-    lines.push(`file '${escapeConcat(frames[i])}'`)
-    lines.push(`duration ${segDuration.toFixed(3)}`)
-  }
-  lines.push(`file '${escapeConcat(frames[frames.length - 1])}'`)
-  await fs.writeFile(listPath, lines.join('\n'), 'utf8')
+  throw new Error(`视频合成失败（已尝试全部编码器）：${lastError}`)
 }
 
 function sendProgress(sender: Electron.WebContents | null, progress: MvExportProgress) {
@@ -660,22 +633,20 @@ async function runExport(payload: MvExportPayload, sender: Electron.WebContents 
       }
     })
 
-    // v1.4.8-pre2 时间尺统一：以实测音频长度为准。B 站元数据 track.duration 与真实音频
-    // 不一致时（元数据偏长/偏短），网格、ffmpeg -t 与舞台进度条会各走一尺，歌词越往后偏得越多。
-    // 探测失败才回退入参；两者都拿不到仍显式报错中止（修复6）：旧的 max(1,…) 静默兜底
-    // 会把分钟级音频截成 1 秒成片
-    const probedDuration = await probeDuration(audioPath)
-    const duration = probedDuration > 0 ? probedDuration : (payload.duration || 0)
+    // 2. 时长与音频编码：时间尺统一以实测音频长度为准（B 站元数据与真实音频不一致时，
+    //    网格、-t 与舞台进度条会各走一尺，歌词越往后偏得越多）。探测失败才回退入参，
+    //    两者都拿不到仍显式报错中止（旧的 max(1,…) 静默兜底会把分钟级音频截成 1 秒成片）
+    const media = await probeMedia(audioPath)
+    const duration = media.duration > 0 ? media.duration : (payload.duration || 0)
     if (duration < 1) throw new Error('无法确定音频时长（探测失败且入参缺失），已中止导出')
+    // 音频直通：源本身是 AAC 就 -c:a copy，免二次编码并消掉 AAC 编码器延迟
+    const audioArgs = media.audioCodec === 'aac' ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '192k']
 
-    // 2. 真实 UI 逐帧捕获（按流畅度档位定步长，K 窗并行）
+    // 3. 逐帧捕获 + 流式编码（渲染与编码重叠，编码器失败自动回退下一候选）
     const preset = SMOOTHNESS_PRESETS[payload.smoothness || ''] || SMOOTHNESS_PRESETS[DEFAULT_SMOOTHNESS]
     const times = buildCaptureTimes(payload.lyrics, duration, preset.step, preset.maxFrames)
-    const { files: frames, times: keptTimes } = await captureFrames(job, payload, times, duration, tempDir, sender)
-
-    // 3. 单遍合成：concat demuxer 按 duration 拼帧 → 一次编码（O(N)，无 overlay 链）
-    await writeConcatList(frames, keptTimes, duration, path.join(tempDir, 'list.txt'))
-    await composeVideo(path.join(tempDir, 'list.txt'), audioPath, outputPath, duration, sender)
+    const coverDataUrl = await fetchCoverDataUrl(payload.coverUrl)
+    await encodeWithFallback(job, payload, times, duration, audioPath, audioArgs, coverDataUrl, outputPath, sender)
 
     sendProgress(sender, { phase: 'done', percent: 100, filePath: outputPath })
     return { filePath: outputPath }

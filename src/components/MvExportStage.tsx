@@ -46,27 +46,17 @@ const sliderTheme = {
 // 不能等 React effect 挂载（存在竞态）。payload 先落 pending，组件挂载后取走。
 let pendingPayloadJson: string | null = null
 let timeSink: ((t: number) => void) | null = null
-/**
- * v1.4.8-pre2 上屏版本号：__mvSetTime 每次调用自增版本，并在页内双 rAF 后把该版本写回
- * __mvPaintedVersion。主进程据此确认「这一次时间步进的新状态确实已上屏」再回读，
- * 此后字节相同才等价于画面真没变，合并判断不会再吞掉歌词切换。
- */
-let timeVersion = 0
 
 if (typeof window !== 'undefined') {
   window.__mvInit = (json: string) => {
     pendingPayloadJson = json
     window.dispatchEvent(new Event('mv-payload'))
   }
+  // v1.4.8-pre3：帧由离屏窗口的 paint 事件推送（paint 触发即代表新帧已产出），
+  // 主进程不再需要版本号确认，这里只负责步进时间
   window.__mvSetTime = (t: number) => {
-    const version = ++timeVersion
     timeSink?.(t)
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      window.__mvPaintedVersion = version
-    }))
-    return version
   }
-  window.__mvPaintedVersion = 0
 }
 
 function parsePayload(json: string | null): MvStagePayload | null {
@@ -260,10 +250,8 @@ export default function MvExportStage() {
 declare global {
   interface Window {
     __mvInit?: (json: string) => void
-    /** 步进当前时间，返回本次调用的版本号（v1.4.8-pre2） */
-    __mvSetTime?: (t: number) => number
-    /** 已上屏的最大版本号，双 rAF 后写回（v1.4.8-pre2） */
-    __mvPaintedVersion?: number
+    /** 步进当前时间（v1.4.8-pre3：帧由主进程监听 paint 事件获取） */
+    __mvSetTime?: (t: number) => void
     __mvReady?: boolean
   }
 }
