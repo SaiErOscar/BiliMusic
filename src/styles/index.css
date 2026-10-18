@@ -2148,29 +2148,32 @@ body {
 }
 
 /*
- * v1.4.9-pre3 音频可视化定位。
+ * v1.4.9 音频可视化定位。
  *
  * 原实现把 <canvas> 直接塞进 .now-playing-cover-wrap 的普通流内，72px 高度真实撑高
  * 了封面容器，把下方的标题块、进度条、控件整排下推——这就是「UI 偏移」的根因，
  * 且 .now-playing-visualizer 这个类当时在样式表里根本不存在，等于没有任何定位约束。
+ * 改为绝对定位后脱离文档流，绝不参与容器高度计算，原有布局零位移。
  *
- * 现在改为绝对定位：脱离文档流，绝不参与容器高度计算，原有布局零位移。
- * 位置压在封面下缘外侧一点（bottom: -6px），左右各留 6% 让柱子不顶到封面圆角边缘；
- * pointer-events:none 保证它不抢封面/控件的鼠标事件。
- * 封面 1:1 且靠 flex 居中，容器宽度即封面宽度，所以左右 6% 是相对封面宽度算的。
+ * v1.4.9 转正前修正「柱子悬空、与封面底边不齐」：
+ * - 原先 bottom: -6px 让柱底探出封面 6px，再叠加底部淡出遮罩，视觉上像浮在封面外，
+ *   与封面底边对不上。现在 bottom: 0，柱底与封面底边严格齐平，柱子像从封面底部长出来，
+ *   律动感更强也更稳。
+ * - 同时去掉底部淡出遮罩：底边既然已经对齐，再淡出反而会削掉柱根、破坏「坐实」的观感。
+ *   柱子底部齐平形成的水平线正好就是封面的下边缘，不需要额外的过渡。
+ * - 左右内缩 6%：封面圆角是 22px，在常见封面宽度下约占 5~6%，内缩到这个位置柱子的
+ *   两个下角正好落在圆角切点上，不会从圆角处「戳出去」。
+ * - pointer-events: none 保证不抢封面与下方控件的鼠标事件。
  */
 .now-playing-visualizer {
   position: absolute;
   left: 6%;
   right: 6%;
-  bottom: -6px;
-  height: 72px;
+  bottom: 0;
+  height: 64px;
   width: auto;
   pointer-events: none;
   z-index: 2;
-  /* 底部淡出：柱子根部与下方留白自然衔接，不出现生硬的矩形边界 */
-  mask-image: linear-gradient(to top, transparent 0%, #000 34%);
-  -webkit-mask-image: linear-gradient(to top, transparent 0%, #000 34%);
 }
 
 .now-playing-cover {

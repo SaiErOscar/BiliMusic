@@ -135,4 +135,35 @@ describe('可视化不再挤压播放页布局（v1.4.9-pre3）', () => {
     const ruleEnd = css.indexOf('}', ruleStart)
     expect(css.slice(ruleStart, ruleEnd)).toMatch(/pointer-events:\s*none/)
   })
+
+  it('柱子底部与封面底边严格对齐（bottom: 0，不再探出封面外）', () => {
+    const ruleStart = css.indexOf('.now-playing-visualizer {')
+    const ruleEnd = css.indexOf('}', ruleStart)
+    const rule = css.slice(ruleStart, ruleEnd)
+    // v1.4.9 转正前修正：原先 bottom: -6px 让柱底探出封面，叠加底部淡出后视觉悬空
+    expect(rule).toMatch(/bottom:\s*0;/)
+    expect(rule).not.toMatch(/bottom:\s*-/)
+  })
+
+  it('不再使用底部淡出遮罩（对齐后淡出会削掉柱根）', () => {
+    const ruleStart = css.indexOf('.now-playing-visualizer {')
+    const ruleEnd = css.indexOf('}', ruleStart)
+    const rule = css.slice(ruleStart, ruleEnd)
+    expect(rule).not.toMatch(/mask-image/)
+  })
+
+  it('组件兜底高度与 CSS 高度一致（避免首帧被拉伸）', () => {
+    const visualizerSrc = readFileSync(
+      path.resolve(__dirname, '../src/components/AudioVisualizer.tsx'),
+      'utf8',
+    ).replace(/\r\n/g, '\n')
+    const constMatch = visualizerSrc.match(/const CANVAS_HEIGHT = (\d+)/)
+    expect(constMatch).not.toBeNull()
+    const constHeight = Number(constMatch![1])
+    const ruleStart = css.indexOf('.now-playing-visualizer {')
+    const rule = css.slice(ruleStart, css.indexOf('}', ruleStart))
+    const cssHeight = Number((rule.match(/height:\s*(\d+)px/) || [])[1])
+    expect(cssHeight).toBeGreaterThan(0)
+    expect(constHeight).toBe(cssHeight)
+  })
 })

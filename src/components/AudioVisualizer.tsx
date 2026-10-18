@@ -22,8 +22,13 @@ import { getAnalyser, computeBars } from '@/services/audioGraph'
 /** 柱子数量。40 根在播放页封面下方的宽度下密度合适。 */
 const BAR_COUNT = 40
 
-/** 画布高度（CSS 像素）。 */
-const CANVAS_HEIGHT = 72
+/**
+ * 画布高度兜底值（CSS 像素）。
+ *
+ * 实际高度由 CSS 类决定（.now-playing-visualizer 设为 64px），这里只在 clientHeight
+ * 取不到时兜底。两处必须保持一致，否则降级/首帧会用错误高度绘制导致柱子被拉伸。
+ */
+const CANVAS_HEIGHT = 64
 
 /** 未就绪/降级时的静态占位高度比例（一条浅浅的基线，暗示暂无频谱）。 */
 const PLACEHOLDER_RATIO = 0.08
