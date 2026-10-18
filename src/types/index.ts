@@ -53,6 +53,24 @@ export interface DownloadRecord {
   downloadedAt: string
 }
 
+/** v1.4.9-pre1 主题体系化：用户在内置主题上覆盖的基色，只存改过的项 */
+export interface ThemeSeedOverride {
+  primary?: string
+  secondary?: string
+  accent?: string
+}
+
+/** v1.4.9-pre1 歌词窗样式预设：一组可命名的歌词窗外观项 */
+export interface LyricStylePreset {
+  id: string
+  name: string
+  lyricTextColor: string
+  lyricControlColor: string
+  lyricFontSize: number
+  lyricFontWeight: number
+  lyricFontFamily: string
+}
+
 export interface AppSettings {
   sidebarState: SidebarState
   playQuality: '标准' | '高品质' | '无损'
@@ -87,6 +105,12 @@ export interface AppSettings {
   // v1.4.8-pre1 桌面全局媒体键开关（Electron globalShortcut，失焦也生效）
   // 默认关闭，避免抢占其他播放器的系统媒体键
   globalMediaKeys: boolean
+  // v1.4.9-pre1 主题体系化：所选内置主题 id（default = BiliBili 粉，即 index.css 默认值）
+  themeId: string
+  // v1.4.9-pre1：在所选主题基色上的覆盖项（空对象表示用主题原色）
+  themeSeedOverride: ThemeSeedOverride
+  // v1.4.9-pre1：歌词窗样式预设库
+  lyricPresets: LyricStylePreset[]
 }
 
 export type NavItem = {

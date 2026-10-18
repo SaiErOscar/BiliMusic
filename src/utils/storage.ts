@@ -44,6 +44,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   // v1.4.8-pre1 播放三件套：倍速默认 1x，全局媒体键默认关（避抢占其他播放器）
   playbackRate: 1,
   globalMediaKeys: false,
+  // v1.4.9-pre1 主题体系化：默认主题（BiliBili 粉，回落 index.css 默认值）、无自定义覆盖、无预设
+  themeId: 'default',
+  themeSeedOverride: {},
+  lyricPresets: [],
 }
 
 function notifySettingsChanged() {

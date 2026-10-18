@@ -1,33 +1,18 @@
 import { useState, useEffect } from 'react'
 import type { ThemeMode } from '@/types'
-import { readStoredItemSync, writeStoredItem } from '@/utils/persistentStorage'
+import { applyTheme, initTheme, readStoredMode, writeStoredMode } from '@/theme/apply'
 
-const THEME_MODE_KEY = 'theme-mode'
-
-function getSystemTheme(): 'light' | 'dark' {
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-function applyTheme(mode: ThemeMode) {
-  const resolved = mode === 'system' ? getSystemTheme() : mode
-  document.documentElement.setAttribute('data-theme', resolved)
-}
-
-function readStoredMode(): ThemeMode {
-  return (readStoredItemSync(THEME_MODE_KEY) as ThemeMode) || 'system'
-}
-
-// 首次加载时同步设置主题，避免 FOUC
-applyTheme(readStoredMode())
+// 首次加载时同步应用主题与主题配色，避免 FOUC（模块被导入即执行，幂等）
+initTheme()
 
 export function useTheme() {
-  // 惰性读取：每次挂载都从 localStorage 取最新值，
+  // 惰性读取：每次挂载都从存储取最新值，
   // 避免路由切回设置页时用陈旧的模块级初始值导致主题回退为「系统」
   const [mode, setMode] = useState<ThemeMode>(readStoredMode)
 
   useEffect(() => {
     applyTheme(mode)
-    writeStoredItem(THEME_MODE_KEY, mode)
+    writeStoredMode(mode)
   }, [mode])
 
   // v1.4.3-pre7：备份导入等外部修改主题后，同步刷新本组件状态（否则开关回显滞后）
@@ -40,9 +25,7 @@ export function useTheme() {
   useEffect(() => {
     if (mode !== 'system') return
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const handler = () => {
-      document.documentElement.setAttribute('data-theme', getSystemTheme())
-    }
+    const handler = () => applyTheme('system')
     mq.addEventListener('change', handler)
     return () => mq.removeEventListener('change', handler)
   }, [mode])

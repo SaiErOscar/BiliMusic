@@ -40,6 +40,29 @@ import { createPlaylistsExport, importPlaylistsFromText } from '@/utils/storage'
 import { runSync, forceUpload, forceDownload, getLastSync, SYNC_STATE_EVENT, WEBDAV_CONFIGURED_EVENT, type SyncResult } from '@/utils/sync'
 import { clearNonCriticalCache } from '@/utils/safeStorage'
 import type { AppSettings, DownloadFormat, SidebarState, ThemeMode } from '@/types'
+import { BUILTIN_THEMES, getPreset } from '@/theme/tokens'
+import { currentResolvedMode } from '@/theme/apply'
+import { MAX_LYRIC_PRESETS, MAX_PRESET_NAME_LENGTH, applyPresetToPatch, findPreset, presetFromSettings, removePreset, upsertPreset } from '@/theme/lyricPresets'
+
+// v1.4.9-pre1：设置页内共用的胶囊按钮 / 预设输入框样式
+const chipButtonStyle = {
+  padding: '4px 10px',
+  borderRadius: 999,
+  border: '1px solid var(--glass-border)',
+  background: 'transparent',
+  color: 'var(--color-foreground)',
+  fontSize: 12,
+  cursor: 'pointer',
+}
+const presetInputStyle = {
+  width: 110,
+  padding: '4px 8px',
+  borderRadius: 'var(--radius-sm)',
+  border: '1px solid var(--glass-border)',
+  background: 'var(--glass-bg)',
+  color: 'var(--color-foreground)',
+  fontSize: 12,
+}
 
 export default function Settings() {
   const { mode, setMode } = useTheme()
@@ -58,6 +81,34 @@ export default function Settings() {
   const sleepActive = sleepEndsAt !== null || sleepAfterCurrent
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const [playlistTransferMessage, setPlaylistTransferMessage] = useState('')
+  // v1.4.9-pre1 歌词窗样式预设：输入名、操作提示、当前主题基色
+  const [lyricPresetName, setLyricPresetName] = useState('')
+  const [lyricPresetMessage, setLyricPresetMessage] = useState('')
+  const themePreset = getPreset(settings.themeId)
+  const themeSeed = currentResolvedMode() === 'dark' ? themePreset.dark : themePreset.light
+  const hasSeedOverride = Boolean(
+    settings.themeSeedOverride.primary || settings.themeSeedOverride.secondary || settings.themeSeedOverride.accent,
+  )
+
+  const saveLyricPreset = () => {
+    const preset = presetFromSettings(settings, lyricPresetName)
+    setAppSettings({ lyricPresets: upsertPreset(settings.lyricPresets, preset) })
+    setLyricPresetName('')
+    setLyricPresetMessage(`已保存「${preset.name}」`)
+  }
+
+  const applyLyricPreset = (id: string) => {
+    const preset = findPreset(settings.lyricPresets, id)
+    if (!preset) return
+    setAppSettings(applyPresetToPatch(preset))
+    setLyricPresetMessage(`已应用「${preset.name}」`)
+  }
+
+  const deleteLyricPreset = (id: string) => {
+    const preset = findPreset(settings.lyricPresets, id)
+    setAppSettings({ lyricPresets: removePreset(settings.lyricPresets, id) })
+    setLyricPresetMessage(preset ? `已删除「${preset.name}」` : '')
+  }
   const [appVersion, setAppVersion] = useState('1.0.0')
   const [updateStatus, setUpdateStatus] = useState('')
   const [updateAction, setUpdateAction] = useState<'restart' | 'reload' | null>(null)
@@ -228,6 +279,26 @@ export default function Settings() {
                 onChange={setMode}
               />
             </SettingsRow>
+            <SettingsRow label="主题配色" description="更换整体品牌色；明暗由上方主题模式决定">
+              <StyledSelect
+                value={themePreset.name}
+                onChange={(name) => {
+                  const preset = BUILTIN_THEMES.find(t => t.name === name)
+                  if (preset) setAppSettings({ themeId: preset.id, themeSeedOverride: {} })
+                }}
+                options={BUILTIN_THEMES.map(t => t.name)}
+              />
+            </SettingsRow>
+            <SettingsRow label="自定义基色" description="在所选主题上覆盖主色 / 辅助色 / 点缀色，重置即回主题原色">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <ColorField value={settings.themeSeedOverride.primary || themeSeed.primary} onChange={(primary) => setAppSettings({ themeSeedOverride: { ...settings.themeSeedOverride, primary } })} title="主色" />
+                <ColorField value={settings.themeSeedOverride.secondary || themeSeed.secondary} onChange={(secondary) => setAppSettings({ themeSeedOverride: { ...settings.themeSeedOverride, secondary } })} title="辅助色" />
+                <ColorField value={settings.themeSeedOverride.accent || themeSeed.accent} onChange={(accent) => setAppSettings({ themeSeedOverride: { ...settings.themeSeedOverride, accent } })} title="点缀色" />
+                {hasSeedOverride && (
+                  <button type="button" onClick={() => setAppSettings({ themeSeedOverride: {} })} style={chipButtonStyle}>重置</button>
+                )}
+              </div>
+            </SettingsRow>
             <SettingsRow label="侧边栏">
               <SegmentedControl
                 options={[
@@ -363,6 +434,24 @@ export default function Settings() {
                 </SettingsRow>
                 <SettingsRow label="歌词字体" description="桌面歌词使用的字体（桌面歌词窗内也可调）">
                   <FontSelect value={settings.lyricFontFamily} onChange={(lyricFontFamily) => setAppSettings({ lyricFontFamily })} />
+                </SettingsRow>
+                <SettingsRow label="样式预设" description={lyricPresetMessage || `把当前歌词窗外观存为预设，最多 ${MAX_LYRIC_PRESETS} 个，同名覆盖`}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                    <input
+                      value={lyricPresetName}
+                      onChange={(e) => setLyricPresetName(e.target.value)}
+                      placeholder="预设名称"
+                      maxLength={MAX_PRESET_NAME_LENGTH}
+                      style={presetInputStyle}
+                    />
+                    <button type="button" onClick={saveLyricPreset} style={chipButtonStyle}>保存</button>
+                    {settings.lyricPresets.map((preset) => (
+                      <span key={preset.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                        <button type="button" onClick={() => applyLyricPreset(preset.id)} style={chipButtonStyle}>{preset.name}</button>
+                        <button type="button" onClick={() => deleteLyricPreset(preset.id)} title="删除预设" style={chipButtonStyle}>×</button>
+                      </span>
+                    ))}
+                  </div>
                 </SettingsRow>
               </>
             )}
