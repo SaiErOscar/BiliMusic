@@ -42,6 +42,41 @@ function countRows(fragment: string): number {
   return (fragment.match(/<SettingsRow\b/g) || []).length
 }
 
+/**
+ * 估算一段源码的渲染高度（px）。
+ *
+ * v1.4.9-pre4 教训：第一版按「行数」配平，数出来左 13 / 右 16 看似均衡，实际左栏
+ * 矮了 400px 以上——因为不同行的真实高度差很大：
+ * - 普通行（只有标签 + 开关/下拉）  ≈ 68（min-height）
+ * - 带 description 的行            ≈ 80（多一行说明文字）
+ * - 输入框行（云同步三行）          ≈ 76（input 比开关高）
+ * - stacked 行（睡眠定时/样式预设） ≈ 110（标签在上、控件换行在下）
+ * - 按钮组（settings-actions）      ≈ 60 起，多组叠加
+ * - 每个板块头（MusicSection 标题） ≈ 60
+ *
+ * 这里只做相对比较，绝对值不必精确；目的是让「按高度配平」有可回归的量化口径。
+ */
+function estimateHeight(fragment: string): number {
+  let height = 0
+  // 板块头
+  height += (fragment.match(/<SettingsGroup\b/g) || []).length * 60
+  // stacked 行单独先数（避免被普通行重复计数）
+  const stackedRows = (fragment.match(/<SettingsRow[^>]*\bstacked\b/g) || []).length
+  height += stackedRows * 110
+  const allRows = countRows(fragment)
+  const plainRows = allRows - stackedRows
+  // 输入框行：以 settings-input 出现次数估算
+  const inputRows = Math.min(plainRows, (fragment.match(/className="settings-input"/g) || []).length)
+  const describedRows = (fragment.match(/<SettingsRow[^>]*description=/g) || []).length - stackedRows
+  const bareRows = Math.max(0, plainRows - inputRows - Math.max(0, describedRows))
+  height += inputRows * 76
+  height += Math.max(0, describedRows) * 80
+  height += bareRows * 68
+  // 按钮组
+  height += (fragment.match(/settings-actions/g) || []).length * 60
+  return height
+}
+
 describe('设置页「播放」板块拆分（v1.4.9-pre4）', () => {
   it('存在「播放」「播放页」「桌面歌词」三个板块', () => {
     const titles = groupTitles()
@@ -106,13 +141,44 @@ describe('设置页「播放」板块拆分（v1.4.9-pre4）', () => {
     }
   })
 
-  it('左右两栏行数差不超过 5 行（左右均衡）', () => {
+  it('左右两栏估算高度差不超过 10%（按真实行高，不按行数）', () => {
     const { left, right } = columns()
-    const leftRows = countRows(left)
-    const rightRows = countRows(right)
-    expect(leftRows).toBeGreaterThan(0)
-    expect(rightRows).toBeGreaterThan(0)
-    expect(Math.abs(leftRows - rightRows), `左 ${leftRows} 行 / 右 ${rightRows} 行`).toBeLessThanOrEqual(5)
+    const leftH = estimateHeight(left)
+    const rightH = estimateHeight(right)
+    expect(leftH).toBeGreaterThan(0)
+    expect(rightH).toBeGreaterThan(0)
+    const diffRatio = Math.abs(leftH - rightH) / Math.max(leftH, rightH)
+    expect(
+      diffRatio,
+      `左栏约 ${leftH}px / 右栏约 ${rightH}px，相差 ${(diffRatio * 100).toFixed(1)}%`,
+    ).toBeLessThanOrEqual(0.1)
+  })
+
+  it('云同步与歌单迁移同栏（两者同属「歌单数据」，且右栏高度已配平）', () => {
+    const { left, right } = columns()
+    const syncInLeft = left.includes('title="歌单云同步"')
+    const transferInLeft = left.includes('title="歌单迁移"')
+    expect(syncInLeft).toBe(transferInLeft)
+  })
+
+  it('账号与关于保持横跨两栏（settings-span）', () => {
+    // 两个板块都挂 settings-span 类，CSS 里对应 grid-column: 1 / -1。
+    // 注意：不能用 indexOf('>') 截取开标签——icon={<X size={20} />} 里就有个 '>'，
+    // 会提前截断。这里直接在板块标题之后的固定窗口内找 className 声明。
+    for (const title of ['账号', '关于']) {
+      const start = settingsSrc.indexOf(`<SettingsGroup title="${title}"`)
+      expect(start, `未找到板块「${title}」`).toBeGreaterThan(-1)
+      // 该板块开标签的窗口：到下一个换行后的「>」为止（SettingsGroup 是多行或单行均可）
+      const window = settingsSrc.slice(start, start + 200)
+      const hasSpan = /className="settings-span"/.test(window)
+      expect(hasSpan, `板块「${title}」未挂 settings-span，窗口内容：${window.split('\n')[0]}`).toBe(true)
+    }
+    // CSS 里该类的定义必须是横跨
+    const css = readFileSync(path.resolve(__dirname, '../src/styles/index.css'), 'utf8').replace(/\r\n/g, '\n')
+    const ruleStart = css.indexOf('.settings-span {')
+    expect(ruleStart).toBeGreaterThan(-1)
+    const rule = css.slice(ruleStart, css.indexOf('}', ruleStart))
+    expect(rule).toMatch(/grid-column:\s*1\s*\/\s*-1/)
   })
 
   it('板块总数增加但设置项一个不少（拆分不是删除）', () => {

@@ -266,6 +266,18 @@ export default function Settings() {
         )}
       />
 
+      {/*
+        v1.4.9-pre4 修正：两栏按「真实渲染高度」配平，不再按行数。
+        上一版数行数（左 13 / 右 16）看似均衡，实际左栏矮 400px 以上——因为
+        歌单云同步的输入框行、睡眠定时与样式预设的 stacked 行都比普通开关行高得多。
+
+        实测各板块估算高度：外观 516 / 播放 398 / 播放页 300 / 下载 596 /
+        桌面歌词 570 / 歌单云同步 488 / 歌单迁移 180。
+        穷举所有分法后取语义与均衡兼顾的一组：
+          左栏 = 外观 516 + 播放 398 + 桌面歌词 570 = 1484
+          右栏 = 播放页 300 + 下载 596 + 云同步 488 + 迁移 180 = 1564
+        差值 80px（约 5%），且语义成组：左＝全局外观与播放行为，右＝页面/下载/数据。
+      */}
       <div className="settings-grid">
         <div className="settings-column">
           <SettingsGroup title="外观" icon={<Palette size={20} />}>
@@ -422,6 +434,58 @@ export default function Settings() {
             </SettingsRow>
           </SettingsGroup>
 
+          {/* v1.4.9-pre4 桌面歌词板块：歌词窗外观（配色/字号/粗细/字体/样式预设）。
+              放左栏与「外观」相邻——两者都是「视觉呈现」，语义连贯且高度配平。 */}
+          {!isNativeApp() && (
+            <SettingsGroup title="桌面歌词" icon={<AlignLeft size={20} />}>
+              <SettingsRow label="歌词文字颜色" description="桌面歌词的文字颜色（自动：从视频封面提主色）">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
+                  <ToggleSwitch checked={settings.autoTextColor} onChange={() => setAppSettings({ autoTextColor: !settings.autoTextColor })} />
+                  <ColorField value={settings.autoTextColor && settings.autoLyricTextColor ? settings.autoLyricTextColor : settings.lyricTextColor} onChange={(lyricTextColor) => setAppSettings({ lyricTextColor })} title={settings.autoTextColor ? '已启用自动颜色（封面提色）' : '点击从屏幕拾取文字颜色'} disabled={settings.autoTextColor} />
+                </div>
+              </SettingsRow>
+              <SettingsRow label="歌词按钮颜色" description="桌面歌词的播放/上一首等按钮颜色（自动：每 5 秒采样窗周围背景取对比色）">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
+                  <ToggleSwitch checked={settings.autoControlColor} onChange={() => setAppSettings({ autoControlColor: !settings.autoControlColor })} />
+                  <ColorField value={settings.autoControlColor && settings.autoLyricControlColor ? settings.autoLyricControlColor : settings.lyricControlColor} onChange={(lyricControlColor) => setAppSettings({ lyricControlColor })} title={settings.autoControlColor ? '已启用自动颜色（背景采样）' : '点击从屏幕拾取按钮颜色'} disabled={settings.autoControlColor} />
+                </div>
+              </SettingsRow>
+              <SettingsRow label="歌词字号" description="桌面歌词的文字大小（18-60px，桌面歌词窗内也可调）">
+                <input type="range" min={18} max={60} step={1} value={settings.lyricFontSize} onChange={(e) => setAppSettings({ lyricFontSize: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
+                <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontSize}</span>
+              </SettingsRow>
+              <SettingsRow label="歌词粗细" description="桌面歌词的文字粗细（400-900，桌面歌词窗内也可调）">
+                <input type="range" min={400} max={900} step={20} value={settings.lyricFontWeight} onChange={(e) => setAppSettings({ lyricFontWeight: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
+                <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontWeight}</span>
+              </SettingsRow>
+              <SettingsRow label="歌词字体" description="桌面歌词使用的字体（桌面歌词窗内也可调）">
+                <FontSelect value={settings.lyricFontFamily} onChange={(lyricFontFamily) => setAppSettings({ lyricFontFamily })} />
+              </SettingsRow>
+              <SettingsRow label="样式预设" description={lyricPresetMessage || `把当前歌词窗外观存为预设，最多 ${MAX_LYRIC_PRESETS} 个，同名覆盖`} stacked>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+                  <input
+                    value={lyricPresetName}
+                    onChange={(e) => setLyricPresetName(e.target.value)}
+                    placeholder="预设名称"
+                    maxLength={MAX_PRESET_NAME_LENGTH}
+                    style={presetInputStyle}
+                  />
+                  <button type="button" onClick={saveLyricPreset} style={chipButtonStyle}>保存</button>
+                  {settings.lyricPresets.map((preset) => (
+                    <span key={preset.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                      <button type="button" onClick={() => applyLyricPreset(preset.id)} style={chipButtonStyle}>{preset.name}</button>
+                      <button type="button" onClick={() => deleteLyricPreset(preset.id)} title="删除预设" style={chipButtonStyle}>×</button>
+                    </span>
+                  ))}
+                </div>
+              </SettingsRow>
+            </SettingsGroup>
+          )}
+        </div>
+
+        <div className="settings-column">
           <SettingsGroup title="播放页" icon={<Monitor size={20} />}>
             {/* v1.4.9-pre2 音频可视化：开启后播放页封面下缘显示频谱柱状图。
                 桌面端此时播放源会切为 Blob（Web Audio 需同源音频），起播延迟略增，故默认关。 */}
@@ -437,9 +501,6 @@ export default function Settings() {
             </SettingsRow>
           </SettingsGroup>
 
-        </div>
-
-        <div className="settings-column">
           <SettingsGroup title="下载" icon={<Download size={20} />}>
             <SettingsRow label="下载目录">
               <div className="settings-path">
@@ -497,56 +558,6 @@ export default function Settings() {
               </>
             )}
           </SettingsGroup>
-
-          {/* v1.4.9-pre4 桌面歌词板块：原属「播放」板块尾部的六项外观设置，独立成块后
-              移到右栏，与左栏的「播放/播放页」形成语义区分（左＝行为与播放页，右＝歌词窗外观）。 */}
-          {!isNativeApp() && (
-            <SettingsGroup title="桌面歌词" icon={<AlignLeft size={20} />}>
-              <SettingsRow label="歌词文字颜色" description="桌面歌词的文字颜色（自动：从视频封面提主色）">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
-                  <ToggleSwitch checked={settings.autoTextColor} onChange={() => setAppSettings({ autoTextColor: !settings.autoTextColor })} />
-                  <ColorField value={settings.autoTextColor && settings.autoLyricTextColor ? settings.autoLyricTextColor : settings.lyricTextColor} onChange={(lyricTextColor) => setAppSettings({ lyricTextColor })} title={settings.autoTextColor ? '已启用自动颜色（封面提色）' : '点击从屏幕拾取文字颜色'} disabled={settings.autoTextColor} />
-                </div>
-              </SettingsRow>
-              <SettingsRow label="歌词按钮颜色" description="桌面歌词的播放/上一首等按钮颜色（自动：每 5 秒采样窗周围背景取对比色）">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
-                  <ToggleSwitch checked={settings.autoControlColor} onChange={() => setAppSettings({ autoControlColor: !settings.autoControlColor })} />
-                  <ColorField value={settings.autoControlColor && settings.autoLyricControlColor ? settings.autoLyricControlColor : settings.lyricControlColor} onChange={(lyricControlColor) => setAppSettings({ lyricControlColor })} title={settings.autoControlColor ? '已启用自动颜色（背景采样）' : '点击从屏幕拾取按钮颜色'} disabled={settings.autoControlColor} />
-                </div>
-              </SettingsRow>
-              <SettingsRow label="歌词字号" description="桌面歌词的文字大小（18-60px，桌面歌词窗内也可调）">
-                <input type="range" min={18} max={60} step={1} value={settings.lyricFontSize} onChange={(e) => setAppSettings({ lyricFontSize: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
-                <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontSize}</span>
-              </SettingsRow>
-              <SettingsRow label="歌词粗细" description="桌面歌词的文字粗细（400-900，桌面歌词窗内也可调）">
-                <input type="range" min={400} max={900} step={20} value={settings.lyricFontWeight} onChange={(e) => setAppSettings({ lyricFontWeight: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
-                <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontWeight}</span>
-              </SettingsRow>
-              <SettingsRow label="歌词字体" description="桌面歌词使用的字体（桌面歌词窗内也可调）">
-                <FontSelect value={settings.lyricFontFamily} onChange={(lyricFontFamily) => setAppSettings({ lyricFontFamily })} />
-              </SettingsRow>
-              <SettingsRow label="样式预设" description={lyricPresetMessage || `把当前歌词窗外观存为预设，最多 ${MAX_LYRIC_PRESETS} 个，同名覆盖`} stacked>
-                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-                  <input
-                    value={lyricPresetName}
-                    onChange={(e) => setLyricPresetName(e.target.value)}
-                    placeholder="预设名称"
-                    maxLength={MAX_PRESET_NAME_LENGTH}
-                    style={presetInputStyle}
-                  />
-                  <button type="button" onClick={saveLyricPreset} style={chipButtonStyle}>保存</button>
-                  {settings.lyricPresets.map((preset) => (
-                    <span key={preset.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                      <button type="button" onClick={() => applyLyricPreset(preset.id)} style={chipButtonStyle}>{preset.name}</button>
-                      <button type="button" onClick={() => deleteLyricPreset(preset.id)} title="删除预设" style={chipButtonStyle}>×</button>
-                    </span>
-                  ))}
-                </div>
-              </SettingsRow>
-            </SettingsGroup>
-          )}
 
           <SettingsGroup title="歌单云同步" icon={<Cloud size={20} />}>
             <SettingsRow label="WebDAV 地址">
@@ -630,6 +641,7 @@ export default function Settings() {
           </SettingsGroup>
         </div>
 
+          {/* 账号与关于横跨整行（.settings-span → grid-column: 1 / -1），保持两栏通栏布局 */}
           <SettingsGroup title="账号" icon={<UserRound size={20} />} className="settings-span">
             <div className="settings-account">
               <div className="settings-account__avatar">
