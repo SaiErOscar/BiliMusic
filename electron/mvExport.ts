@@ -32,7 +32,7 @@ import os from 'os'
 import { spawn } from 'child_process'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
-import { resolveEncoderCandidates, type EncoderCandidate } from './encoders'
+import { resolveEncoderCandidates, classifyFfmpegFailure, type EncoderCandidate } from './encoders'
 
 const require = createRequire(import.meta.url)
 const __filename = fileURLToPath(import.meta.url)
@@ -276,8 +276,21 @@ async function downloadToFile(url: string, filePath: string, label: string, onPe
       if (value) {
         received += value.length
         if (!writeStream.write(value)) {
-          await new Promise<void>((resolve) => {
-            writeStream.once('drain', resolve)
+          // v1.4.8-pre5 修复：等待 drain 必须与流错误/关闭赛跑。原实现只挂 once('drain')，
+          // 磁盘满或权限被收回时 write() 返回 false 后 drain 永不触发，导出会无限挂起
+          // （取消检查在循环顶部，而这里 await 不返回，取消也无法生效）。
+          await new Promise<void>((resolve, reject) => {
+            const cleanup = () => {
+              writeStream.off('drain', onDrain)
+              writeStream.off('error', onStreamError)
+              writeStream.off('close', onClose)
+            }
+            const onDrain = () => { cleanup(); resolve() }
+            const onStreamError = (err: Error) => { cleanup(); reject(err) }
+            const onClose = () => { cleanup(); reject(streamError ?? new Error('音频写入流已关闭')) }
+            writeStream.once('drain', onDrain)
+            writeStream.once('error', onStreamError)
+            writeStream.once('close', onClose)
           })
         }
         if (total > 0) onPercent?.(Math.round((received / total) * 100))
@@ -288,6 +301,8 @@ async function downloadToFile(url: string, filePath: string, label: string, onPe
   } finally {
     writeStream.off('error', onError)
     if (!writeStream.closed) writeStream.destroy()
+    // 失败/取消时释放 HTTP 响应体，避免连接与缓冲区悬挂到 GC
+    void reader.cancel().catch(() => {})
   }
 }
 
@@ -376,42 +391,52 @@ async function openStage(
   coverDataUrl: string,
 ): Promise<{ win: BrowserWindow; settledFrame: Electron.NativeImage | null }> {
   const win = createCaptureWindow(job)
-  await win.loadURL(resolveStageUrl())
-  await win.webContents.executeJavaScript(
-    `window.__mvInit(${JSON.stringify(JSON.stringify({
-      title: payload.title,
-      artist: payload.artist,
-      cover: coverDataUrl,
-      duration,
-      startTime: 0,
-      lyrics: payload.lyrics,
-      watermark: payload.watermark,
-    }))})`,
-  )
-  const readyDeadline = Date.now() + 20_000
-  for (;;) {
-    if (job.cancelRequested || win.isDestroyed()) throw new Error('已取消')
-    if (await win.webContents.executeJavaScript('window.__mvReady === true')) break
-    if (Date.now() > readyDeadline) throw new Error('导出页面加载超时')
-    await sleep(120)
-  }
-  // 首屏入场是静态的，先强制重绘并等这一帧：它同时就是 t=0 的首帧
-  // （舞台初始 time 为 0，再调 __mvSetTime(0) 不会触发重绘）。
-  // 监听必须先挂上再 invalidate，否则同步触发的 paint 会被漏掉
-  const pending = waitNextPaint(win, 500)
-  win.webContents.invalidate()
-  let settledFrame = await pending
-  if (!settledFrame) {
-    const retry = waitNextPaint(win, 500)
+  try {
+    await win.loadURL(resolveStageUrl())
+    await win.webContents.executeJavaScript(
+      `window.__mvInit(${JSON.stringify(JSON.stringify({
+        title: payload.title,
+        artist: payload.artist,
+        cover: coverDataUrl,
+        duration,
+        startTime: 0,
+        lyrics: payload.lyrics,
+        watermark: payload.watermark,
+      }))})`,
+    )
+    const readyDeadline = Date.now() + 20_000
+    for (;;) {
+      if (job.cancelRequested || win.isDestroyed()) throw new Error('已取消')
+      if (await win.webContents.executeJavaScript('window.__mvReady === true')) break
+      if (Date.now() > readyDeadline) throw new Error('导出页面加载超时')
+      await sleep(120)
+    }
+    // 首屏入场是静态的，先强制重绘并等这一帧：它同时就是 t=0 的首帧
+    // （舞台初始 time 为 0，再调 __mvSetTime(0) 不会触发重绘）。
+    // 监听必须先挂上再 invalidate，否则同步触发的 paint 会被漏掉
+    const pending = waitNextPaint(win, 500)
     win.webContents.invalidate()
-    settledFrame = await retry
+    let settledFrame = await pending
+    if (!settledFrame) {
+      const retry = waitNextPaint(win, 500)
+      win.webContents.invalidate()
+      settledFrame = await retry
+    }
+    if (!settledFrame) {
+      // 最后兜底：单次回读。仅首帧走这条路，逐帧路径仍全部走 paint
+      const img = await win.webContents.capturePage()
+      settledFrame = img && !img.isEmpty() ? img : null
+    }
+    return { win, settledFrame }
+  } catch (e) {
+    // v1.4.8-pre5 修复：窗口在 createCaptureWindow 时已登记进 job.windows。
+    // 此处抛错（加载失败/就绪超时/取消）若不回收，runExport 结束后 currentJob 置 null，
+    // 再没有任何路径能销毁它，隐藏的离屏渲染进程会泄漏到应用退出。
+    try { if (!win.isDestroyed()) win.destroy() } catch { /* 已销毁 */ }
+    const idx = job.windows.indexOf(win)
+    if (idx >= 0) job.windows.splice(idx, 1)
+    throw e
   }
-  if (!settledFrame) {
-    // 最后兜底：单次回读。仅首帧走这条路，逐帧路径仍全部走 paint
-    const img = await win.webContents.capturePage()
-    settledFrame = img && !img.isEmpty() ? img : null
-  }
-  return { win, settledFrame }
 }
 
 /**
@@ -574,13 +599,19 @@ async function encodeWithFallback(
     } catch (e) {
       if (job.cancelRequested) throw e
       lastError = e instanceof Error ? e.message : String(e)
-      // 编码器失败（ffmpeg 非 0 退出，或管道被编码器带断）才换候选；捕获阶段的错误直接抛
-      const encoderFailure = lastError.startsWith('ffmpeg') || lastError.includes('EPIPE') || lastError.includes('ERR_STREAM')
-      if (encoderFailure) {
+      // v1.4.8-pre5：按失败性质决定「中止 / 换候选 / 换候选并拉黑」。
+      // 原实现只看消息是否以 ffmpeg 开头就拉黑，磁盘满与坏音频也会被当成编码器不可用，
+      // 一次即可把硬件编码器与 libx264 先后写进会话缓存，导致本次进程内导出全废。
+      const kind = classifyFfmpegFailure(lastError)
+      const fromEncoder = lastError.startsWith('ffmpeg') || kind === 'encoder'
+      if (!fromEncoder) throw e
+      if (kind === 'fatal') throw e
+      if (kind === 'encoder') {
         failedEncoders.add(candidate.codec)
-        console.warn(`[mvExport] encoder ${candidate.codec} failed on real task, falling back:`, lastError)
+        console.warn(`[mvExport] encoder ${candidate.codec} unavailable, falling back:`, lastError)
       } else {
-        throw e
+        // 无法归类：换候选再试一次，但不写会话缓存（可能只是一次性环境问题）
+        console.warn(`[mvExport] encoder ${candidate.codec} failed (unclassified), retry next:`, lastError)
       }
     }
   }
@@ -648,6 +679,12 @@ async function runExport(payload: MvExportPayload, sender: Electron.WebContents 
 
     sendProgress(sender, { phase: 'done', percent: 100, filePath: outputPath })
     return { filePath: outputPath }
+  } catch (e) {
+    // v1.4.8-pre5 修复：失败或取消时清掉半成品 mp4。ffmpeg 以 -y 直接写目标文件，
+    // 中途退出会留下不可播放的残片；下次同名导出会因 existsSync 改名为 (2)，
+    // 残片永久留在 MV 目录且不被任何下载记录引用。
+    await fs.rm(outputPath, { force: true }).catch(() => {})
+    throw e
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {})
     if (currentJob === job) currentJob = null

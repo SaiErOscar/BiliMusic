@@ -289,8 +289,13 @@ declare global {
       persistentStorage?: PersistentStorageApi
       biliApi: BiliApi
       lyricsApi: LyricsApi
-      /** v1.4.8-pre1 全局媒体键（globalShortcut，桌面专属） */
-      setMediaKeysEnabled?: (enabled: boolean) => Promise<{ ok: boolean; reason?: string }>
+      /** v1.4.8-pre1 全局媒体键（globalShortcut，桌面专属）；pre5 起回报失败键位 */
+      setMediaKeysEnabled?: (enabled: boolean) => Promise<{
+        ok: boolean
+        reason?: 'not-ready' | 'occupied' | 'partial' | 'error'
+        failedKeys?: string[]
+        error?: string
+      }>
       getMediaKeysEnabled?: () => Promise<boolean>
       onMediaKeyCommand?: (callback: (command: MediaKeyCommand) => void) => () => void
       exportMvSingle?: MvExportApi['exportMvSingle']

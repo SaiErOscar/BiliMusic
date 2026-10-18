@@ -33,7 +33,7 @@ import { useAppSettings } from '@/hooks/useAppSettings'
 import { selectDownloadFolder } from '@/services/api'
 import { isMvExportSupported } from '@/services/mvExport'
 import { platform, isNativeApp } from '@/platform'
-import { usePlayer, useSleepRemainingText } from '@/contexts/PlayerContext'
+import { usePlayer, useSleepRemainingText, formatMediaKeyName } from '@/contexts/PlayerContext'
 import { SLEEP_PRESET_MINUTES } from '@/utils/sleepTimer'
 import { useAuth } from '@/contexts/AuthContext'
 import { createPlaylistsExport, importPlaylistsFromText } from '@/utils/storage'
@@ -52,6 +52,7 @@ export default function Settings() {
     startSleepCountdown,
     startSleepAfterCurrent,
     cancelSleepTimer,
+    mediaKeysStatus,
   } = usePlayer()
   const sleepRemaining = useSleepRemainingText()
   const sleepActive = sleepEndsAt !== null || sleepAfterCurrent
@@ -258,7 +259,17 @@ export default function Settings() {
               <ToggleSwitch checked={settings.autoPlay} onChange={() => setAppSettings({ autoPlay: !settings.autoPlay })} />
             </SettingsRow>
             {platform.mediaKeys && (
-              <SettingsRow label="全局媒体键" description="应用切到后台时系统媒体键仍控制 BiliMusic（开启后会占用其他播放器的媒体键）">
+              <SettingsRow
+                label="全局媒体键"
+                description={
+                  // v1.4.8-pre5：显示主进程回报的真实注册态，不再只反映开关意愿
+                  settings.globalMediaKeys && mediaKeysStatus && !mediaKeysStatus.ok
+                    ? mediaKeysStatus.reason === 'partial'
+                      ? `部分键位被占用：${mediaKeysStatus.failedKeys.map(formatMediaKeyName).join('、')}（其余仍生效）`
+                      : '未生效：键位被其他程序占用，可稍后重试'
+                    : '应用切到后台时系统媒体键仍控制 BiliMusic（开启后会占用其他播放器的媒体键）'
+                }
+              >
                 <ToggleSwitch checked={settings.globalMediaKeys} onChange={() => setAppSettings({ globalMediaKeys: !settings.globalMediaKeys })} />
               </SettingsRow>
             )}

@@ -189,10 +189,21 @@ export interface PlatformMediaNotify {
  * 调用方按现有 `if (platform.xxx)` 模式做能力探测与降级。
  */
 /** v1.4.8-pre1 桌面全局媒体键（仅 Electron，移动端无） */
+export interface MediaKeysSetResult {
+  /** 全部键位注册成功为 true；关闭时恒 true */
+  ok: boolean
+  /** partial：部分键位被占用；occupied：全部失败；not-ready：应用未就绪；error：异常 */
+  reason?: 'not-ready' | 'occupied' | 'partial' | 'error'
+  /** 本次注册失败的键位（partial/occupied 时非空） */
+  failedKeys?: string[]
+  /** reason=error 时的原始错误文本 */
+  error?: string
+}
+
 export interface PlatformMediaKeys {
-  /** 开启/关闭全局媒体键注册，返回 { ok, reason? } */
-  setEnabled: (enabled: boolean) => Promise<{ ok: boolean; reason?: string }>
-  /** 当前是否已注册（主进程权威态） */
+  /** 开启/关闭全局媒体键注册，返回真实注册结果 */
+  setEnabled: (enabled: boolean) => Promise<MediaKeysSetResult>
+  /** 当前是否有任一媒体键已注册（主进程权威态） */
   getEnabled: () => Promise<boolean>
   /** 订阅来自主进程的媒体键命令，返回取消订阅函数 */
   onCommand: (cb: (command: 'toggle-play' | 'next' | 'prev' | 'stop') => void) => () => void

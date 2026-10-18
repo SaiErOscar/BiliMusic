@@ -48,6 +48,26 @@ function getArtworkType(url: string): string {
   }
 }
 
+/** v1.4.8-pre5 全局媒体键真实注册态（来自主进程回报，不是持久化的意愿值） */
+export interface MediaKeysStatus {
+  ok: boolean
+  reason?: 'not-ready' | 'occupied' | 'partial' | 'error'
+  /** 注册失败的 accelerator 名（partial/occupied 时非空） */
+  failedKeys: string[]
+}
+
+const MEDIA_KEY_LABELS: Record<string, string> = {
+  MediaPlayPause: '播放/暂停',
+  MediaNextTrack: '下一首',
+  MediaPreviousTrack: '上一首',
+  MediaStop: '停止',
+}
+
+/** accelerator 名转中文标签，未知键位原样返回 */
+export function formatMediaKeyName(key: string): string {
+  return MEDIA_KEY_LABELS[key] ?? key
+}
+
 interface PlayerContextValue {
   currentTrack: Track | null
   isPlaying: boolean
@@ -90,6 +110,8 @@ interface PlayerContextValue {
   startSleepCountdown: (minutes: number) => void
   startSleepAfterCurrent: () => void
   cancelSleepTimer: () => void
+  /** v1.4.8-pre5 全局媒体键真实注册态；null = 未开启或当前平台不支持 */
+  mediaKeysStatus: MediaKeysStatus | null
 }
 
 interface PlayerProgress {
@@ -186,6 +208,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // handleTrackEnd / 迁移入口内用 ref 读睡眠态，避免把 setState 引入依赖数组触发 TDZ
   const sleepEndsAtRef = useRef<number | null>(sleepEndsAt)
   const sleepAfterCurrentRef = useRef(sleepAfterCurrent)
+  // v1.4.8-pre5 全局媒体键真实注册态：null = 未开启或平台不支持；ok=false 时 failedKeys 为被占用键位
+  const [mediaKeysStatus, setMediaKeysStatus] = useState<MediaKeysStatus | null>(null)
+  // effect 内要用最新 setAppSettings，但不把它放进依赖（每次渲染都是新函数，会导致重复 IPC）
+  const setAppSettingsRef = useRef(setAppSettings)
+  setAppSettingsRef.current = setAppSettings
+  // 同一失败签名只提示一次，避免设置页反复进入时刷屏
+  const mediaKeysNoticeRef = useRef('')
 
   // 派生：isShuffled 从 repeatMode 推导
   const isShuffled = repeatMode === 'shuffle'
@@ -769,16 +798,39 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     })
   }, [next, prev, togglePlay, pause])
 
-  // v1.4.8-pre1 全局媒体键开关：settings 变化同步到主进程（仅当 platform.mediaKeys 存在时）
+  // v1.4.8-pre5 全局媒体键开关：settings 变化同步到主进程，并用主进程回报的真实结果
+  // 更新状态。原实现只 console.warn，界面停在「已开启」而实际一个键都没注册成功。
   useEffect(() => {
     const setEnabled = platform.mediaKeys?.setEnabled
     if (!setEnabled) return
-    setEnabled(Boolean(settings.globalMediaKeys)).then((res) => {
-      if (settings.globalMediaKeys && !res.ok) {
-        console.warn('[mediaKeys] 开启失败：', res.reason)
+    const desired = Boolean(settings.globalMediaKeys)
+    let cancelled = false
+    setEnabled(desired).then((res) => {
+      if (cancelled) return
+      const failedKeys = res.failedKeys ?? []
+      setMediaKeysStatus(desired ? { ok: res.ok, reason: res.reason, failedKeys } : null)
+      if (!desired) {
+        // 关闭时清掉提示签名，用户下次手动开启若仍失败会重新提示
+        mediaKeysNoticeRef.current = ''
+        return
       }
-    }).catch(() => { /* ignore */ })
-  }, [settings.globalMediaKeys])
+      if (res.ok) {
+        mediaKeysNoticeRef.current = ''
+        return
+      }
+      const sig = `${res.reason ?? 'unknown'}:${failedKeys.join(',')}`
+      if (mediaKeysNoticeRef.current === sig) return
+      mediaKeysNoticeRef.current = sig
+      if (res.reason === 'partial') {
+        showToast(`部分媒体键被占用：${failedKeys.map(formatMediaKeyName).join('、')}`)
+        return
+      }
+      showToast('全局媒体键未生效，键位可能被其他程序占用')
+      // 全失败时把开关回退，避免界面停在「已开启但无任何键生效」的假象
+      setAppSettingsRef.current({ globalMediaKeys: false })
+    }).catch(() => { /* 主进程不可用时静默降级 */ })
+    return () => { cancelled = true }
+  }, [settings.globalMediaKeys, showToast])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -869,13 +921,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     startSleepCountdown,
     startSleepAfterCurrent,
     cancelSleepTimer,
+    mediaKeysStatus,
   }), [
     currentTrack, isPlaying, volume, isMuted, repeatMode, isShuffled, queue, loadingAudio,
     play, pause, togglePlay, next, prev, handleSetVolume, setIsMuted, setRepeatMode, setIsShuffled,
     addToQueue, addTracksToQueue, removeFromQueue, removeMultipleFromQueue, moveInQueue,
     playNow, playNext, clearQueue, toggleLike, playAll, playFromQueue,
     playbackRate, setPlaybackRate, sleepEndsAt, sleepAfterCurrent,
-    startSleepCountdown, startSleepAfterCurrent, cancelSleepTimer,
+    startSleepCountdown, startSleepAfterCurrent, cancelSleepTimer, mediaKeysStatus,
   ])
 
   const progressValue = useMemo<PlayerProgress>(() => ({

@@ -84,3 +84,55 @@ export async function detectGpuVendors(): Promise<string[]> {
 export async function resolveEncoderCandidates(platform: string): Promise<EncoderCandidate[]> {
   return orderEncodersFor(await detectGpuVendors(), platform)
 }
+
+/**
+ * v1.4.8-pre5 ffmpeg 失败归类，供「是否拉黑编码器」判断。
+ *
+ * 背景：原实现只看消息是否以 `ffmpeg` 开头就把候选写进会话级黑名单。磁盘满、
+ * 输出目录不可写、音频文件无音频流这类与编码器无关的失败也命中该前缀，一次磁盘满
+ * 就能把硬件编码器和 libx264 先后拉黑，本次进程内所有 MV 导出直接不可用。
+ *
+ * 分类：
+ * - fatal：输入/输出侧不可恢复（磁盘、权限、缺流、坏文件），换编码器重跑同样失败，
+ *   调用方应直接抛出，既不重试也不拉黑
+ * - encoder：编码器初始化或运行失败（驱动、会话、插件、管道被带断），可换下一候选
+ * - unknown：无法归类，回退下一候选但不写会话缓存，避免一次性环境问题造成永久降级
+ */
+export type FfmpegFailureKind = 'encoder' | 'fatal' | 'unknown'
+
+/** 输入/输出侧不可恢复特征（优先判定，宁可中止也不误拉黑编码器） */
+const FATAL_PATTERNS: RegExp[] = [
+  /no space left on device/i,
+  /permission denied/i,
+  /read-only file system/i,
+  /matches no streams/i,
+  /invalid data found when processing input/i,
+  /could not find codec parameters/i,
+  /no such file or directory/i,
+  /is a directory/i,
+]
+
+/** 编码器自身不可用特征 */
+const ENCODER_PATTERNS: RegExp[] = [
+  /error while opening encoder/i,
+  /error initializing output stream/i,
+  /cannot load/i,
+  /device failed/i,
+  /unknown encoder/i,
+  /encoder .{0,40}not found/i,
+  /function not implemented/i,
+  /no capable devices/i,
+  /openencodesessionex failed/i,
+  /encode not supported/i,
+  /not supported by .{0,20}encoder/i,
+  /\bepipe\b/i,
+  /err_stream/i,
+]
+
+/** 归类一条 ffmpeg 失败消息 */
+export function classifyFfmpegFailure(message: string): FfmpegFailureKind {
+  if (!message) return 'unknown'
+  if (FATAL_PATTERNS.some((re) => re.test(message))) return 'fatal'
+  if (ENCODER_PATTERNS.some((re) => re.test(message))) return 'encoder'
+  return 'unknown'
+}
