@@ -17,6 +17,11 @@ export type { MvExportProgress }
 export interface ExportMvOptions {
   quality?: AudioQualityPreference
   watermark: boolean
+  /**
+   * v1.4.9-pre3 无控件导出：true 时舞台隐藏进度条/时间/播放按钮/音量/循环，
+   * 只留封面、歌曲信息、歌词与水印（对应播放页鼠标静止后控件淡出的纯净观感）。
+   */
+  clean?: boolean
   /** 流畅度档位（快速/标准/流畅/极致），缺省标准（AppSettings.mvSmoothness） */
   smoothness?: string
   outputDir?: string
@@ -90,6 +95,7 @@ export async function exportTrackMv(
       duration: track.duration || 0,
       lyrics: lines,
       watermark: options.watermark,
+      clean: options.clean === true,
       smoothness: options.smoothness,
       outputDir: options.outputDir,
     }, options.ownerTag)

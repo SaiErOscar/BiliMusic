@@ -30,6 +30,18 @@ if (process.env.VITE_DEV_SERVER_URL) {
   app.commandLine.appendSwitch('remote-allow-origins', '*')
 }
 
+// v1.4.9-pre3 修复：Windows 上全局媒体键「注册成功但不触发」。
+//
+// 根因：Chromium 自带 HardwareMediaKeyHandling，会先把硬件媒体键接管到自己的
+// MediaSession 层（对应 navigator.mediaSession），再由它分发给「当前活跃媒体会话」。
+// Electron 的 globalShortcut.register('MediaPlayPause') 因此能返回 true（键位登记成功），
+// 但按键事件被 Chromium 提前消费，注册的回调永远不触发——UI 上开关显示已开启、
+// 媒体键状态回报也正常，实际按键毫无反应。
+//
+// 处置：关掉该 feature，让媒体键回到 OS 全局热键路径，globalShortcut 才能收到。
+// 必须在 app ready 之前 appendSwitch，故放在模块顶层。
+app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling')
+
 // B站请求头处理
 //
 // 注意：Electron 每个 session 的 webRequest 事件只允许注册一个监听器，

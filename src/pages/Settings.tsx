@@ -349,7 +349,14 @@ export default function Settings() {
                 <ToggleSwitch checked={settings.globalMediaKeys} onChange={() => setAppSettings({ globalMediaKeys: !settings.globalMediaKeys })} />
               </SettingsRow>
             )}
-            <SettingsRow label="睡眠定时" description="到点或播完当前曲后自动停止播放">
+            <SettingsRow
+              label="睡眠定时"
+              description="到点或播完当前曲后自动停止播放"
+              // v1.4.9-pre3 修复：六个药丸按钮横排时控件区必然超宽，把左侧文字列压到
+              // min-content（中文 min-content＝单字宽）导致标签逐字竖排。这行改为纵向堆叠：
+              // 标签在上、按钮组在下并允许换行，宽度不再互相挤压。
+              stacked
+            >
               <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
                 {SLEEP_PRESET_MINUTES.map((m) => (
                   <button
@@ -506,6 +513,10 @@ export default function Settings() {
               <>
                 <SettingsRow label="MV 导出水印" description="导出播放界面 MV 时在画面角落加 BiliMusic 角标">
                   <ToggleSwitch checked={settings.mvWatermark} onChange={() => setAppSettings({ mvWatermark: !settings.mvWatermark })} />
+                </SettingsRow>
+                {/* v1.4.9-pre3 无控件导出：只留封面、标题歌手、歌词与水印，隐藏进度条/时间/播放按钮/音量/循环 */}
+                <SettingsRow label="MV 无控件导出" description="导出时隐藏播放控件，只保留封面、歌曲信息与歌词（纯净成片）">
+                  <ToggleSwitch checked={settings.mvCleanExport} onChange={() => setAppSettings({ mvCleanExport: !settings.mvCleanExport })} />
                 </SettingsRow>
                 <SettingsRow label="MV 导出流畅度" description="关键帧密度：档位越高画面越流畅，导出越慢、临时占用越大">
                   <select
@@ -695,13 +706,20 @@ function SettingsRow({
   label,
   description,
   children,
+  stacked = false,
 }: {
   label: string
   description?: string
   children: ReactNode
+  /**
+   * v1.4.9-pre3：控件区是多个按钮/滑块等「宽度不可压缩」的一排时，横向两栏布局会把
+   * 左侧文字列挤到 min-content，中文标签于是逐字竖排。置 true 改为纵向堆叠：
+   * 文字在上、控件在下并允许换行，二者不再争夺同一行宽度。
+   */
+  stacked?: boolean
 }) {
   return (
-    <div className="settings-row">
+    <div className={`settings-row${stacked ? ' settings-row--stacked' : ''}`}>
       <div className="settings-row__text">
         <strong>{label}</strong>
         {description && <span>{description}</span>}

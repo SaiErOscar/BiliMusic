@@ -25,6 +25,11 @@ export interface MvExportPayload {
   duration: number
   lyrics: { time: number; text: string }[]
   watermark: boolean
+  /**
+   * v1.4.9-pre3 无控件导出：true 时舞台隐藏进度条/时间/播放按钮/音量/循环，
+   * 只留封面、歌曲信息、歌词与水印。缺省/false 保持既有画面（含控件）。
+   */
+  clean?: boolean
   /** 流畅度档位（快速/标准/流畅/极致），缺省标准 */
   smoothness?: string
   outputDir?: string

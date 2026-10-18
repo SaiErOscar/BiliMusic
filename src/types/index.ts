@@ -117,6 +117,9 @@ export interface AppSettings {
   audioVisualizer: boolean
   // v1.4.9-pre2 歌词双语：网易源 tlyric 翻译行与原词同行显示（无翻译时自然回退单语）
   lyricBilingual: boolean
+  // v1.4.9-pre3 MV 无控件导出：隐藏进度条/时间/播放按钮/音量/循环，只留封面、歌曲信息、
+  // 歌词与水印（对应播放页「鼠标静止后控件淡出」的纯净观感）
+  mvCleanExport: boolean
 }
 
 export type NavItem = {

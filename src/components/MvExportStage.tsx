@@ -27,6 +27,11 @@ interface MvStagePayload {
   startTime?: number
   lyrics: LyricLine[]
   watermark: boolean
+  /**
+   * v1.4.9-pre3 无控件导出：true 时隐藏进度条/时间/播放按钮/音量/循环，
+   * 只留封面、歌曲信息、歌词与水印（对应播放页鼠标静止后控件淡出的观感）。
+   */
+  clean?: boolean
 }
 
 function formatTime(seconds: number): string {
@@ -108,6 +113,8 @@ export default function MvExportStage() {
   }
   const duration = payload?.duration || 0
   const lyrics = payload?.lyrics || []
+  // v1.4.9-pre3 无控件导出：缺省 false，保持既有含控件画面
+  const clean = payload?.clean === true
 
   return (
     <div className="now-playing">
@@ -153,10 +160,12 @@ export default function MvExportStage() {
 
       <div className="now-playing-main">
         <section className="now-playing-left">
-          <div className="now-playing-cover-wrap">
+          <div className="now-playing-cover-wrap now-playing-cover-wrap--mv">
             <div className="now-playing-cover-glow" style={{ opacity: 0.4 }} />
             <img
-              className="now-playing-cover"
+              // v1.4.9-pre3：MV 舞台用独立类——封面按原图比例 contain 完整显示，
+              // 不再被 1:1 方框裁切；阴影也换成与导出画面更相称的一版。
+              className="now-playing-cover now-playing-cover--mv"
               src={track.coverUrl}
               alt={track.title}
               draggable={false}
@@ -170,51 +179,60 @@ export default function MvExportStage() {
             </div>
           </div>
 
-          <div className="now-playing-progress now-playing-ui" style={sliderTheme}>
-            <PlayerSlider
-              ariaLabel="播放进度"
-              value={time}
-              max={duration}
-              onChange={() => {}}
-              disabled={duration <= 0}
-              formatValue={formatTime}
-              variant="progress"
-            />
-            <div className="now-playing-time">
-              <span>{formatTime(time)}</span>
-              <span>-{formatTime(Math.max(duration - time, 0))}</span>
-            </div>
-          </div>
-
-          {/* 底部控件区：静态展示（暂停态），与真实播放页同构 */}
-          <div className="now-playing-controls now-playing-ui now-playing-ui--controls">
-            <div className="now-playing-controls-left">
-              <div className="now-playing-volume-popover" style={sliderTheme}>
-                <button type="button" className="now-playing-volume-trigger" style={{ cursor: 'default' }}>
-                  <Volume2 size={20} />
-                </button>
+          {/*
+            v1.4.9-pre3 无控件模式：clean 为 true 时整段（进度条+时间+底部控件区）不渲染。
+            用条件渲染而不是 CSS 隐藏——离屏窗口逐帧截图，省掉这层 DOM 也省掉每帧的
+            布局与合成开销，同时彻底避免隐藏元素在极少数情况下仍参与布局导致画面偏移。
+          */}
+          {!clean && (
+            <>
+              <div className="now-playing-progress now-playing-ui" style={sliderTheme}>
+                <PlayerSlider
+                  ariaLabel="播放进度"
+                  value={time}
+                  max={duration}
+                  onChange={() => {}}
+                  disabled={duration <= 0}
+                  formatValue={formatTime}
+                  variant="progress"
+                />
+                <div className="now-playing-time">
+                  <span>{formatTime(time)}</span>
+                  <span>-{formatTime(Math.max(duration - time, 0))}</span>
+                </div>
               </div>
-            </div>
-            <div className="now-playing-control-cluster">
-              <button type="button" className="now-playing-round" style={{ cursor: 'default' }}>
-                <SkipBack size={27} />
-              </button>
-              <button type="button" className="now-playing-play" style={{ cursor: 'default' }}>
-                {/* 成片语义为「播放中」（pre3）：显示暂停态图标 ⏸，此前误用播放三角呈暂停观感 */}
-                <Pause size={30} fill="currentColor" />
-              </button>
-              <button type="button" className="now-playing-round" style={{ cursor: 'default' }}>
-                <SkipForward size={27} />
-              </button>
-            </div>
-            <div className="now-playing-controls-right">
-              <button type="button" className="now-playing-round" style={{ cursor: 'default' }}>
-                <span className="now-playing-repeat">
-                  <Repeat size={20} />
-                </span>
-              </button>
-            </div>
-          </div>
+
+              {/* 底部控件区：静态展示（暂停态），与真实播放页同构 */}
+              <div className="now-playing-controls now-playing-ui now-playing-ui--controls">
+                <div className="now-playing-controls-left">
+                  <div className="now-playing-volume-popover" style={sliderTheme}>
+                    <button type="button" className="now-playing-volume-trigger" style={{ cursor: 'default' }}>
+                      <Volume2 size={20} />
+                    </button>
+                  </div>
+                </div>
+                <div className="now-playing-control-cluster">
+                  <button type="button" className="now-playing-round" style={{ cursor: 'default' }}>
+                    <SkipBack size={27} />
+                  </button>
+                  <button type="button" className="now-playing-play" style={{ cursor: 'default' }}>
+                    {/* 成片语义为「播放中」（pre3）：显示暂停态图标 ⏸，此前误用播放三角呈暂停观感 */}
+                    <Pause size={30} fill="currentColor" />
+                  </button>
+                  <button type="button" className="now-playing-round" style={{ cursor: 'default' }}>
+                    <SkipForward size={27} />
+                  </button>
+                </div>
+                <div className="now-playing-controls-right">
+                  <button type="button" className="now-playing-round" style={{ cursor: 'default' }}>
+                    <span className="now-playing-repeat">
+                      <Repeat size={20} />
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </section>
 
         <section className="now-playing-lyrics-card">

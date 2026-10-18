@@ -190,7 +190,10 @@ export default function AudioVisualizer({ active, className }: Props) {
       ref={canvasRef}
       className={className}
       aria-hidden="true"
-      style={{ display: 'block', width: '100%', height: CANVAS_HEIGHT }}
+      // v1.4.9-pre3：高度交给 CSS 类（.now-playing-visualizer 定为 72px 绝对定位），
+      // 这里不再写内联 height——内联样式优先级高于类，会把定位/尺寸一起锁死，
+      // 且组件在别的容器里复用时无法按上下文调整高度。
+      style={{ display: 'block', width: '100%' }}
     />
   )
 }

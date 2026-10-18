@@ -53,6 +53,11 @@ export interface MvExportPayload {
   lyrics: { time: number; text: string }[]
   /** 是否添加 BiliMusic 角标水印（AppSettings.mvWatermark） */
   watermark: boolean
+  /**
+   * v1.4.9-pre3 无控件导出（AppSettings.mvCleanExport）：true 时舞台隐藏进度条、
+   * 时间、播放按钮、音量与循环控件，只留封面、歌曲信息、歌词与水印。
+   */
+  clean?: boolean
   /** 流畅度档位（快速/标准/流畅/极致），缺省取标准 */
   smoothness?: string
   /** 自定义输出目录（下载目录），MV 落在其下 MV/ 子目录 */
@@ -315,8 +320,16 @@ async function fetchCoverDataUrl(coverUrl: string): Promise<string> {
     const buf = Buffer.from(await resp.arrayBuffer())
     const img = nativeImage.createFromBuffer(buf)
     if (img.isEmpty()) return ''
-    const resized = img.resize({ width: COVER_SIZE, height: COVER_SIZE, quality: 'good' })
-    const jpeg = (img.getSize().width <= COVER_SIZE ? img : resized).toJPEG(90)
+    const size = img.getSize()
+    // v1.4.9-pre3 修复：原实现 resize({ width: COVER_SIZE, height: COVER_SIZE }) 把任意
+    // 比例的封面强拉成正方形——B 站封面多为 16:9，导出画面里人物与文字明显被压扁。
+    // 现在按原图长边等比缩放到 COVER_SIZE 上限，宽高各自按原比例换算，绝不改变宽高比；
+    // 舞台侧再用 object-fit: contain 完整显示（见 .now-playing-cover--mv）。
+    const scale = Math.min(1, COVER_SIZE / Math.max(size.width, size.height))
+    const targetW = Math.max(1, Math.round(size.width * scale))
+    const targetH = Math.max(1, Math.round(size.height * scale))
+    const resized = scale < 1 ? img.resize({ width: targetW, height: targetH, quality: 'good' }) : img
+    const jpeg = resized.toJPEG(90)
     return `data:image/jpeg;base64,${jpeg.toString('base64')}`
   } catch (e) {
     console.warn('[mvExport] cover fetch failed, use placeholder:', e)
@@ -402,6 +415,8 @@ async function openStage(
         startTime: 0,
         lyrics: payload.lyrics,
         watermark: payload.watermark,
+        // v1.4.9-pre3 无控件导出：舞台据此隐藏进度条/时间/播放按钮/音量/循环
+        clean: payload.clean === true,
       }))})`,
     )
     const readyDeadline = Date.now() + 20_000

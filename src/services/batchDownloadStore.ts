@@ -191,6 +191,8 @@ async function run() {
           const { filePath: mvPath } = await exportTrackMv(track, {
             quality: qualityPref,
             watermark: appSettings.mvWatermark,
+            // v1.4.9-pre3 无控件导出：批量导出同样跟随设置
+            clean: appSettings.mvCleanExport,
             smoothness: appSettings.mvSmoothness,
             outputDir: dir,
             // ownerTag（v1.4.7-pre1 修复1）：批量取消只杀批量自己发起的任务

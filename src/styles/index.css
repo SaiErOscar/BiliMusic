@@ -2147,6 +2147,32 @@ body {
   transform: translateY(18px);
 }
 
+/*
+ * v1.4.9-pre3 音频可视化定位。
+ *
+ * 原实现把 <canvas> 直接塞进 .now-playing-cover-wrap 的普通流内，72px 高度真实撑高
+ * 了封面容器，把下方的标题块、进度条、控件整排下推——这就是「UI 偏移」的根因，
+ * 且 .now-playing-visualizer 这个类当时在样式表里根本不存在，等于没有任何定位约束。
+ *
+ * 现在改为绝对定位：脱离文档流，绝不参与容器高度计算，原有布局零位移。
+ * 位置压在封面下缘外侧一点（bottom: -6px），左右各留 6% 让柱子不顶到封面圆角边缘；
+ * pointer-events:none 保证它不抢封面/控件的鼠标事件。
+ * 封面 1:1 且靠 flex 居中，容器宽度即封面宽度，所以左右 6% 是相对封面宽度算的。
+ */
+.now-playing-visualizer {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: -6px;
+  height: 72px;
+  width: auto;
+  pointer-events: none;
+  z-index: 2;
+  /* 底部淡出：柱子根部与下方留白自然衔接，不出现生硬的矩形边界 */
+  mask-image: linear-gradient(to top, transparent 0%, #000 34%);
+  -webkit-mask-image: linear-gradient(to top, transparent 0%, #000 34%);
+}
+
 .now-playing-cover {
   position: relative;
   width: 100%;
@@ -2157,6 +2183,40 @@ body {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.13);
   box-shadow: 0 32px 72px rgba(0, 0, 0, 0.52), inset 0 1px rgba(255, 255, 255, 0.18);
+}
+
+/*
+ * v1.4.9-pre3 MV 导出舞台封面。
+ *
+ * 两个问题一起修：
+ * 1. 比例——B 站封面多为 16:9，真实播放页用 aspect-ratio:1 + object-fit:cover 是「裁切」，
+ *    对屏幕观感尚可；但导出成片时裁掉左右会丢画面内容，且此前主进程还把图强拉成方图，
+ *    两者叠加就是用户看到的「拉伸」。现在舞台侧改 contain 完整显示，图不变形也不丢内容。
+ * 2. 阴影——原 box-shadow 是为屏幕小图设计的（0 32px 72px 很重、贴边），放到 1280×720
+ *    的成片里显得脏。改为更柔的双层扩散 + 轻微环境光，贴合导出的平光背景。
+ *
+ * 用 aspect-ratio:auto + 固定高度容器保证 16:9 与 1:1 封面都能在左侧栏里居中且不跳高。
+ */
+.now-playing-cover--mv {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  object-fit: contain;
+  border-radius: 18px;
+  border: 0;
+  background: transparent;
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.38),
+    0 4px 14px rgba(0, 0, 0, 0.22);
+}
+
+/* MV 舞台的封面容器：固定 1:1 占位，让不同比例的封面都在同一块区域内居中 */
+.now-playing-cover-wrap--mv {
+  aspect-ratio: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .now-playing-meta {
@@ -3881,6 +3941,23 @@ body {
   flex: 0 0 auto;
   min-width: 0;
   max-width: min(390px, 46vw);
+}
+
+/*
+ * v1.4.9-pre3：控件区不可压缩的一排（如睡眠定时的六个药丸按钮）改为纵向堆叠。
+ * 根因同 v1.3.9-beta1 的标签竖排——space-between 行里右侧控件 flex:0 0 auto 抢光宽度，
+ * 左侧文字列被压到 min-content（中文即单字宽）而逐字换行。这里不再靠给文字列加
+ * flex-grow 兜（那只是治标），而是让两栏上下排布，从布局上消除宽度争夺。
+ */
+.settings-row--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.settings-row--stacked .settings-row__control {
+  max-width: 100%;
+  width: 100%;
 }
 
 .settings-segment {
