@@ -9,10 +9,10 @@ import {
   MusicHero,
   MusicPageShell,
   MusicSection,
-  TrackList,
   TrackListRow,
   defaultIconFor,
 } from '@/components/AppleMusicPage'
+import VirtualList from '@/components/VirtualList'
 import type { Track } from '@/types'
 
 export default function Favorites() {
@@ -55,8 +55,11 @@ export default function Favorites() {
         <EmptyLibrary icon={defaultIconFor('favorites')} title="暂无收藏" subtitle="喜欢的歌曲会以更精致的列表在这里出现。" />
       ) : (
         <MusicSection title="收藏曲目" icon={<Heart size={22} />}>
-          <TrackList>
-            {tracks.map((track, index) => (
+          {/* v1.4.9-pre4 虚拟化：收藏可达数百首，只渲染视口内的行 */}
+          <VirtualList
+            items={tracks}
+            className="am-track-list"
+            renderRow={(track, index) => (
               <TrackListRow
                 key={track.id + String(index)}
                 track={track}
@@ -73,8 +76,8 @@ export default function Favorites() {
                   </div>
                 )}
               />
-            ))}
-          </TrackList>
+            )}
+          />
         </MusicSection>
       )}
     </MusicPageShell>

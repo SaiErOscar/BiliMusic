@@ -8,10 +8,10 @@ import {
   MusicHero,
   MusicPageShell,
   MusicSection,
-  TrackList,
   TrackListRow,
   defaultIconFor,
 } from '@/components/AppleMusicPage'
+import VirtualList from '@/components/VirtualList'
 import type { Track } from '@/types'
 
 export default function Recent() {
@@ -73,8 +73,11 @@ export default function Recent() {
         <EmptyLibrary icon={defaultIconFor('recent')} title="暂无播放记录" subtitle="播放歌曲后将在此显示。" />
       ) : (
         <MusicSection title="播放记录" icon={<Clock size={22} />}>
-          <TrackList>
-            {tracks.map((track, index) => (
+          {/* v1.4.9-pre4 虚拟化：最近播放可达数百条，只渲染视口内的行 */}
+          <VirtualList
+            items={tracks}
+            className="am-track-list"
+            renderRow={(track, index) => (
               <TrackListRow
                 key={track.id + String(index)}
                 track={track}
@@ -92,8 +95,8 @@ export default function Recent() {
                   </button>
                 )}
               />
-            ))}
-          </TrackList>
+            )}
+          />
         </MusicSection>
       )}
     </MusicPageShell>

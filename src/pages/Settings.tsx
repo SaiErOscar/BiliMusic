@@ -22,6 +22,7 @@ import {
   Trash2,
   UserRound,
   BookOpen,
+  AlignLeft,
 } from 'lucide-react'
 import { ActionButton, MusicHero, MusicPageShell, MusicSection } from '@/components/AppleMusicPage'
 import HelpModal from '@/components/HelpModal'
@@ -318,6 +319,13 @@ export default function Settings() {
             </SettingsRow>
           </SettingsGroup>
 
+          {/* v1.4.9-pre4 板块拆分：「播放」原含 13 行（音质/自动播放/可视化/媒体键/睡眠定时/
+              歌词显示/歌词双语/桌面歌词配色字号粗细字体/样式预设），既过长又与「外观」挤在同一列
+              造成左右失衡。现按功能语义拆成三个板块：
+              - 播放：核心播放行为（音质、自动播放、全局媒体键、睡眠定时）
+              - 播放页：播放页本身的显示项（可视化、歌词显示、歌词双语）
+              - 桌面歌词：歌词窗外观（配色、字号、粗细、字体、样式预设）
+              拆分后左栏 外观6+播放4+播放页3=13 行，右栏 下载10+桌面歌词6=16 行，两侧接近。 */}
           <SettingsGroup title="播放" icon={<Music2 size={20} />}>
             <SettingsRow label="音质">
               <StyledSelect
@@ -328,11 +336,6 @@ export default function Settings() {
             </SettingsRow>
             <SettingsRow label="自动播放" description="播放结束时自动播放推荐">
               <ToggleSwitch checked={settings.autoPlay} onChange={() => setAppSettings({ autoPlay: !settings.autoPlay })} />
-            </SettingsRow>
-            {/* v1.4.9-pre2 音频可视化：开启后播放页封面下缘显示频谱柱状图。
-                桌面端此时播放源会切为 Blob（Web Audio 需同源音频），起播延迟略增，故默认关。 */}
-            <SettingsRow label="音频可视化" description="播放页显示频谱柱状图（开启后桌面端起播会略慢，因需先缓存音频）">
-              <ToggleSwitch checked={settings.audioVisualizer} onChange={() => setAppSettings({ audioVisualizer: !settings.audioVisualizer })} />
             </SettingsRow>
             {platform.mediaKeys && (
               <SettingsRow
@@ -417,6 +420,14 @@ export default function Settings() {
                 )}
               </div>
             </SettingsRow>
+          </SettingsGroup>
+
+          <SettingsGroup title="播放页" icon={<Monitor size={20} />}>
+            {/* v1.4.9-pre2 音频可视化：开启后播放页封面下缘显示频谱柱状图。
+                桌面端此时播放源会切为 Blob（Web Audio 需同源音频），起播延迟略增，故默认关。 */}
+            <SettingsRow label="音频可视化" description="播放页显示频谱柱状图（开启后桌面端起播会略慢，因需先缓存音频）">
+              <ToggleSwitch checked={settings.audioVisualizer} onChange={() => setAppSettings({ audioVisualizer: !settings.audioVisualizer })} />
+            </SettingsRow>
             <SettingsRow label="歌词显示" description="播放页自动显示歌词">
               <ToggleSwitch checked={settings.showLyrics} onChange={() => setAppSettings({ showLyrics: !settings.showLyrics })} />
             </SettingsRow>
@@ -424,53 +435,6 @@ export default function Settings() {
             <SettingsRow label="歌词双语" description="歌词行下方显示译文（仅网易云源提供翻译）">
               <ToggleSwitch checked={settings.lyricBilingual} onChange={() => setAppSettings({ lyricBilingual: !settings.lyricBilingual })} />
             </SettingsRow>
-            {!isNativeApp() && (
-              <>
-                <SettingsRow label="歌词文字颜色" description="桌面歌词的文字颜色（自动：从视频封面提主色）">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
-                    <ToggleSwitch checked={settings.autoTextColor} onChange={() => setAppSettings({ autoTextColor: !settings.autoTextColor })} />
-                    <ColorField value={settings.autoTextColor && settings.autoLyricTextColor ? settings.autoLyricTextColor : settings.lyricTextColor} onChange={(lyricTextColor) => setAppSettings({ lyricTextColor })} title={settings.autoTextColor ? '已启用自动颜色（封面提色）' : '点击从屏幕拾取文字颜色'} disabled={settings.autoTextColor} />
-                  </div>
-                </SettingsRow>
-                <SettingsRow label="歌词按钮颜色" description="桌面歌词的播放/上一首等按钮颜色（自动：每 5 秒采样窗周围背景取对比色）">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
-                    <ToggleSwitch checked={settings.autoControlColor} onChange={() => setAppSettings({ autoControlColor: !settings.autoControlColor })} />
-                    <ColorField value={settings.autoControlColor && settings.autoLyricControlColor ? settings.autoLyricControlColor : settings.lyricControlColor} onChange={(lyricControlColor) => setAppSettings({ lyricControlColor })} title={settings.autoControlColor ? '已启用自动颜色（背景采样）' : '点击从屏幕拾取按钮颜色'} disabled={settings.autoControlColor} />
-                  </div>
-                </SettingsRow>
-                <SettingsRow label="歌词字号" description="桌面歌词的文字大小（18-60px，桌面歌词窗内也可调）">
-                  <input type="range" min={18} max={60} step={1} value={settings.lyricFontSize} onChange={(e) => setAppSettings({ lyricFontSize: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
-                  <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontSize}</span>
-                </SettingsRow>
-                <SettingsRow label="歌词粗细" description="桌面歌词的文字粗细（400-900，桌面歌词窗内也可调）">
-                  <input type="range" min={400} max={900} step={20} value={settings.lyricFontWeight} onChange={(e) => setAppSettings({ lyricFontWeight: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
-                  <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontWeight}</span>
-                </SettingsRow>
-                <SettingsRow label="歌词字体" description="桌面歌词使用的字体（桌面歌词窗内也可调）">
-                  <FontSelect value={settings.lyricFontFamily} onChange={(lyricFontFamily) => setAppSettings({ lyricFontFamily })} />
-                </SettingsRow>
-                <SettingsRow label="样式预设" description={lyricPresetMessage || `把当前歌词窗外观存为预设，最多 ${MAX_LYRIC_PRESETS} 个，同名覆盖`}>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-                    <input
-                      value={lyricPresetName}
-                      onChange={(e) => setLyricPresetName(e.target.value)}
-                      placeholder="预设名称"
-                      maxLength={MAX_PRESET_NAME_LENGTH}
-                      style={presetInputStyle}
-                    />
-                    <button type="button" onClick={saveLyricPreset} style={chipButtonStyle}>保存</button>
-                    {settings.lyricPresets.map((preset) => (
-                      <span key={preset.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                        <button type="button" onClick={() => applyLyricPreset(preset.id)} style={chipButtonStyle}>{preset.name}</button>
-                        <button type="button" onClick={() => deleteLyricPreset(preset.id)} title="删除预设" style={chipButtonStyle}>×</button>
-                      </span>
-                    ))}
-                  </div>
-                </SettingsRow>
-              </>
-            )}
           </SettingsGroup>
 
         </div>
@@ -533,6 +497,56 @@ export default function Settings() {
               </>
             )}
           </SettingsGroup>
+
+          {/* v1.4.9-pre4 桌面歌词板块：原属「播放」板块尾部的六项外观设置，独立成块后
+              移到右栏，与左栏的「播放/播放页」形成语义区分（左＝行为与播放页，右＝歌词窗外观）。 */}
+          {!isNativeApp() && (
+            <SettingsGroup title="桌面歌词" icon={<AlignLeft size={20} />}>
+              <SettingsRow label="歌词文字颜色" description="桌面歌词的文字颜色（自动：从视频封面提主色）">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
+                  <ToggleSwitch checked={settings.autoTextColor} onChange={() => setAppSettings({ autoTextColor: !settings.autoTextColor })} />
+                  <ColorField value={settings.autoTextColor && settings.autoLyricTextColor ? settings.autoLyricTextColor : settings.lyricTextColor} onChange={(lyricTextColor) => setAppSettings({ lyricTextColor })} title={settings.autoTextColor ? '已启用自动颜色（封面提色）' : '点击从屏幕拾取文字颜色'} disabled={settings.autoTextColor} />
+                </div>
+              </SettingsRow>
+              <SettingsRow label="歌词按钮颜色" description="桌面歌词的播放/上一首等按钮颜色（自动：每 5 秒采样窗周围背景取对比色）">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
+                  <ToggleSwitch checked={settings.autoControlColor} onChange={() => setAppSettings({ autoControlColor: !settings.autoControlColor })} />
+                  <ColorField value={settings.autoControlColor && settings.autoLyricControlColor ? settings.autoLyricControlColor : settings.lyricControlColor} onChange={(lyricControlColor) => setAppSettings({ lyricControlColor })} title={settings.autoControlColor ? '已启用自动颜色（背景采样）' : '点击从屏幕拾取按钮颜色'} disabled={settings.autoControlColor} />
+                </div>
+              </SettingsRow>
+              <SettingsRow label="歌词字号" description="桌面歌词的文字大小（18-60px，桌面歌词窗内也可调）">
+                <input type="range" min={18} max={60} step={1} value={settings.lyricFontSize} onChange={(e) => setAppSettings({ lyricFontSize: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
+                <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontSize}</span>
+              </SettingsRow>
+              <SettingsRow label="歌词粗细" description="桌面歌词的文字粗细（400-900，桌面歌词窗内也可调）">
+                <input type="range" min={400} max={900} step={20} value={settings.lyricFontWeight} onChange={(e) => setAppSettings({ lyricFontWeight: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
+                <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontWeight}</span>
+              </SettingsRow>
+              <SettingsRow label="歌词字体" description="桌面歌词使用的字体（桌面歌词窗内也可调）">
+                <FontSelect value={settings.lyricFontFamily} onChange={(lyricFontFamily) => setAppSettings({ lyricFontFamily })} />
+              </SettingsRow>
+              <SettingsRow label="样式预设" description={lyricPresetMessage || `把当前歌词窗外观存为预设，最多 ${MAX_LYRIC_PRESETS} 个，同名覆盖`} stacked>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+                  <input
+                    value={lyricPresetName}
+                    onChange={(e) => setLyricPresetName(e.target.value)}
+                    placeholder="预设名称"
+                    maxLength={MAX_PRESET_NAME_LENGTH}
+                    style={presetInputStyle}
+                  />
+                  <button type="button" onClick={saveLyricPreset} style={chipButtonStyle}>保存</button>
+                  {settings.lyricPresets.map((preset) => (
+                    <span key={preset.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                      <button type="button" onClick={() => applyLyricPreset(preset.id)} style={chipButtonStyle}>{preset.name}</button>
+                      <button type="button" onClick={() => deleteLyricPreset(preset.id)} title="删除预设" style={chipButtonStyle}>×</button>
+                    </span>
+                  ))}
+                </div>
+              </SettingsRow>
+            </SettingsGroup>
+          )}
 
           <SettingsGroup title="歌单云同步" icon={<Cloud size={20} />}>
             <SettingsRow label="WebDAV 地址">

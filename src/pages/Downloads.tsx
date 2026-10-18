@@ -8,6 +8,7 @@ import {
   MusicPageShell,
   MusicSection,
 } from '@/components/AppleMusicPage'
+import VirtualList from '@/components/VirtualList'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { loadDownloadRecords, clearDownloadRecords, deleteDownloadRecord, DOWNLOADS_CHANGED_EVENT } from '@/utils/storage'
 import type { DownloadRecord } from '@/types'
@@ -113,8 +114,12 @@ export default function Downloads() {
             />
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {records.map((record) => (
+          <VirtualList
+            items={records}
+            rowHeight={DOWNLOADS_ROW_HEIGHT}
+            // 行间 gap 2px 由容器承担，虚拟化的行高需含它，否则滚动越长偏差越大
+            className="download-list-virtual"
+            renderRow={(record) => (
               <div
                 key={record.id}
                 style={{
@@ -275,8 +280,8 @@ export default function Downloads() {
                   </button>
                 </div>
               </div>
-            ))}
-          </div>
+            )}
+          />
         )}
       </MusicSection>
     </MusicPageShell>
@@ -327,6 +332,15 @@ function DownloadMetric({
 
 /** 路径拼接（记录层无 path 模块；分隔符按运行平台，v1.4.7-pre1 修复4，不再恒拼 '\'） */
 const PATH_SEP = platform.runtime?.platform === 'win32' ? '\\' : '/'
+
+/**
+ * v1.4.9-pre4 下载列表行高（px）。
+ *
+ * 由行内最高元素决定：36px 格式图标 + 上下各 10px 内边距 = 56px。
+ * 行与行之间原本有 2px gap（原实现是 flex column + gap:2），虚拟化改用 padding
+ * 撑高后 gap 不再生效，故把这 2px 并进行高，保证滚动到底时不留空白也不重叠。
+ */
+const DOWNLOADS_ROW_HEIGHT = 58
 function joinPath(dir: string, name: string): string {
   return joinPathNative(dir, name, PATH_SEP)
 }

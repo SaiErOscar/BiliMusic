@@ -12,9 +12,9 @@ import {
   MusicHero,
   MusicPageShell,
   MusicSection,
-  TrackList,
   TrackListRow,
 } from '@/components/AppleMusicPage'
+import VirtualList from '@/components/VirtualList'
 import {
   deletePlaylist,
   getPlaylist,
@@ -337,8 +337,19 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
               {editing ? '完成' : '选择'}
             </button>
           </div>
-          <TrackList>
-            {tracks.map((track, index) => (
+          {/*
+            v1.4.9-pre4 虚拟化：歌单可达千首，只渲染视口内的行。
+            但拖拽排序与选择模式依赖「全部行都在 DOM 里」：
+            - 拖拽需要给目标行挂 onDragOver/onDrop，不可见行没有 DOM 就接不到事件；
+            - 选择模式要显示勾选框与全选状态，且整行点击语义变为「切换选中」。
+            因此这两种状态下 disabled=true 退回全量渲染，其余情况走虚拟化。
+            歌单通常一次性查看，切到编辑/拖拽态才全量，性能与功能兼顾。
+          */}
+          <VirtualList
+            items={tracks}
+            className="am-track-list"
+            disabled={editing || dragIndex !== null}
+            renderRow={(track, index) => (
               <div
                 key={track.id + String(index)}
                 draggable={!editing}
@@ -386,8 +397,8 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
                   )}
                 />
               </div>
-            ))}
-          </TrackList>
+            )}
+          />
         </MusicSection>
       )}
       {batchDownloading && (
