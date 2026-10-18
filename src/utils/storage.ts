@@ -48,6 +48,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   themeId: 'default',
   themeSeedOverride: {},
   lyricPresets: [],
+  // v1.4.9-pre2 音频可视化默认关（保默认起播延迟）；歌词双语默认关（不改变既有单语观感）
+  audioVisualizer: false,
+  lyricBilingual: false,
 }
 
 function notifySettingsChanged() {

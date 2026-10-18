@@ -16,6 +16,14 @@ import type { LyricsApi } from '@/types/electron'
 export interface LyricLine {
   time: number
   text: string
+  /**
+   * v1.4.9-pre2 歌词双语：该行对应译文（网易云 tlyric）。
+   *
+   * 可选字段——无翻译的源（QQ / LRCLIB）、纯文本歌词、旧缓存条目都不填，
+   * 既有消费方（LyricsView / useMiniWindowSync / mvExport / formatLrc /
+   * batchDownloadStore）读的就是 time+text，新增字段不改变既有语义。
+   */
+  translation?: string
 }
 
 export interface LyricResult {
@@ -174,29 +182,41 @@ async function lrclibSearch(keyword: string): Promise<LyricCandidate[]> {
   }
 }
 
-async function neteaseGetLyric(id: string | number): Promise<string> {
+/**
+ * 网易云取词（v1.4.9-pre2 起同时取翻译 tlyric）。
+ *
+ * 主进程 `lyrics:get-netease` 早已用 kv=-1 请求翻译，此前只回传原文；现在桌面链路
+ * 直接读返回的 `translation`。移动端回退分支是一份独立实现（CapacitorHttp 直连），
+ * 同样从响应里取 `tlyric.lyric`，两条链路行为对齐。
+ */
+async function neteaseGetLyric(id: string | number): Promise<LyricContent> {
   const api = bridge()
   if (!api) {
     try {
-      const json = await httpRequest<{ lrc?: { lyric?: string } }>(NETEASE_LYRIC, {
+      const json = await httpRequest<{ lrc?: { lyric?: string }; tlyric?: { lyric?: string } }>(NETEASE_LYRIC, {
         params: { id: String(id), lv: -1, kv: -1, tv: -1 },
         headers: NETEASE_REQ_HEADERS,
         credentials: 'omit',
       })
-      return json?.lrc?.lyric || ''
+      const content = json?.lrc?.lyric || ''
+      const translation = json?.tlyric?.lyric || ''
+      return translation.trim() ? { content, translation } : { content }
     } catch {
-      return ''
+      return { content: '' }
     }
   }
   try {
     const data = await api.getNetease(id)
-    return data?.content || data?.conteng || ''
+    const content = data?.content || data?.conteng || ''
+    const translation = data?.translation || ''
+    // 旧版主进程（pre2 之前）不带 translation，此处自然退化为单语，无需版本探测
+    return translation.trim() ? { content, translation } : { content }
   } catch {
-    return ''
+    return { content: '' }
   }
 }
 
-async function lrclibGetLyric(id: string | number): Promise<string> {
+async function lrclibGetLyric(id: string | number): Promise<LyricContent> {
   const api = bridge()
   if (!api) {
     try {
@@ -204,48 +224,48 @@ async function lrclibGetLyric(id: string | number): Promise<string> {
         `${LRCLIB_GET}/${encodeURIComponent(String(id))}`,
         { credentials: 'omit' },
       )
-      return (json?.syncedLyrics && json.syncedLyrics.trim()) ? json.syncedLyrics : (json?.plainLyrics || '')
+      return { content: (json?.syncedLyrics && json.syncedLyrics.trim()) ? json.syncedLyrics : (json?.plainLyrics || '') }
     } catch {
-      return ''
+      return { content: '' }
     }
   }
   try {
     const data = await api.getLrclib(id)
-    return data?.content || data?.conteng || ''
+    return { content: data?.content || data?.conteng || '' }
   } catch {
-    return ''
+    return { content: '' }
   }
 }
 
-/** 按候选来源分发到对应取词接口（v1.3.7 多源） */
-async function getLyricContent(candidate: LyricCandidate): Promise<string> {
+/** 按候选来源分发到对应取词接口（v1.3.7 多源；v1.4.9-pre2 返回原文+可选翻译） */
+async function getLyricContent(candidate: LyricCandidate): Promise<LyricContent> {
   if (candidate.source === 'netease') return neteaseGetLyric(candidate.songId)
   if (candidate.source === 'lrclib') return lrclibGetLyric(candidate.songId)
   return oiGetLyric(candidate.songId)
 }
 
-async function oiGetLyric(id: string | number): Promise<string> {
+async function oiGetLyric(id: string | number): Promise<LyricContent> {
   const api = bridge()
   if (!api) {
-    // 移动端回退：httpRequest 直连 OIAPI 取 LRC
+    // 移动端回退：httpRequest 直连 OIAPI 取 LRC（QQ 源无翻译）
     try {
       const json = await httpRequest<{ code: number; data?: string | { content?: string; conteng?: string } }>(
         OIAPI_QQ_LYRIC,
         { params: { id: String(id), format: 'lrc', type: 'json' } },
       )
-      if (!json || json.code !== 1) return ''
-      if (typeof json.data === 'string') return json.data
-      if (json.data && typeof json.data === 'object') return json.data.content || json.data.conteng || ''
-      return ''
+      if (!json || json.code !== 1) return { content: '' }
+      if (typeof json.data === 'string') return { content: json.data }
+      if (json.data && typeof json.data === 'object') return { content: json.data.content || json.data.conteng || '' }
+      return { content: '' }
     } catch {
-      return ''
+      return { content: '' }
     }
   }
   try {
     const data = await api.get(id, 'lrc')
-    return data?.content || data?.conteng || ''
+    return { content: data?.content || data?.conteng || '' }
   } catch {
-    return ''
+    return { content: '' }
   }
 }
 
@@ -410,6 +430,82 @@ function plainToLines(plain: string): LyricLine[] {
     .map((text) => ({ time: -1, text }))
 }
 
+// ===== 歌词双语（v1.4.9-pre2）=====
+
+/**
+ * 双语合并的时间容差（秒）。
+ *
+ * 网易云 tlyric 是按整句对齐的，同一句原文与译文的时间戳通常完全一致或相差几毫秒；
+ * 但原文/译文偶有分句边界不同（原文一句、译文拆两句），容差放宽到 0.35s 可覆盖这种
+ * 抖动，又不至于把相邻两句（一般间隔 ≥1s）错配到同一译文上。
+ */
+const TRANSLATION_TOLERANCE = 0.35
+
+/**
+ * 把原文 LRC 与翻译 LRC 按时间轴合并为带 `translation` 的歌词行。
+ *
+ * 为什么按时间对齐而不是按行号：两边都是 LRC，行数/顺序不保证一一对应
+ * （原文可能有重复时间标签或前奏提示行），只有时间轴是共同的锚点。
+ *
+ * 规则：
+ * - 原文行按原有顺序与数量返回，绝不因为译文而增删条目；
+ * - 译文按时间就近匹配（容差 ≤0.35s），每条译文最多用一次，避免一句译文被复用给相邻原文；
+ * - 匹配不上（超出容差）或译文为空的行不填 `translation`。
+ *
+ * 纯文本 / 不同步歌词（无时间标签）自然回退：译文解析不出带时间的行，等于不合并。
+ */
+export function mergeTranslation(
+  lines: LyricLine[],
+  translationLrc: string,
+  tolerance = TRANSLATION_TOLERANCE,
+): LyricLine[] {
+  if (!lines.length || !translationLrc) return lines
+
+  const translations = parseLrc(translationLrc)
+  if (!translations.length) return lines
+
+  // 时间升序消费译文：原文行本身已按 time 升序（parseLrc 排过序），只需要一条
+  // 单向游标，避免每行都全表扫描。
+  const matched = new Set<number>()
+  return lines.map((line) => {
+    if (line.time < 0) return line
+
+    let bestIdx = -1
+    let bestDiff = tolerance
+    for (let i = 0; i < translations.length; i++) {
+      if (matched.has(i)) continue
+      const diff = Math.abs(translations[i].time - line.time)
+      if (diff <= bestDiff) {
+        // 用 <= 取更靠后的候选：同一时刻重复译文取最后一条（网易云重复句的末次翻译通常最完整）
+        bestDiff = diff
+        bestIdx = i
+      }
+    }
+    if (bestIdx < 0) return line
+
+    const text = translations[bestIdx].text.trim()
+    // 译文与原文相同（如纯音乐/未翻译直接复制原句）时不加第二行，避免重复显示
+    if (!text || text === line.text.trim()) return line
+    matched.add(bestIdx)
+    return { ...line, translation: text }
+  })
+}
+
+/** 取词结果的原文 + 可选翻译；无翻译能力的源 translation 缺省 */
+interface LyricContent {
+  content: string
+  translation?: string
+}
+
+/**
+ * 原文 LRC + 翻译 LRC → 歌词行数组（带可选 translation）。
+ * syncedLrc 为空、或译文解析不出带时间的行时，等价于现状的单语解析。
+ */
+function linesWithTranslation(syncedLrc: string, translation?: string): LyricLine[] {
+  const lines = parseLrc(syncedLrc)
+  return translation ? mergeTranslation(lines, translation) : lines
+}
+
 // ===== 相似度 / 候选排序 =====
 
 function norm(s: string): string {
@@ -491,8 +587,8 @@ async function searchBestCandidate(track: Track): Promise<LyricCandidate | null>
   return best.candidate
 }
 
-function lyricToResult(candidate: LyricCandidate, content: string): LyricResult | null {
-  const syncedLines = parseLrc(content)
+function lyricToResult(candidate: LyricCandidate, content: string, translation?: string): LyricResult | null {
+  const syncedLines = linesWithTranslation(content, translation)
   const lines = syncedLines.length ? syncedLines : plainToLines(content)
   if (!lines.length) return null
   return {
@@ -511,6 +607,14 @@ function lyricToResult(candidate: LyricCandidate, content: string): LyricResult 
 const CACHE_KEY = 'bilimusic_lyrics_v2'
 const MISS_TTL = 24 * 60 * 60 * 1000
 
+/**
+ * 缓存条目直接存 `LyricResult`（含 lines），v1.4.9-pre2 的双语译文是 `LyricLine`
+ * 上的可选字段，随 result 一并序列化——无需改结构，也无需升 version。
+ *
+ * 向后兼容：旧条目（无 translation 字段）JSON.parse 后照常读到 time/text，
+ * 消费方按 `line.translation` 缺省处理，老用户缓存不会失效；
+ * 反之新条目被旧版本读到也只是多一个被忽略的字段。
+ */
 type CacheEntry =
   | { status: 'ok'; result: LyricResult }
   | { status: 'miss'; ts: number }
@@ -631,8 +735,8 @@ export async function getLyricForTrack(track: Track): Promise<LyricResult | null
   const candidate = await searchBestCandidate(track)
   if (!candidate) { cacheMiss(track.id); return null }
 
-  const content = await oiGetLyric(candidate.songId)
-  const result = lyricToResult(candidate, content)
+  const { content, translation } = await oiGetLyric(candidate.songId)
+  const result = lyricToResult(candidate, content, translation)
   if (!result) { cacheMiss(track.id); return null }
 
   cacheOk(track.id, result)
@@ -707,8 +811,8 @@ export async function chooseLyricCandidate(trackId: string, record: LyricCandida
     cacheNone(trackId)
     return noneLyricResult()
   }
-  const content = await getLyricContent(record)
-  const result = lyricToResult(record, content)
+  const { content, translation } = await getLyricContent(record)
+  const result = lyricToResult(record, content, translation)
   if (result) cacheOk(trackId, result)
   return result ? applyLyricOffset(result, trackId) : null
 }

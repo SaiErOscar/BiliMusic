@@ -148,12 +148,18 @@ export async function clearBilibiliAuthCookies(): Promise<void> {
 }
 
 
-// ===== 音频流可播放 URL（移动端 Referer 防盗链适配）=====
+// ===== 音频流可播放 URL（Referer 防盗链适配 + 可视化取材）=====
 //
 // B 站音频流（bilivideo CDN）要求 Referer 头，缺失返回 403。桌面端由主进程
 // webRequest.onBeforeSendHeaders 注入 Referer；移动端 WebView 的 <audio> 播放时
 // 无法注入自定义头，需先用 CapacitorHttp（原生栈，可带 Referer）下载音频流，
 // 转成 Blob URL 交给 <audio> 播放。
+//
+// v1.4.9-pre2 桌面端「仅开启可视化时切 Blob」：Web Audio 的
+// createMediaElementSource 要求媒体与页面同源，跨域直链拿不到频谱数据（分析
+// 节点会一直是静音），故开启可视化时用渲染层 fetch 把同一 CDN 直链读成 Blob，
+// 转成同源 blob: URL 再交给 <audio>。直链本身仍带 Referer（主进程注入），且本
+// 改动只影响「开可视化」这一条路径，关闭时与既有行为零差异。
 
 function base64ToBytes(base64: string): Uint8Array {
   // 去掉可能的 data URI 前缀
@@ -164,10 +170,43 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes
 }
 
-/** 把 B 站音频流 URL 转为当前环境可播放的 URL（移动端下载转 Blob，桌面端原样返回）。 */
-export async function resolveAudioPlayableUrl(url: string): Promise<string> {
-  // 桌面端：主进程 webRequest 已注入 Referer，直接返回原 URL
-  if (!isCapacitorNative()) return url
+/**
+ * 桌面端把同一 CDN 直链读成 Blob 再转同源 URL（仅供「开启音频可视化」使用）。
+ *
+ * 这里用渲染层 fetch 而不是 CapacitorHttp：后者只在原生平台可用，桌面端拿不到。
+ * CDN 响应自带 `Access-Control-Allow-Origin: *`，且主进程 onBeforeSendHeaders 已为
+ * *.bilivideo.com 注入 Referer，因此渲染层能正常读取字节。
+ *
+ * 任何失败都抛错，由调用方回退到直链——绝不能让「可视化」把播放搞挂。
+ */
+async function fetchDesktopAudioBlobUrl(url: string): Promise<string> {
+  const resp = await fetch(url, { credentials: 'omit' })
+  if (!resp.ok) throw new Error(`音频流下载失败：HTTP ${resp.status}`)
+  const blob = await resp.blob()
+  if (!blob.size) throw new Error('音频流为空')
+  return URL.createObjectURL(blob)
+}
+
+/**
+ * 把 B 站音频流 URL 转为当前环境可播放的 URL。
+ *
+ * - 移动端：始终下载转 Blob（绕过 Referer 防盗链），`forceBlob` 对其无影响。
+ * - 桌面端：默认原样返回 CDN 直链（与既有行为逐字节一致）；只有调用方显式传
+ *   `forceBlob`（即用户开启了音频可视化）时才转 Blob，并在失败时回退直链。
+ */
+export async function resolveAudioPlayableUrl(url: string, forceBlob = false): Promise<string> {
+  // 非原生平台的默认路径：主进程已注入 Referer，直接返回原 URL
+  if (!isCapacitorNative() && !forceBlob) return url
+
+  if (!isCapacitorNative()) {
+    try {
+      return await fetchDesktopAudioBlobUrl(url)
+    } catch (e) {
+      // 可视化取材失败不影响播放：退回直链（此时无频谱，但歌照常放）
+      console.warn('[http] 可视化取材失败，回退直链播放：', e)
+      return url
+    }
+  }
 
   try {
     const resp = await CapacitorHttp.request({

@@ -41,6 +41,8 @@ export interface OiapiLyricData {
   conteng?: string
   base64?: string
   cache?: boolean
+  /** v1.4.9-pre2 歌词双语：网易云 tlyric 翻译 LRC（可选，无翻译/无此能力的源不返回） */
+  translation?: string
 }
 
 /** 网易云搜索结果行（仅保留用到的字段，duration 为毫秒） */
@@ -148,7 +150,13 @@ export function registerLyricsApiHandlers() {
 
     const json = await fetchJson(url.toString(), NETEASE_HEADERS)
     const lyric = json?.lrc?.lyric
-    return typeof lyric === 'string' && lyric.trim() ? { content: lyric } : null
+    if (!(typeof lyric === 'string' && lyric.trim())) return null
+    // v1.4.9-pre2 歌词双语：kv=-1 早已请求到翻译，此前被丢弃；这里一并带回渲染层。
+    // translation 只在非空时挂上，保持返回结构向后兼容（渲染层按可选字段读取）。
+    const tlyric = json?.tlyric?.lyric
+    return typeof tlyric === 'string' && tlyric.trim()
+      ? { content: lyric, translation: tlyric }
+      : { content: lyric }
   })
 
   // ===== v1.3.7 手动匹配多源：LRCLIB =====

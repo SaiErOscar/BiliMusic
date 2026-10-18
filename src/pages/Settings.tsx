@@ -329,6 +329,11 @@ export default function Settings() {
             <SettingsRow label="自动播放" description="播放结束时自动播放推荐">
               <ToggleSwitch checked={settings.autoPlay} onChange={() => setAppSettings({ autoPlay: !settings.autoPlay })} />
             </SettingsRow>
+            {/* v1.4.9-pre2 音频可视化：开启后播放页封面下缘显示频谱柱状图。
+                桌面端此时播放源会切为 Blob（Web Audio 需同源音频），起播延迟略增，故默认关。 */}
+            <SettingsRow label="音频可视化" description="播放页显示频谱柱状图（开启后桌面端起播会略慢，因需先缓存音频）">
+              <ToggleSwitch checked={settings.audioVisualizer} onChange={() => setAppSettings({ audioVisualizer: !settings.audioVisualizer })} />
+            </SettingsRow>
             {platform.mediaKeys && (
               <SettingsRow
                 label="全局媒体键"
@@ -407,6 +412,10 @@ export default function Settings() {
             </SettingsRow>
             <SettingsRow label="歌词显示" description="播放页自动显示歌词">
               <ToggleSwitch checked={settings.showLyrics} onChange={() => setAppSettings({ showLyrics: !settings.showLyrics })} />
+            </SettingsRow>
+            {/* v1.4.9-pre2 歌词双语：目前只有网易云源带翻译（tlyric），其余源无译文时行为不变 */}
+            <SettingsRow label="歌词双语" description="歌词行下方显示译文（仅网易云源提供翻译）">
+              <ToggleSwitch checked={settings.lyricBilingual} onChange={() => setAppSettings({ lyricBilingual: !settings.lyricBilingual })} />
             </SettingsRow>
             {!isNativeApp() && (
               <>

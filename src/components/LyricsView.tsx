@@ -25,6 +25,15 @@ interface LyricsViewProps {
    * 状态不齐）。纯函数化后任意采样节奏下动画匀速精确，多窗接缝天然连续。
    */
   timeDriven?: boolean
+  /**
+   * 双语模式（v1.4.9-pre2）：默认 true 直接按行的 translation 渲染译文。
+   *
+   * 关闭时在这里就地剥掉 translation，而不是让「歌词双语」开关去改数据管线——
+   * 桌面歌词窗（useMiniWindowSync → MiniPlayerState.lyricLines）与 MV 导出
+   * （mvExport 只取 time/text）都直接消费 LyricResult，译文必须始终留在数据里，
+   * 开关只影响主界面这一处渲染。
+   */
+  bilingual?: boolean
 }
 
 // 二分：返回最后一个 time <= t 的下标
@@ -44,7 +53,7 @@ function activeIndexFor(lines: LyricLine[], t: number): number {
   return res
 }
 
-export default function LyricsView({ lines, currentTime, synced, onSeek, scrollBehavior = 'smooth', initialScrollBehavior, repositionSignal, timeDriven = false }: LyricsViewProps) {
+export default function LyricsView({ lines, currentTime, synced, onSeek, scrollBehavior = 'smooth', initialScrollBehavior, repositionSignal, timeDriven = false, bilingual = true }: LyricsViewProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const lineRefs = useRef<(HTMLDivElement | null)[]>([])
   const userScrollingRef = useRef(false)
@@ -54,7 +63,13 @@ export default function LyricsView({ lines, currentTime, synced, onSeek, scrollB
   const firstAutoScrollRef = useRef(true)
   const lastRepositionRef = useRef(repositionSignal)
 
-  const active = synced ? activeIndexFor(lines, currentTime) : -1
+  // 双语关闭时就地剥离译文（见 Props.bilingual 注释）：仅在真有关闭且有译文时才新建数组，
+  // 保持默认路径（bilingual=true）与原实现同一引用，不影响下游 memo/滚动副作用。
+  const shownLines = bilingual || !lines.some((l) => l.translation)
+    ? lines
+    : lines.map(({ translation: _translation, ...rest }): LyricLine => rest)
+
+  const active = synced ? activeIndexFor(shownLines, currentTime) : -1
   const posIndex = Math.max(active, 0)
 
   const scrollActiveLineIntoView = () => {
@@ -84,7 +99,7 @@ export default function LyricsView({ lines, currentTime, synced, onSeek, scrollB
     if (timeDriven) return
     if (userScrollingRef.current) return
     scrollActiveLineIntoView()
-  }, [posIndex, lines, synced, timeDriven])
+  }, [posIndex, shownLines, synced, timeDriven])
 
   useEffect(() => {
     if (!synced) return
@@ -106,7 +121,7 @@ export default function LyricsView({ lines, currentTime, synced, onSeek, scrollB
 
   const timeDrivenTop = (): number | null => {
     const vp = viewportRef.current
-    if (!vp || !lines.length) return null
+    if (!vp || !shownLines.length) return null
     const targetOf = (idx: number): number => {
       const el = lineRefs.current[idx]
       if (!el) return 0
@@ -116,7 +131,7 @@ export default function LyricsView({ lines, currentTime, synced, onSeek, scrollB
     const from = targetOf(Math.max(0, cur - 1))
     const to = targetOf(cur)
     if (cur === 0) return to
-    const lineStart = lines[cur]?.time ?? 0
+    const lineStart = shownLines[cur]?.time ?? 0
     const p = Math.min(1, Math.max(0, (currentTime - lineStart) / D_SCROLL))
     return from + (to - from) * easeOutCubic(p)
   }
@@ -129,7 +144,7 @@ export default function LyricsView({ lines, currentTime, synced, onSeek, scrollB
     if (!vp) return
     vp.scrollTo({ top, behavior: 'instant' as ScrollBehavior })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTime, lines, synced, timeDriven])
+  }, [currentTime, shownLines, synced, timeDriven])
 
   useEffect(() => {
     return () => {
@@ -163,7 +178,7 @@ export default function LyricsView({ lines, currentTime, synced, onSeek, scrollB
           padding: '12% 4px',
         }}
       >
-        {lines.map((l, i) => (
+        {shownLines.map((l, i) => (
           <motion.p
             key={i}
             initial={{ opacity: 0, y: 10 }}
@@ -179,6 +194,20 @@ export default function LyricsView({ lines, currentTime, synced, onSeek, scrollB
             }}
           >
             {l.text}
+            {/* v1.4.9-pre2 双语：有译文才渲染第二行，无译文的行完全等价于改动前的单行输出 */}
+            {l.translation ? (
+              <span
+                style={{
+                  display: 'block',
+                  fontSize: '0.68em',
+                  fontWeight: 500,
+                  lineHeight: 1.5,
+                  opacity: 0.62,
+                }}
+              >
+                {l.translation}
+              </span>
+            ) : null}
           </motion.p>
         ))}
       </div>
@@ -266,6 +295,21 @@ export default function LyricsView({ lines, currentTime, synced, onSeek, scrollB
               }}
             >
               {l.text}
+              {/* v1.4.9-pre2 双语：译文比原文弱一档（更小字号/更细字重/更低不透明度），
+                  随所在行的活跃度动画一起淡入淡出；无译文时不产生额外节点 */}
+              {l.translation ? (
+                <span
+                  style={{
+                    display: 'block',
+                    fontSize: '0.66em',
+                    fontWeight: 500,
+                    lineHeight: 1.32,
+                    opacity: 0.62,
+                  }}
+                >
+                  {l.translation}
+                </span>
+              ) : null}
             </motion.div>
           )
         })}

@@ -4,6 +4,7 @@ import type { Track, RepeatMode } from '@/types'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { toggleFavoriteTrack, loadFavoriteTracks, addRecentTrack } from '@/utils/storage'
 import { resolveAudioPlayableUrl, releaseAudioPlayableUrl } from '@/services/http'
+import { ensureAudioGraph, disposeAudioGraph } from '@/services/audioGraph'
 import { normalizePlaybackRate } from '@/utils/playbackRate'
 import { applySleepAction, formatSleepRemaining } from '@/utils/sleepTimer'
 import { platform } from '@/platform'
@@ -199,6 +200,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [queue, setQueue] = useState<Track[]>(() => restoredRef.current.queue)
   const [loadingAudio, setLoadingAudio] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  // v1.4.9-pre2 音频可视化：设置项来源（默认 false）。仅驱动「开关瞬间」的副作用。
+  const audioVisualizerEnabled = settings.audioVisualizer
+  // 上一轮是否已把 audio 元素接进 Web Audio 图。用 ref 而非 state：它只影响副作用，
+  // 不参与渲染；也不需要进依赖数组（否则关→开时会因为闭包旧值而重连失败）。
+  const visualizerAttachedRef = useRef(false)
   // v1.4.8-pre1 倍速：初值从持久化 settings 归一读取，非法值回退 1
   const [playbackRate, setPlaybackRateState] = useState<number>(() => normalizePlaybackRate(settings.playbackRate))
   const playbackRateRef = useRef(playbackRate)
@@ -279,8 +285,36 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         playableUrlRef.current = null
       }
       audio.src = ''
+      // v1.4.9-pre2：播放器卸载时释放分析分支并关闭 AudioContext
+      disposeAudioGraph()
+      visualizerAttachedRef.current = false
     }
   }, [])
+
+  // v1.4.9-pre2 音频可视化接线：
+  // - 开：接管 audio 元素建立分析图（同元素只建一次，重复调用是复用的），
+  //   随后触发一次重载，让当前曲目改从 Blob 播放（跨域直链拿不到频谱）。
+  // - 关：只断开分析分支，不重载、不中断播放——Blob 与直链对 <audio> 等价，
+  //   当前曲目继续放完；下一首起 resolveAudioPlayableUrl 会重新走直链。
+  // 延迟一帧是为了把 audio 元素的创建 effect 与「读设置」解耦，
+  // 保证开关切换和首屏初始化都走同一条路径。
+  useEffect(() => {
+    const id = setTimeout(() => {
+      const audio = audioRef.current
+      if (!audio) return
+      if (audioVisualizerEnabled) {
+        // resume 已在 ensureAudioGraph 内部触发（suspended 时），这里无需重复
+        const ctx = ensureAudioGraph(audio)
+        visualizerAttachedRef.current = ctx !== null
+        return
+      }
+      if (visualizerAttachedRef.current) {
+        disposeAudioGraph()
+        visualizerAttachedRef.current = false
+      }
+    }, 0)
+    return () => clearTimeout(id)
+  }, [audioVisualizerEnabled])
 
   useEffect(() => {
     if (audioRef.current) {
@@ -402,9 +436,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           playableUrlRef.current = null
         }
 
-        // 移动端需先下载音频流转 Blob（绕过 Referer 防盗链），桌面端原样返回
-        const playableUrl = await resolveAudioPlayableUrl(source.audioUrl)
-        if (cancelled) return
+        // 移动端始终下载音频流转 Blob（绕过 Referer 防盗链），桌面端默认原样返回；
+        // v1.4.9-pre2：桌面端开启可视化时也要 Blob（跨域直链拿不到频谱数据）
+        const playableUrl = await resolveAudioPlayableUrl(source.audioUrl, settings.audioVisualizer)
+        if (cancelled) {
+          // 本次加载已被切歌/卸载取消：刚建出的 Blob URL 必须立刻释放，否则泄漏
+          releaseAudioPlayableUrl(playableUrl)
+          return
+        }
+        // 同样要处理「上一个 Blob 在 await 期间又被写入」的竞态：以 ref 为准释放
+        if (playableUrlRef.current && playableUrlRef.current !== playableUrl) {
+          releaseAudioPlayableUrl(playableUrlRef.current)
+        }
         playableUrlRef.current = playableUrl
         audio.src = playableUrl
         audio.load()
@@ -438,7 +481,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [currentTrack?.bvid, currentTrack?.id, qualityPreference])
+  }, [currentTrack?.bvid, currentTrack?.id, qualityPreference, settings.audioVisualizer])
 
   // v1.4.8-pre1 倍速：state 变同步 audio + 持久化 settings，playbackRateRef 供 loadAndPlay 重设时使用
   useEffect(() => {

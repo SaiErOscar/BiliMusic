@@ -14,6 +14,7 @@ import { useLyrics } from '@/hooks/useLyrics'
 import { useDesktopLyricVisible } from '@/hooks/useDesktopLyric'
 import PlayerSlider from '@/components/PlayerSlider'
 import LyricsView from '@/components/LyricsView'
+import AudioVisualizer from '@/components/AudioVisualizer'
 import {
   searchMultiSourceRound,
   initialMultiSourceState,
@@ -275,6 +276,13 @@ export default function NowPlaying() {
                   animate={{ opacity: 1, scale: 1, rotateX: 0 }}
                   transition={spring}
                 />
+                {/* v1.4.9-pre2 音频可视化：叠在封面下缘，仅在开启时渲染 */}
+                {settings.audioVisualizer && (
+                  <AudioVisualizer
+                    active={player.isPlaying}
+                    className="now-playing-visualizer"
+                  />
+                )}
               </div>
 
               <div className="now-playing-meta">
@@ -577,6 +585,9 @@ function LyricsPanel({
   currentTime: number
 }) {
   const { status, result, choose, retry, offset, adjustOffset, resetOffset } = lyrics
+  // v1.4.9-pre2 歌词双语开关：LyricsPanel 是独立组件，需自行读取设置
+  // （顶层 NowPlaying 的 settings 不在本作用域内）
+  const { settings } = useAppSettings()
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<LyricCandidate[]>([])
@@ -691,7 +702,13 @@ function LyricsPanel({
         {(status === 'ok' || status === 'unsynced') && result && (
           <>
             {status === 'unsynced' && <div className="lyrics-panel__hint">该版本无逐行时间轴，按普通歌词显示</div>}
-            <LyricsView lines={result.lines} currentTime={currentTime} synced={result.synced} onSeek={onSeek} />
+            <LyricsView
+              lines={result.lines}
+              currentTime={currentTime}
+              synced={result.synced}
+              onSeek={onSeek}
+              bilingual={settings.lyricBilingual}
+            />
           </>
         )}
       </div>

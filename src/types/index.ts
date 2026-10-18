@@ -111,6 +111,12 @@ export interface AppSettings {
   themeSeedOverride: ThemeSeedOverride
   // v1.4.9-pre1：歌词窗样式预设库
   lyricPresets: LyricStylePreset[]
+  // v1.4.9-pre2 音频可视化：播放页频谱可视化开关
+  // 桌面端默认关：关闭时播放源沿用 CDN 直链，起播延迟与原行为一致；
+  // 开启后才切 Blob（Web Audio 需要同源音频），移动端本就走 Blob 分支，无额外代价。
+  audioVisualizer: boolean
+  // v1.4.9-pre2 歌词双语：网易源 tlyric 翻译行与原词同行显示（无翻译时自然回退单语）
+  lyricBilingual: boolean
 }
 
 export type NavItem = {

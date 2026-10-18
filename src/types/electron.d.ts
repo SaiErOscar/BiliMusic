@@ -106,6 +106,11 @@ export interface OiapiLyricData {
   conteng?: string
   base64?: string
   cache?: boolean
+  /**
+   * v1.4.9-pre2 歌词双语：网易云 tlyric 翻译 LRC。
+   * 可选字段，仅网易云源可能返回；QQ / LRCLIB 及旧版主进程不返回，读取方按缺省处理。
+   */
+  translation?: string
 }
 
 /** v1.3.7 网易云搜索行（duration 为毫秒） */

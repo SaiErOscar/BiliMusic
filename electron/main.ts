@@ -65,8 +65,22 @@ function setupBiliHeaders() {
     callback({ requestHeaders: headers })
   })
 
-  // API/passport 响应：写入 CORS 头，让渲染进程的浏览器 fetch 可跨域读取
-  const apiUrls = { urls: ['https://api.bilibili.com/*', 'https://passport.bilibili.com/*'] }
+  // API/passport 响应：写入 CORS 头，让渲染进程的浏览器 fetch 可跨域读取。
+  //
+  // v1.4.9-pre2 起把音频/图片 CDN 一并纳入：音频可视化需要把 CDN 直链取成同源 Blob
+  // （Web Audio 的 createMediaElementSource 拿不到跨域音频的频谱数据），而渲染层
+  // fetch CDN 会被 CORS 拦截——此处补上 ACAO，渲染层才能读到响应体。
+  // 注意：媒体元素/图片走 no-cors 加载，不受此头影响，故对既有播放与封面零变化。
+  const apiUrls = {
+    urls: [
+      'https://api.bilibili.com/*',
+      'https://passport.bilibili.com/*',
+      'https://*.bilivideo.com/*',
+      'https://*.bilivideo.cn/*',
+      'https://*.akamaized.net/*',
+      'https://*.hdslb.com/*',
+    ],
+  }
   session.defaultSession.webRequest.onHeadersReceived(apiUrls, (details, callback) => {
     const respHeaders: Record<string, string[]> = {}
     if (details.responseHeaders) {
