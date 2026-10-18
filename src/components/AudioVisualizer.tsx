@@ -1,6 +1,10 @@
 /**
  * v1.4.9-pre2 音频可视化：频谱柱状图。
  *
+ * v1.4.10 重做绘制形态与尺寸来源：柱根由圆角改直角，一排柱根连成一条实的水平线压在
+ * 封面下边缘上（只留柱顶圆角）；画布宽度不再由组件下发，而是与封面四边贴齐、底部圆角
+ * 也对齐封面，柱子的可见轮廓与封面外轮廓严丝合缝。原因见下方 canvas 处的注释。
+ *
  * 为什么单独做成组件：
  * - 绘制循环与播放器状态无关，只关心「有没有 analyser」和「音频在不在播」，
  *   独立组件可以按需挂载（只在播放页出现），不必让整个页面的状态变化触发重绘。
@@ -107,14 +111,20 @@ export default function AudioVisualizer({ active, className }: Props) {
         const ratio = Math.max(0, Math.min(1, bars[i] ?? 0))
         const barHeight = Math.max(2, ratio * height)
         const x = i * (barWidth + gap)
-        const y = height - barHeight
+        const top = height - barHeight
+        // v1.4.10：柱根改直角、只留柱顶圆角。柱根先是圆的时，每根柱子底部都向内收一个
+        // 弧，连起来是虚线一样的锯齿，叠在封面下边缘上就不像「贴着底边长出来」；
+        // 柱根切开后，一排柱根连成一条实的水平线，正好压在封面下边缘上。
+        // 圆角半径不得超过柱半高，否则短视频里矮柱会被拉变形。
+        const r = Math.min(radius, barHeight / 2, barWidth / 2)
         ctx2d.beginPath()
-        // roundRect 在旧内核可能缺失，兜底用直角矩形，保证绘制不抛错
-        if (typeof ctx2d.roundRect === 'function') {
-          ctx2d.roundRect(x, y, barWidth, barHeight, radius)
-        } else {
-          ctx2d.rect(x, y, barWidth, barHeight)
-        }
+        ctx2d.moveTo(x, height)
+        ctx2d.lineTo(x, top + r)
+        ctx2d.quadraticCurveTo(x, top, x + r, top)
+        ctx2d.lineTo(x + barWidth - r, top)
+        ctx2d.quadraticCurveTo(x + barWidth, top, x + barWidth, top + r)
+        ctx2d.lineTo(x + barWidth, height)
+        ctx2d.closePath()
         ctx2d.fill()
       }
     }
@@ -195,10 +205,10 @@ export default function AudioVisualizer({ active, className }: Props) {
       ref={canvasRef}
       className={className}
       aria-hidden="true"
-      // v1.4.9-pre3：高度交给 CSS 类（.now-playing-visualizer 定为 72px 绝对定位），
-      // 这里不再写内联 height——内联样式优先级高于类，会把定位/尺寸一起锁死，
-      // 且组件在别的容器里复用时无法按上下文调整高度。
-      style={{ display: 'block', width: '100%' }}
+      // 尺寸完全交给 CSS 类（.now-playing-visualizer）。内联 height 会盖掉类的定位尺寸；
+      // 内联 width:100% 更隐蔽——绝对定位元素同时有 left/right 时 right 会失效，
+      // 画布因此整块右移并探出封面（v1.4.10 真机实测两侧各差 25.19px）。两个都不留。
+      style={{ display: 'block' }}
     />
   )
 }
