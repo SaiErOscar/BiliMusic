@@ -2187,6 +2187,19 @@ body {
   z-index: 2;
 }
 
+/*
+ * v1.4.10-pre1 MV 导出舞台的可视化。
+ *
+ * 柱子的绘制（柱数/间隙/柱根直角/主题色渐变）与播放页共用同一实现，差异只在定位：
+ * 舞台封面是 contain 完整显示，16:9 封面在 1:1 容器里上下留白，所以画布不能贴容器底边，
+ * 而要贴「封面图片的实际显示下缘」——left/top/width 由舞台按 contain 缩放规则算出后内联下发
+ * （见 MvExportStage 的 coverBox），CSS 这边只负责高度（沿用 .now-playing-visualizer 的 64px）
+ * 与底部圆角。底部圆角取 MV 封面的 18px（屏幕播放页封面是 22px），柱根轮廓与所覆盖的图对齐。
+ */
+.now-playing-visualizer--mv {
+  border-radius: 0 0 18px 18px;
+}
+
 .now-playing-cover {
   position: relative;
   width: 100%;

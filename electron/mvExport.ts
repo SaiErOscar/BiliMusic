@@ -33,6 +33,7 @@ import { spawn } from 'child_process'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
 import { resolveEncoderCandidates, classifyFfmpegFailure, type EncoderCandidate } from './encoders'
+import { ANALYSIS_HZ, BAR_COUNT, SAMPLE_RATE, buildSpectrumTimelineAsync, encodeTimelineBase64 } from './spectrum'
 
 const require = createRequire(import.meta.url)
 const __filename = fileURLToPath(import.meta.url)
@@ -58,6 +59,12 @@ export interface MvExportPayload {
    * 时间、播放按钮、音量与循环控件，只留封面、歌曲信息、歌词与水印。
    */
   clean?: boolean
+  /**
+   * v1.4.10-pre1 音频可视化跟随（AppSettings.audioVisualizer）：true 时导出画面在封面下缘
+   * 显示频谱柱状图。主进程会先对已下载音频做离线频谱分析，把整曲频谱时间线注入离屏舞台；
+   * clean 为 true 时一律不显示（无控件导出不含可视化）。分析失败只降级为「无柱子」，不中断导出。
+   */
+  visualizer?: boolean
   /** 流畅度档位（快速/标准/流畅/极致），缺省取标准 */
   smoothness?: string
   /** 自定义输出目录（下载目录），MV 落在其下 MV/ 子目录 */
@@ -65,8 +72,11 @@ export interface MvExportPayload {
 }
 
 export interface MvExportProgress {
-  /** error：任务失败（与 done 分离，批量侧不会把失败当 100% 完成） */
-  phase: 'audio' | 'render' | 'compose' | 'done' | 'error'
+  /**
+   * error：任务失败（与 done 分离，批量侧不会把失败当 100% 完成）；
+   * analyze：v1.4.10-pre1 音频可视化的离线频谱分析（仅可视化开启时出现）
+   */
+  phase: 'audio' | 'analyze' | 'render' | 'compose' | 'done' | 'error'
   percent: number
   message?: string
   filePath?: string
@@ -93,6 +103,25 @@ const SMOOTHNESS_PRESETS: Record<string, { step: number; maxFrames: number }> = 
   '极致': { step: 0.03, maxFrames: 9000 },
 }
 const DEFAULT_SMOOTHNESS = '标准'
+/**
+ * v1.4.10-pre1：可视化开启时的采样网格步长上限（1/30 秒）。
+ * 导出画面的柱子由时间索引预计算频谱，网格不加密就会以档位步长（标准档 0.1 秒、
+ * 10Hz）跳变，与播放页的连续律动差得太远；加密到 1/30 后柱子约 33Hz 更新，观感接近。
+ * 代价是采样点增多、导出耗时上升，因此只在可视化开启时生效。
+ */
+const VISUALIZER_STEP = 1 / ANALYSIS_HZ
+/**
+ * 可视化开启时的采样点上限（约 6.7 分钟曲目）。超长歌自动放粗步长，
+ * 避免一份频谱把导出拖到不可接受的长度；此时柱子更新变慢但画面仍然正确。
+ */
+const VISUALIZER_MAX_FRAMES = 12000
+
+/** 注入离屏舞台的频谱数据（主进程算好，渲染层只解码显示） */
+interface StageSpectrum {
+  base64: string
+  hz: number
+  bars: number
+}
 /** 封面降采样尺寸（CSS 显示 400px，高 DPI 留足余量） */
 const COVER_SIZE = 800
 /** 会话内失败的编码器：同一进程内不再重试，避免每次导出都白跑一遍捕获 */
@@ -249,6 +278,89 @@ function probeMedia(filePath: string): Promise<{ duration: number; audioCodec: s
   })
 }
 
+/**
+ * v1.4.10-pre1：把已下载的音频解成 44100Hz 单声道 16bit PCM，供离线频谱分析。
+ * ffmpeg 直出到 stdout，中途可用取消中断（与下载同一套取消语义）。
+ */
+function decodePcm(audioPath: string, job: MvExportJob): Promise<Int16Array> {
+  return new Promise((resolve, reject) => {
+    let proc: ReturnType<typeof spawn>
+    try {
+      proc = trackChild(spawn(ffmpegPath, [
+        '-hide_banner', '-nostats',
+        '-i', audioPath,
+        '-vn',
+        '-f', 's16le', '-acodec', 'pcm_s16le',
+        '-ac', '1',
+        '-ar', String(SAMPLE_RATE),
+        '-',
+      ], { windowsHide: true }))
+    } catch (e) {
+      reject(new Error(`ffmpeg 解音频失败: ${e instanceof Error ? e.message : String(e)}`))
+      return
+    }
+    const chunks: Buffer[] = []
+    let stderr = ''
+    let total = 0
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      chunks.push(chunk)
+      total += chunk.length
+      // 防御性上限（约 1 小时单声道 PCM）：异常输入不至于把内存吃干
+      if (total > 44100 * 2 * 3600) {
+        try { proc.kill() } catch { /* 已退出 */ }
+      }
+    })
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString()
+      if (stderr.length > 8192) stderr = stderr.slice(-4096)
+    })
+    proc.on('error', (err) => reject(new Error(`ffmpeg 解音频失败: ${err.message}`)))
+    proc.on('exit', (code) => {
+      if (job.cancelRequested) { reject(new Error('已取消')); return }
+      if (code !== 0) { reject(new Error(`ffmpeg 解音频失败 (exit ${code}): ${stderr.slice(-300)}`)); return }
+      const buf = Buffer.concat(chunks)
+      // Int16Array 要求偶数长度与对齐的缓冲区，末尾奇数字节直接丢弃（不足一个样本）
+      const usable = buf.length - (buf.length % 2)
+      if (usable <= 0) { reject(new Error('ffmpeg 解音频未产出样本')); return }
+      const aligned = buf.buffer.slice(buf.byteOffset, buf.byteOffset + usable)
+      resolve(new Int16Array(aligned))
+    })
+  })
+}
+
+/**
+ * 生成频谱时间线（仅可视化开启时调用）。
+ * 失败一律降级为 null：导出继续，成片没有柱子，绝不因为可视化把整条链路弄挂。
+ */
+async function buildStageSpectrum(
+  audioPath: string,
+  job: MvExportJob,
+  sender: Electron.WebContents | null,
+): Promise<StageSpectrum | null> {
+  try {
+    const pcm = await decodePcm(audioPath, job)
+    if (job.cancelRequested) throw new Error('已取消')
+    const timeline = await buildSpectrumTimelineAsync(pcm, {
+      onProgress: (frames, totalFrames) => {
+        // 分片让出期间检查取消：分析是 CPU 密集的同步段，靠这里把取消传进去
+        if (job.cancelRequested) throw new Error('已取消')
+        if (frames % 60 === 0 || frames === totalFrames) {
+          sendProgress(sender, {
+            phase: 'analyze',
+            percent: Math.min(99, Math.round((frames / Math.max(1, totalFrames)) * 100)),
+            message: '分析音频',
+          })
+        }
+      },
+    })
+    return { base64: encodeTimelineBase64(timeline), hz: ANALYSIS_HZ, bars: BAR_COUNT }
+  } catch (e) {
+    if (job.cancelRequested) throw e
+    console.warn('[mvExport] 频谱分析失败，导出将不含音频可视化:', e instanceof Error ? e.message : e)
+    return null
+  }
+}
+
 // ===== 主流程 =====
 
 async function downloadToFile(url: string, filePath: string, label: string, onPercent?: (p: number) => void): Promise<void> {
@@ -402,6 +514,7 @@ async function openStage(
   payload: MvExportPayload,
   duration: number,
   coverDataUrl: string,
+  spectrum: StageSpectrum | null,
 ): Promise<{ win: BrowserWindow; settledFrame: Electron.NativeImage | null }> {
   const win = createCaptureWindow(job)
   try {
@@ -417,6 +530,11 @@ async function openStage(
         watermark: payload.watermark,
         // v1.4.9-pre3 无控件导出：舞台据此隐藏进度条/时间/播放按钮/音量/循环
         clean: payload.clean === true,
+        // v1.4.10-pre1 音频可视化：舞台据此在封面下缘画频谱柱（clean 时不传，等于不显示）
+        visualizer: payload.visualizer === true && payload.clean !== true,
+        spectrum: spectrum?.base64,
+        spectrumHz: spectrum?.hz,
+        spectrumBars: spectrum?.bars,
       }))})`,
     )
     const readyDeadline = Date.now() + 20_000
@@ -467,11 +585,12 @@ async function captureAndEncode(
   audioPath: string,
   audioArgs: string[],
   coverDataUrl: string,
+  spectrum: StageSpectrum | null,
   outputPath: string,
   candidate: EncoderCandidate,
   sender: Electron.WebContents | null,
 ): Promise<void> {
-  const { win, settledFrame } = await openStage(job, payload, duration, coverDataUrl)
+  const { win, settledFrame } = await openStage(job, payload, duration, coverDataUrl, spectrum)
   let pipe: EncoderPipe | null = null
   try {
     const frameAt = (t: number) => Math.round(t * FPS)
@@ -599,6 +718,7 @@ async function encodeWithFallback(
   audioPath: string,
   audioArgs: string[],
   coverDataUrl: string,
+  spectrum: StageSpectrum | null,
   outputPath: string,
   sender: Electron.WebContents | null,
 ): Promise<void> {
@@ -609,7 +729,7 @@ async function encodeWithFallback(
   for (const candidate of candidates) {
     if (job.cancelRequested) throw new Error('已取消')
     try {
-      await captureAndEncode(job, payload, times, duration, audioPath, audioArgs, coverDataUrl, outputPath, candidate, sender)
+      await captureAndEncode(job, payload, times, duration, audioPath, audioArgs, coverDataUrl, spectrum, outputPath, candidate, sender)
       return
     } catch (e) {
       if (job.cancelRequested) throw e
@@ -644,6 +764,8 @@ function validateExportPayload(payload: MvExportPayload): string | null {
   // 音频/封面直链只允许 http(s)（渲染层被攻破时不至于 spawn 任意协议）
   if (!/^https?:\/\//i.test(payload.audioUrl)) return '音频地址协议不合法'
   if (payload.coverUrl && !/^https?:\/\//i.test(payload.coverUrl)) return '封面地址协议不合法'
+  // v1.4.10-pre1：visualizer 只接受布尔/undefined，避免脏类型让「是否分析音频」的判断漂移
+  if (payload.visualizer != null && typeof payload.visualizer !== 'boolean') return '可视化标志不合法'
   // 输出目录：绝对路径且无空字节/回跳（与 markFolderPurpose 的加固同一防线思路）
   if (payload.outputDir != null) {
     if (typeof payload.outputDir !== 'string' || !path.isAbsolute(payload.outputDir)) return '输出目录不合法'
@@ -686,11 +808,20 @@ async function runExport(payload: MvExportPayload, sender: Electron.WebContents 
     // 音频直通：源本身是 AAC 就 -c:a copy，免二次编码并消掉 AAC 编码器延迟
     const audioArgs = media.audioCodec === 'aac' ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '192k']
 
-    // 3. 逐帧捕获 + 流式编码（渲染与编码重叠，编码器失败自动回退下一候选）
+    // 3. v1.4.10-pre1 音频可视化：开启且非无控件导出时，先对已下载音频做离线频谱分析。
+    //    失败只降级为「成片无柱子」，不中断导出（buildStageSpectrum 内部吞错返回 null）。
+    const visualizerOn = payload.visualizer === true && payload.clean !== true
+    const spectrum = visualizerOn ? await buildStageSpectrum(audioPath, job, sender) : null
+
+    // 4. 逐帧捕获 + 流式编码（渲染与编码重叠，编码器失败自动回退下一候选）
     const preset = SMOOTHNESS_PRESETS[payload.smoothness || ''] || SMOOTHNESS_PRESETS[DEFAULT_SMOOTHNESS]
-    const times = buildCaptureTimes(payload.lyrics, duration, preset.step, preset.maxFrames)
+    // 可视化开启时网格加密到 1/30：柱子由时间索引预计算频谱，网格不加密就退成档位步长的
+    // 幻灯片（标准档 10Hz），与播放页的连续律动差太远。超长歌由 maxFrames 上限自动放粗步长。
+    const step = spectrum ? Math.min(preset.step, VISUALIZER_STEP) : preset.step
+    const maxFrames = spectrum ? Math.max(preset.maxFrames, VISUALIZER_MAX_FRAMES) : preset.maxFrames
+    const times = buildCaptureTimes(payload.lyrics, duration, step, maxFrames)
     const coverDataUrl = await fetchCoverDataUrl(payload.coverUrl)
-    await encodeWithFallback(job, payload, times, duration, audioPath, audioArgs, coverDataUrl, outputPath, sender)
+    await encodeWithFallback(job, payload, times, duration, audioPath, audioArgs, coverDataUrl, spectrum, outputPath, sender)
 
     sendProgress(sender, { phase: 'done', percent: 100, filePath: outputPath })
     return { filePath: outputPath }

@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Pause, SkipBack, SkipForward, Volume2, Repeat } from 'lucide-react'
 import LyricsView from '@/components/LyricsView'
 import PlayerSlider from '@/components/PlayerSlider'
 import type { LyricLine } from '@/services/lyrics'
+import { barsAtTime, decodeSpectrum, type DecodedSpectrum } from '@/utils/spectrumDecode'
+import { VISUALIZER_CANVAS_HEIGHT, drawVisualizerBars } from '@/services/visualizerDraw'
 
 /**
  * v1.4.6-pre3 方案 A：MV 导出专用离屏渲染舞台（#/mv-export 路由）。
@@ -32,6 +34,17 @@ interface MvStagePayload {
    * 只留封面、歌曲信息、歌词与水印（对应播放页鼠标静止后控件淡出的观感）。
    */
   clean?: boolean
+  /**
+   * v1.4.10-pre1 音频可视化：主进程已在分析阶段把频谱时间线算好，这里只负责显示。
+   * visualizer 为 true 且 clean 不为 true 时，在封面图片的实际显示下缘画频谱柱。
+   */
+  visualizer?: boolean
+  /** 频谱时间线（base64，每帧 spectrumBars 个字节，帧序即时间序） */
+  spectrum?: string
+  /** 分析帧率（帧/秒，v1.4.10-pre1 为 30） */
+  spectrumHz?: number
+  /** 每帧桶数（v1.4.10-pre1 为 40） */
+  spectrumBars?: number
 }
 
 function formatTime(seconds: number): string {
@@ -116,6 +129,43 @@ export default function MvExportStage() {
   // v1.4.9-pre3 无控件导出：缺省 false，保持既有含控件画面
   const clean = payload?.clean === true
 
+  // v1.4.10-pre1 音频可视化：开启且非无控件导出时才有柱子。
+  // 导出舞台没有实时音频，柱高完全由当前时间索引预分析好的频谱时间线——
+  // 不挂 rAF、不跑定时器，每次 __mvSetTime 只重绘一帧，paint 与时间点才守得住对应关系。
+  const showVisualizer = payload?.visualizer === true && !clean
+  const spectrum = useMemo(
+    () => (showVisualizer
+      ? decodeSpectrum(payload?.spectrum, payload?.spectrumBars || 40, payload?.spectrumHz || 30)
+      : null),
+    [showVisualizer, payload?.spectrum, payload?.spectrumBars, payload?.spectrumHz],
+  )
+
+  // 柱子要贴「封面图片的实际显示下缘」：MV 舞台封面是 contain（不裁切），
+  // 16:9 封面在 1:1 容器里上下留白，直接贴容器底边会浮在图片外。
+  // 这里按 contain 的缩放规则算出显示区，再把画布定位到它的底边（宽与图片同宽）。
+  const [coverBox, setCoverBox] = useState<{ left: number; top: number; width: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!showVisualizer) { setCoverBox(null); return }
+    const wrap = document.querySelector<HTMLElement>('.now-playing-cover-wrap--mv')
+    const img = document.querySelector<HTMLImageElement>('.now-playing-cover--mv')
+    if (!wrap) return
+    const wrapW = wrap.clientWidth || 0
+    const wrapH = wrap.clientHeight || 0
+    if (wrapW <= 0 || wrapH <= 0) return
+    const nw = img?.naturalWidth || 0
+    const nh = img?.naturalHeight || 0
+    let left = 0
+    let width = wrapW
+    let imageBottom = wrapH
+    if (nw > 0 && nh > 0) {
+      const scale = Math.min(wrapW / nw, wrapH / nh)
+      width = nw * scale
+      left = (wrapW - width) / 2
+      imageBottom = (wrapH - nh * scale) / 2 + nh * scale
+    }
+    setCoverBox({ left, top: Math.max(0, imageBottom - VISUALIZER_CANVAS_HEIGHT), width })
+  }, [showVisualizer, layoutSettled, payload])
+
   return (
     <div className="now-playing">
       <div className="now-playing-smoke" aria-hidden="true">
@@ -170,6 +220,14 @@ export default function MvExportStage() {
               alt={track.title}
               draggable={false}
             />
+            {/* v1.4.10-pre1：柱子叠在封面显示区下缘，与播放页同一绘制实现 */}
+            {showVisualizer && coverBox && spectrum && (
+              <StaticVisualizerCanvas
+                spectrum={spectrum}
+                time={time}
+                style={{ left: coverBox.left, top: coverBox.top, width: coverBox.width, bottom: 'auto' }}
+              />
+            )}
           </div>
 
           <div className="now-playing-meta">
@@ -262,6 +320,36 @@ export default function MvExportStage() {
         </section>
       </div>
     </div>
+  )
+}
+
+/**
+ * 导出舞台的静态可视化画布：柱高由时间索引频谱时间线得到，每次 time 变化只画一帧。
+ * 用 useLayoutEffect 而不是 useEffect——绘制要在同一帧的合成之前完成，
+ * 主进程等到的 paint 才是「这个时间点」的画面（晚一帧就会取到上一个状态）。
+ */
+function StaticVisualizerCanvas({
+  spectrum,
+  time,
+  style,
+}: {
+  spectrum: DecodedSpectrum
+  time: number
+  style: React.CSSProperties
+}) {
+  const ref = useRef<HTMLCanvasElement | null>(null)
+  useLayoutEffect(() => {
+    const canvas = ref.current
+    if (!canvas) return
+    drawVisualizerBars(canvas, barsAtTime(spectrum, time))
+  }, [spectrum, time])
+  return (
+    <canvas
+      ref={ref}
+      className="now-playing-visualizer now-playing-visualizer--mv"
+      style={style}
+      aria-hidden="true"
+    />
   )
 }
 

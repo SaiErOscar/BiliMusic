@@ -487,9 +487,9 @@ export default function Settings() {
 
         <div className="settings-column">
           <SettingsGroup title="播放页" icon={<Monitor size={20} />}>
-            {/* v1.4.9-pre2 音频可视化：开启后播放页封面下缘显示频谱柱状图。
+            {/* v1.4.10-pre1 音频可视化：播放页与 MV 导出画面共用这一开关，小字里要说清它影响导出。
                 桌面端此时播放源会切为 Blob（Web Audio 需同源音频），起播延迟略增，故默认关。 */}
-            <SettingsRow label="音频可视化" description="播放页显示频谱柱状图（开启后桌面端起播会略慢，因需先缓存音频）">
+            <SettingsRow label="音频可视化" description="播放页与导出的 MV 显示频谱柱状图（开启后起播与导出略慢；勾选 MV 无控件导出时不含）">
               <ToggleSwitch checked={settings.audioVisualizer} onChange={() => setAppSettings({ audioVisualizer: !settings.audioVisualizer })} />
             </SettingsRow>
             <SettingsRow label="歌词显示" description="播放页自动显示歌词">
@@ -539,8 +539,8 @@ export default function Settings() {
                 <SettingsRow label="MV 导出水印" description="导出播放界面 MV 时在画面角落加 BiliMusic 角标">
                   <ToggleSwitch checked={settings.mvWatermark} onChange={() => setAppSettings({ mvWatermark: !settings.mvWatermark })} />
                 </SettingsRow>
-                {/* v1.4.9-pre3 无控件导出：只留封面、标题歌手、歌词与水印，隐藏进度条/时间/播放按钮/音量/循环 */}
-                <SettingsRow label="MV 无控件导出" description="导出时隐藏播放控件，只保留封面、歌曲信息与歌词（纯净成片）">
+                {/* v1.4.9-pre3 无控件导出：只留封面、标题歌手、歌词与水印，隐藏进度条/时间/播放按钮/音量/循环；v1.4.10-pre1 起连频谱柱状图一并隐藏 */}
+                <SettingsRow label="MV 无控件导出" description="导出时隐藏播放控件与频谱柱状图，只保留封面、歌曲信息与歌词（纯净成片）">
                   <ToggleSwitch checked={settings.mvCleanExport} onChange={() => setAppSettings({ mvCleanExport: !settings.mvCleanExport })} />
                 </SettingsRow>
                 <SettingsRow label="MV 导出流畅度" description="关键帧密度：档位越高画面越流畅，导出越慢、临时占用越大">

@@ -179,6 +179,8 @@ export default function DownloadButton({
         watermark: settings.mvWatermark,
         // v1.4.9-pre3 无控件导出：隐藏播放控件，只留封面/歌曲信息/歌词
         clean: settings.mvCleanExport,
+        // v1.4.10-pre1 音频可视化跟随：与播放页同开关（无控件导出时主进程一律不显示）
+        visualizer: settings.audioVisualizer,
         smoothness: settings.mvSmoothness,
         outputDir: settings.downloadDir || undefined,
         onProgress: (p) => {
@@ -209,7 +211,7 @@ export default function DownloadButton({
       setMvExporting(false)
       setMvStatus('')
     }
-  }, [actualBvid, actualAid, actualCid, actualId, actualTrack, actualTitle, qualityPref, settings.downloadDir, settings.mvWatermark, settings.mvCleanExport])
+  }, [actualBvid, actualAid, actualCid, actualId, actualTrack, actualTitle, qualityPref, settings.downloadDir, settings.mvWatermark, settings.mvCleanExport, settings.audioVisualizer])
 
   if (!actualBvid || !actualId) return null
 

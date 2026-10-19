@@ -22,6 +22,11 @@ export interface ExportMvOptions {
    * 只留封面、歌曲信息、歌词与水印（对应播放页鼠标静止后控件淡出的纯净观感）。
    */
   clean?: boolean
+  /**
+   * v1.4.10-pre1 音频可视化跟随（AppSettings.audioVisualizer）：true 时导出画面在封面下缘
+   * 显示频谱柱状图（主进程离线分析音频后注入舞台）。clean 为 true 时不显示。
+   */
+  visualizer?: boolean
   /** 流畅度档位（快速/标准/流畅/极致），缺省标准（AppSettings.mvSmoothness） */
   smoothness?: string
   outputDir?: string
@@ -96,6 +101,7 @@ export async function exportTrackMv(
       lyrics: lines,
       watermark: options.watermark,
       clean: options.clean === true,
+      visualizer: options.visualizer === true,
       smoothness: options.smoothness,
       outputDir: options.outputDir,
     }, options.ownerTag)

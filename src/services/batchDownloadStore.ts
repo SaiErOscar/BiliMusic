@@ -193,6 +193,8 @@ async function run() {
             watermark: appSettings.mvWatermark,
             // v1.4.9-pre3 无控件导出：批量导出同样跟随设置
             clean: appSettings.mvCleanExport,
+            // v1.4.10-pre1 音频可视化跟随：批量导出与单曲同一套设置（无控件导出时不显示）
+            visualizer: appSettings.audioVisualizer,
             smoothness: appSettings.mvSmoothness,
             outputDir: dir,
             // ownerTag（v1.4.7-pre1 修复1）：批量取消只杀批量自己发起的任务

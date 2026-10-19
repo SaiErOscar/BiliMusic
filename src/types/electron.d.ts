@@ -30,14 +30,24 @@ export interface MvExportPayload {
    * 只留封面、歌曲信息、歌词与水印。缺省/false 保持既有画面（含控件）。
    */
   clean?: boolean
+  /**
+   * v1.4.10-pre1 音频可视化跟随（AppSettings.audioVisualizer）：true 时导出画面在封面下缘
+   * 显示频谱柱状图（主进程先离线分析音频，把整曲频谱时间线注入离屏舞台）。
+   * clean 为 true 时不显示（无控件导出不含可视化）。
+   * 注：频谱数据本身（spectrum/spectrumHz/spectrumBars）由主进程注入离屏舞台，渲染层不传。
+   */
+  visualizer?: boolean
   /** 流畅度档位（快速/标准/流畅/极致），缺省标准 */
   smoothness?: string
   outputDir?: string
 }
 
 export interface MvExportProgress {
-  /** error：任务失败（与 done 分离，批量侧不会把失败当 100% 完成） */
-  phase: 'audio' | 'render' | 'compose' | 'done' | 'error'
+  /**
+   * error：任务失败（与 done 分离，批量侧不会把失败当 100% 完成）；
+   * analyze：v1.4.10-pre1 音频可视化的离线频谱分析（仅可视化开启时出现）
+   */
+  phase: 'audio' | 'analyze' | 'render' | 'compose' | 'done' | 'error'
   percent: number
   message?: string
   filePath?: string
