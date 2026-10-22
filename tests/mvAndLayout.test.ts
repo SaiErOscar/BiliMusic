@@ -284,3 +284,38 @@ describe('MV 导出跟随音频可视化（v1.4.10-pre1）', () => {
     expect(specSrc).toMatch(/export const ANALYSIS_HZ = 30/)
   })
 })
+
+describe('导出进度连贯化（v1.4.10-pre2）', () => {
+  const read = (rel: string) => readFileSync(path.resolve(__dirname, rel), 'utf8').replace(/\r\n/g, '\n')
+  const mainSrc = read('../electron/mvExport.ts')
+
+  it('三个阶段都走统一区间映射，不再各自 0~99 上报', () => {
+    expect(mainSrc).toContain("import { COMPOSE_PERCENT, DONE_PERCENT, stagePercent } from './exportProgress'")
+    expect(mainSrc).toContain("stagePercent('audio', p / 100)")
+    expect(mainSrc).toContain("stagePercent('analyze', frames / Math.max(1, totalFrames))")
+    expect(mainSrc).toContain("stagePercent('render', written / totalFrames)")
+    // 旧实现：三个阶段各自算百分比，切换处会回退
+    expect(mainSrc).not.toMatch(/Math\.min\(99,\s*Math\.round\(\(written \/ totalFrames\) \* 100\)\)/)
+    expect(mainSrc).not.toMatch(/percent: p,/)
+  })
+
+  it('合成与完成用模块常量，不再散落魔法数', () => {
+    expect(mainSrc).toContain('percent: COMPOSE_PERCENT')
+    expect(mainSrc).toContain('percent: DONE_PERCENT')
+  })
+
+  it('分析阶段的 PCM 解码进程登记到 job.proc，取消能立刻中断', () => {
+    expect(mainSrc).toMatch(/job\.proc = proc/)
+  })
+
+  it('超长音频被上限中断时报明确原因，不伪装成 ffmpeg 失败', () => {
+    expect(mainSrc).toContain('音频过长（超过 1 小时），已跳过可视化分析')
+    expect(mainSrc).toContain('const PCM_MAX_BYTES = SAMPLE_RATE * 2 * 3600')
+  })
+
+  it('整曲 PCM 不再复制成 Float32Array', () => {
+    const specSrc = read('../electron/spectrum.ts')
+    expect(specSrc).not.toContain('int16ToFloat')
+    expect(specSrc).toMatch(/analyzeFrame\(pcm: Int16Array/)
+  })
+})

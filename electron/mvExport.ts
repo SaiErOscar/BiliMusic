@@ -34,6 +34,7 @@ import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
 import { resolveEncoderCandidates, classifyFfmpegFailure, type EncoderCandidate } from './encoders'
 import { ANALYSIS_HZ, BAR_COUNT, SAMPLE_RATE, buildSpectrumTimelineAsync, encodeTimelineBase64 } from './spectrum'
+import { COMPOSE_PERCENT, DONE_PERCENT, stagePercent } from './exportProgress'
 
 const require = createRequire(import.meta.url)
 const __filename = fileURLToPath(import.meta.url)
@@ -74,7 +75,11 @@ export interface MvExportPayload {
 export interface MvExportProgress {
   /**
    * error：任务失败（与 done 分离，批量侧不会把失败当 100% 完成）；
-   * analyze：v1.4.10-pre1 音频可视化的离线频谱分析（仅可视化开启时出现）
+   * analyze：v1.4.10-pre1 音频可视化的离线频谱分析（仅可视化开启时出现）。
+   *
+   * v1.4.10-pre2 起 percent 是全链路统一口径（见 electron/exportProgress.ts）：
+   * 下载音频 0~9、分析音频 10~24、渲染播放页 25~98、合成视频 99、完成 100，
+   * 任何阶段切换处都只前进不后退。
    */
   phase: 'audio' | 'analyze' | 'render' | 'compose' | 'done' | 'error'
   percent: number
@@ -115,6 +120,11 @@ const VISUALIZER_STEP = 1 / ANALYSIS_HZ
  * 避免一份频谱把导出拖到不可接受的长度；此时柱子更新变慢但画面仍然正确。
  */
 const VISUALIZER_MAX_FRAMES = 12000
+/**
+ * v1.4.10-pre2：PCM 解码上限（约 1 小时单声道 44100Hz 16bit，317MB）。
+ * 异常输入不至于把主进程内存吃干；超限直接跳过可视化分析，导出照常完成。
+ */
+const PCM_MAX_BYTES = SAMPLE_RATE * 2 * 3600
 
 /** 注入离屏舞台的频谱数据（主进程算好，渲染层只解码显示） */
 interface StageSpectrum {
@@ -281,6 +291,13 @@ function probeMedia(filePath: string): Promise<{ duration: number; audioCodec: s
 /**
  * v1.4.10-pre1：把已下载的音频解成 44100Hz 单声道 16bit PCM，供离线频谱分析。
  * ffmpeg 直出到 stdout，中途可用取消中断（与下载同一套取消语义）。
+ *
+ * v1.4.10-pre2 修正两点：
+ * 1. 子进程登记到 `job.proc`。此前只进了 childProcesses 集合（仅 will-quit 统一清理），
+ *    `mv:cancel` 杀不到它，在「分析音频」阶段点取消要等整曲解码完才生效。
+ * 2. 去掉多余的一份缓冲区拷贝。原实现 Buffer.concat → ArrayBuffer.slice → Int16Array，
+ *    峰值同时存在三份整曲 PCM；现在能直接对齐视图就复用 concat 的缓冲区，
+ *    只有字节偏移为奇数（池化分配）时才退回拷贝。
  */
 function decodePcm(audioPath: string, job: MvExportJob): Promise<Int16Array> {
   return new Promise((resolve, reject) => {
@@ -299,14 +316,18 @@ function decodePcm(audioPath: string, job: MvExportJob): Promise<Int16Array> {
       reject(new Error(`ffmpeg 解音频失败: ${e instanceof Error ? e.message : String(e)}`))
       return
     }
+    // 取消要能中断解码：与 spawnEncoder 同一约定，mv:cancel 通过 job.proc 杀进程
+    job.proc = proc
     const chunks: Buffer[] = []
     let stderr = ''
     let total = 0
+    let tooLong = false
     proc.stdout?.on('data', (chunk: Buffer) => {
       chunks.push(chunk)
       total += chunk.length
       // 防御性上限（约 1 小时单声道 PCM）：异常输入不至于把内存吃干
-      if (total > 44100 * 2 * 3600) {
+      if (total > PCM_MAX_BYTES) {
+        tooLong = true
         try { proc.kill() } catch { /* 已退出 */ }
       }
     })
@@ -317,13 +338,21 @@ function decodePcm(audioPath: string, job: MvExportJob): Promise<Int16Array> {
     proc.on('error', (err) => reject(new Error(`ffmpeg 解音频失败: ${err.message}`)))
     proc.on('exit', (code) => {
       if (job.cancelRequested) { reject(new Error('已取消')); return }
+      // 超长音频是被我们主动 kill 的，报「ffmpeg 解音频失败」会误导排查方向
+      if (tooLong) { reject(new Error('音频过长（超过 1 小时），已跳过可视化分析')); return }
       if (code !== 0) { reject(new Error(`ffmpeg 解音频失败 (exit ${code}): ${stderr.slice(-300)}`)); return }
-      const buf = Buffer.concat(chunks)
+      const buf = Buffer.concat(chunks, total)
+      // 拷贝已经发生，及时放掉分块引用，避免整曲 PCM 在分析期间被多留一份
+      chunks.length = 0
       // Int16Array 要求偶数长度与对齐的缓冲区，末尾奇数字节直接丢弃（不足一个样本）
       const usable = buf.length - (buf.length % 2)
       if (usable <= 0) { reject(new Error('ffmpeg 解音频未产出样本')); return }
-      const aligned = buf.buffer.slice(buf.byteOffset, buf.byteOffset + usable)
-      resolve(new Int16Array(aligned))
+      if (buf.byteOffset % 2 === 0) {
+        // 对齐时直接开视图，不再复制
+        resolve(new Int16Array(buf.buffer, buf.byteOffset, usable / 2))
+        return
+      }
+      resolve(new Int16Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + usable)))
     })
   })
 }
@@ -347,7 +376,7 @@ async function buildStageSpectrum(
         if (frames % 60 === 0 || frames === totalFrames) {
           sendProgress(sender, {
             phase: 'analyze',
-            percent: Math.min(99, Math.round((frames / Math.max(1, totalFrames)) * 100)),
+            percent: stagePercent('analyze', frames / Math.max(1, totalFrames)),
             message: '分析音频',
           })
         }
@@ -683,7 +712,7 @@ async function captureAndEncode(
       if (written % 5 === 0 || written >= totalFrames) {
         sendProgress(sender, {
           phase: 'render',
-          percent: Math.min(99, Math.round((written / totalFrames) * 100)),
+          percent: stagePercent('render', written / totalFrames),
           message: `渲染播放页 ${written}/${totalFrames} 帧`,
         })
       }
@@ -693,7 +722,7 @@ async function captureAndEncode(
     // 界面会在两个阶段文案之间反复跳动。这里帧全部写完后才切到合成阶段，
     // 进度停在 99% 直到出片，文案与进度条都保持连贯。
     encoder.stdin.end()
-    sendProgress(sender, { phase: 'compose', percent: 99, message: label })
+    sendProgress(sender, { phase: 'compose', percent: COMPOSE_PERCENT, message: label })
     await encoder.done
   } finally {
     if (pipe) {
@@ -793,9 +822,12 @@ async function runExport(payload: MvExportPayload, sender: Electron.WebContents 
     const audioPath = path.join(tempDir, 'audio.bin')
     let lastPercent = -1
     await downloadToFile(payload.audioUrl, audioPath, 'audio', (p) => {
-      if (p !== lastPercent) {
-        lastPercent = p
-        sendProgress(sender, { phase: 'audio', percent: p, message: '下载音频' })
+      // v1.4.10-pre2：下载音频只占整条链路的前 10%，不再按 0~100 上报，
+      // 否则紧接着的分析/渲染阶段从 0 起算会让进度条回退。
+      const percent = stagePercent('audio', p / 100)
+      if (percent !== lastPercent) {
+        lastPercent = percent
+        sendProgress(sender, { phase: 'audio', percent, message: '下载音频' })
       }
     })
 
@@ -823,7 +855,7 @@ async function runExport(payload: MvExportPayload, sender: Electron.WebContents 
     const coverDataUrl = await fetchCoverDataUrl(payload.coverUrl)
     await encodeWithFallback(job, payload, times, duration, audioPath, audioArgs, coverDataUrl, spectrum, outputPath, sender)
 
-    sendProgress(sender, { phase: 'done', percent: 100, filePath: outputPath })
+    sendProgress(sender, { phase: 'done', percent: DONE_PERCENT, filePath: outputPath })
     return { filePath: outputPath }
   } catch (e) {
     // v1.4.8-pre5 修复：失败或取消时清掉半成品 mp4。ffmpeg 以 -y 直接写目标文件，

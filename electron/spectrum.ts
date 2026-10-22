@@ -182,11 +182,18 @@ class FrameAnalyzer {
   /**
    * 分析一帧（PCM 归一化浮点样本，长度须为 fftSize），返回该帧的桶值。
    * 样本从 offset 开始读取，越界部分按 0 补（尾部不足一窗时）。
+   *
+   * v1.4.10-pre2：入参改为 Int16Array，归一化与加窗合并成一次乘加。
+   * 原实现先整曲转一份 Float32Array 再分析，等于把整曲 PCM 多存一份
+   * （10 分钟曲目多占约 53MB，1 小时可达 317MB）；FFT 每帧只吃 2048 点，
+   * 根本没有必要保留整曲浮点副本。
    */
-  analyzeFrame(samples: Float32Array, offset: number): number[] {
+  analyzeFrame(pcm: Int16Array, offset: number): number[] {
     const n = this.fftSize
     for (let i = 0; i < n; i++) {
-      const s = offset + i < samples.length ? samples[offset + i] : 0
+      const idx = offset + i
+      // 归一化到 -1..1 后再乘窗：-32768 → -1，与 Int16 全量程一致
+      const s = idx < pcm.length ? pcm[idx] / 32768 : 0
       this.re[i] = s * this.window[i]
       this.im[i] = 0
     }
@@ -242,15 +249,6 @@ export function spectrumFrameCount(pcmLength: number, sampleRate: number = SAMPL
   return Math.max(1, Math.floor(pcmLength / hop) + 1)
 }
 
-/** 把 PCM 归一化成浮点样本（-1..1）。Int16 的 -32768 会得到 -1，属正常范围。 */
-export function int16ToFloat(pcm: Int16Array): Float32Array {
-  const out = new Float32Array(pcm.length)
-  for (let i = 0; i < pcm.length; i++) {
-    out[i] = pcm[i] / 32768
-  }
-  return out
-}
-
 /**
  * 同步生成整曲频谱时间线：长度 = 帧数 × barCount，每字节 0..255。
  *
@@ -258,14 +256,13 @@ export function int16ToFloat(pcm: Int16Array): Float32Array {
  */
 export function buildSpectrumTimeline(pcm: Int16Array, options: SpectrumTimelineOptions = {}): Uint8Array {
   const { hop, barCount } = resolveOptions(options)
-  const samples = int16ToFloat(pcm)
   const analyzer = new FrameAnalyzer(FFT_SIZE, barCount, ANALYSER_SMOOTHING, DISPLAY_SMOOTHING)
   // 帧数与 spectrumFrameCount 同口径（此处 hop 已解析，直接算，避免二次折算）
   const frames = Math.max(1, Math.floor(pcm.length / hop) + 1)
   const timeline = new Uint8Array(frames * barCount)
 
   for (let f = 0; f < frames; f++) {
-    const bars = analyzer.analyzeFrame(samples, f * hop)
+    const bars = analyzer.analyzeFrame(pcm, f * hop)
     for (let b = 0; b < barCount; b++) {
       const v = bars[b]
       timeline[f * barCount + b] = Math.max(0, Math.min(255, Math.round((Number.isFinite(v) ? v : 0) * 255)))
@@ -285,14 +282,13 @@ export async function buildSpectrumTimelineAsync(
 ): Promise<Uint8Array> {
   const { hop, barCount } = resolveOptions(options)
   const yieldEvery = Math.max(1, Math.floor(options.yieldEvery ?? 150))
-  const samples = int16ToFloat(pcm)
   const analyzer = new FrameAnalyzer(FFT_SIZE, barCount, ANALYSER_SMOOTHING, DISPLAY_SMOOTHING)
   // 帧数与 spectrumFrameCount 同口径（此处 hop 已解析，直接算，避免二次折算）
   const frames = Math.max(1, Math.floor(pcm.length / hop) + 1)
   const timeline = new Uint8Array(frames * barCount)
 
   for (let f = 0; f < frames; f++) {
-    const bars = analyzer.analyzeFrame(samples, f * hop)
+    const bars = analyzer.analyzeFrame(pcm, f * hop)
     for (let b = 0; b < barCount; b++) {
       const v = bars[b]
       timeline[f * barCount + b] = Math.max(0, Math.min(255, Math.round((Number.isFinite(v) ? v : 0) * 255)))
