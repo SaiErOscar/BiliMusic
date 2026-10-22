@@ -70,3 +70,15 @@ platform/HarmonyOS/oh_modules
 /_mvh8.cjs
 /_mvh8/
 /_mvh8.out.txt
+
+# v1.4.9 / v1.4.10-pre1 会话临时探针、构建日志与暂存产物（一次性过程文件）
+/_build-1.4.*
+/_build_149.sh
+/_fixcl.py
+/_fixcss*.py
+/_fixtest.py
+/_tmp_*.cjs
+/_verify149*.cjs
+/_vz1*
+/_vzmv2*
+/release-rb/
