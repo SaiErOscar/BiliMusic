@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { lazy, useEffect } from 'react'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import { Routes, Route } from 'react-router-dom'
 import { useAutoSync } from '@/hooks/useAutoSync'
@@ -11,14 +11,18 @@ import { AddToPlaylistProvider } from '@/contexts/AddToPlaylistContext'
 import LoginDialog from '@/components/LoginDialog'
 import MainLayout from '@/components/layout/MainLayout'
 import Discover from '@/pages/Discover'
-import SearchPage from '@/pages/Search'
-import Recommend from '@/pages/Recommend'
-import Recent from '@/pages/Recent'
-import Favorites from '@/pages/Favorites'
-import Playlists from '@/pages/Playlists'
-import Downloads from '@/pages/Downloads'
-import BiliFavorites from '@/pages/BiliFavorites'
-import Settings from '@/pages/Settings'
+
+// 路由级代码分割：只有首屏默认路由 Discover 静态打入入口包，其余页面按需拉取。
+// 此前全部页面静态导入，入口 chunk 近 700KB，冷启动要为「可能永远不会打开的页面」
+// 付出解析+编译成本。Suspense 边界在 MainLayout 的 <main> 内，切页时侧栏/播放条不挂起。
+const SearchPage = lazy(() => import('@/pages/Search'))
+const Recommend = lazy(() => import('@/pages/Recommend'))
+const Recent = lazy(() => import('@/pages/Recent'))
+const Favorites = lazy(() => import('@/pages/Favorites'))
+const Playlists = lazy(() => import('@/pages/Playlists'))
+const Downloads = lazy(() => import('@/pages/Downloads'))
+const BiliFavorites = lazy(() => import('@/pages/BiliFavorites'))
+const Settings = lazy(() => import('@/pages/Settings'))
 
 function GlobalLoginDialog() {
   const { showLogin, setShowLogin, checkLogin } = useAuth()

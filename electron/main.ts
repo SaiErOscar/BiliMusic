@@ -558,6 +558,9 @@ function createWindow() {
     minimizable: true,
     maximizable: true,
     closable: true,
+    // 首帧绘制完成前不显示窗口，避免冷启动先弹出一个空白窗口。
+    // 鸿蒙上窗口显隐与托盘强耦合（见 whenReady 内的创建顺序），保持原有「创建即可见」行为。
+    ...(isHarmonyOS ? {} : { show: false }),
     ...(!isHarmonyOS ? { titleBarStyle: 'hidden' as const } : {}),
     backgroundColor: '#F6F7F9',
     icon: loadAppIcon(),
@@ -575,6 +578,23 @@ function createWindow() {
     mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadURL('app://local/index.html')
+  }
+
+  // 配合 show:false：首帧就绪（ready-to-show）后再显示，消除冷启动空白窗口。
+  // 兜底 2.5s 强制显示：若加载异常导致事件不触发，应用不会「启动即隐形」。
+  // showMainWindow() 也会提前 show()，故 revealed 保证只执行一次。
+  if (!isHarmonyOS) {
+    let revealed = false
+    const reveal = () => {
+      if (revealed) return
+      revealed = true
+      if (!mainWindow || mainWindow.isDestroyed()) return
+      mainWindow.show()
+      mainWindow.focus()
+    }
+    mainWindow.once('ready-to-show', reveal)
+    const revealFallback = setTimeout(reveal, 2500)
+    mainWindow.once('closed', () => clearTimeout(revealFallback))
   }
 
   mainWindow.on('close', (event) => {

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { Suspense, useEffect } from 'react'
 import { Outlet } from 'react-router-dom'
 import TitleBar from './TitleBar'
 import Sidebar from './Sidebar'
@@ -59,7 +59,9 @@ export default function MainLayout() {
             padding: 'var(--space-lg) var(--space-xl)',
           }}
         >
-          <Outlet />
+          <Suspense fallback={<div style={{ minHeight: '40vh' }} />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
 
