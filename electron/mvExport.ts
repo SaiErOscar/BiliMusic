@@ -465,7 +465,8 @@ async function fetchCoverDataUrl(coverUrl: string): Promise<string> {
     // v1.4.9-pre3 修复：原实现 resize({ width: COVER_SIZE, height: COVER_SIZE }) 把任意
     // 比例的封面强拉成正方形——B 站封面多为 16:9，导出画面里人物与文字明显被压扁。
     // 现在按原图长边等比缩放到 COVER_SIZE 上限，宽高各自按原比例换算，绝不改变宽高比；
-    // 舞台侧再用 object-fit: contain 完整显示（见 .now-playing-cover--mv）。
+    // 取景交给舞台的 object-fit: cover（v1.4.10-pre3 起，与播放页一致：1:1 裁切铺满），
+    // 这里保持原比例即可，裁切是显示层的事。
     const scale = Math.min(1, COVER_SIZE / Math.max(size.width, size.height))
     const targetW = Math.max(1, Math.round(size.width * scale))
     const targetH = Math.max(1, Math.round(size.height * scale))

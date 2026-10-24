@@ -89,19 +89,36 @@ describe('MV 无控件导出（v1.4.9-pre3）', () => {
   })
 })
 
-describe('MV 封面比例与阴影（v1.4.9-pre3）', () => {
+describe('MV 封面取景与阴影（v1.4.9-pre3 引入，v1.4.10-pre3 改回裁切）', () => {
   it('舞台封面使用 --mv 专用类', () => {
     expect(stageSrc).toContain('now-playing-cover--mv')
     expect(stageSrc).toContain('now-playing-cover-wrap--mv')
   })
 
-  it('MV 封面改为 contain，不裁切也不拉伸', () => {
+  it('MV 封面与播放页同语义：1:1 裁切铺满，不拉伸也不留白', () => {
     const ruleStart = css.indexOf('.now-playing-cover--mv {')
     expect(ruleStart).toBeGreaterThan(-1)
     const ruleEnd = css.indexOf('}', ruleStart)
     const rule = css.slice(ruleStart, ruleEnd)
-    expect(rule).toMatch(/object-fit:\s*contain/)
+    // 用户报障：16:9 封面在 1:1 位置里上下留白与播放页观感割裂，要求只显示中间最大的 1:1 区域
+    expect(rule).toMatch(/object-fit:\s*cover/)
+    expect(rule).not.toMatch(/object-fit:\s*contain/)
+    // 尺寸仍由容器给定，比例不再按原图撑开
     expect(rule).toMatch(/aspect-ratio:\s*auto/)
+    expect(rule).toMatch(/width:\s*100%/)
+    expect(rule).toMatch(/height:\s*100%/)
+  })
+
+  it('主进程仍按原图长边等比缩放（不把图强拉成方图）', () => {
+    const mainSrc = readFileSync(path.resolve(__dirname, '../electron/mvExport.ts'), 'utf8')
+    // 注释里会引用旧写法做说明，断言前先剥掉注释行，只看真实代码
+    const code = mainSrc
+      .split('\n')
+      .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+      .join('\n')
+    // 拉伸的根因是主进程 resize 成 COVER_SIZE×COVER_SIZE，这处修复必须保留
+    expect(code).not.toMatch(/resize\(\{\s*width:\s*COVER_SIZE,\s*height:\s*COVER_SIZE/)
+    expect(code).toContain('Math.max(size.width, size.height)')
   })
 
   it('MV 封面容器固定 1:1 占位，不同比例封面都不跳高', () => {
@@ -264,10 +281,19 @@ describe('MV 导出跟随音频可视化（v1.4.10-pre1）', () => {
     expect(decodeSrc).toMatch(/return null/)
   })
 
-  it('MV 舞台的柱子贴封面显示区下缘（按 contain 缩放规则算，不贴容器底边）', () => {
-    expect(stageSrc).toContain('naturalWidth')
-    expect(stageSrc).toContain('imageBottom')
+  it('MV 舞台的柱子贴封面显示区下缘（封面裁切铺满后即容器底边）', () => {
+    // 封面 1:1 裁切铺满后，封面显示区 = 容器，柱子直接贴容器四边由 CSS 定位，
+    // 不再按 contain 缩放规则量「图片实际显示下缘」
+    expect(stageSrc).not.toContain('naturalWidth')
+    expect(stageSrc).not.toContain('imageBottom')
+    expect(stageSrc).not.toContain('VISUALIZER_CANVAS_HEIGHT')
     expect(css).toContain('.now-playing-visualizer--mv')
+    // 画布定位沿用播放页那一套：贴左、贴底、满宽
+    const ruleStart = css.indexOf('.now-playing-visualizer {')
+    const rule = css.slice(ruleStart, css.indexOf('}', ruleStart))
+    expect(rule).toMatch(/left:\s*0/)
+    expect(rule).toMatch(/bottom:\s*0/)
+    expect(rule).toMatch(/width:\s*100%/)
   })
 
   it('设置页小字说清「音频可视化」影响 MV 导出、无控件导出不含可视化', () => {
