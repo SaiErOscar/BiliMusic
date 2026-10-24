@@ -129,6 +129,41 @@ describe('MV 封面取景与阴影（v1.4.9-pre3 引入，v1.4.10-pre3 改回裁
     expect(rule).toMatch(/aspect-ratio:\s*1/)
   })
 
+  // v1.4.11-pre1：pre3 只把 object-fit 改成 cover，预留位本身仍是坏的。
+  // 图片 width/height 都 100%，而「高度由 aspect-ratio 推导」的容器里 height:100% 不可解析，
+  // img 退回按原图比例撑高容器：竖版封面把 1:1 撑成 420x746.7，9:16 还在底部露出 26.7px 背景。
+  // 真机实测（Electron 离屏逐像素扫描）才暴露，所以这里必须断言「容器尺寸与图片解耦」这个根因，
+  // 而不是只断言 CSS 文本里出现了 cover。
+  it('MV 封面不参与容器高度计算：图片绝对定位，容器高度只由 aspect-ratio 决定', () => {
+    const coverRule = (() => {
+      const start = css.indexOf('.now-playing-cover--mv {')
+      expect(start).toBeGreaterThan(-1)
+      return css.slice(start, css.indexOf('}', start))
+    })()
+    const wrapRule = (() => {
+      const start = css.indexOf('.now-playing-cover-wrap--mv {')
+      expect(start).toBeGreaterThan(-1)
+      return css.slice(start, css.indexOf('}', start))
+    })()
+
+    // 根因修法：图片脱离文档流，不再把容器撑高
+    expect(coverRule).toMatch(/position:\s*absolute/)
+    expect(coverRule).toMatch(/inset:\s*0/)
+    // 容器成为绝对定位的参照系，高度由 aspect-ratio 独占
+    expect(wrapRule).toMatch(/position:\s*relative/)
+    expect(wrapRule).toMatch(/aspect-ratio:\s*1/)
+    // 图片自身的比例/尺寸声明不能反过来决定容器高度
+    expect(coverRule).toMatch(/object-fit:\s*cover/)
+    expect(coverRule).not.toMatch(/object-fit:\s*contain/)
+  })
+
+  it('MV 封面容器不再用 flex 居中（flex 子项的 height:100% 正是撑破预留位的来源）', () => {
+    const start = css.indexOf('.now-playing-cover-wrap--mv {')
+    const rule = css.slice(start, css.indexOf('}', start))
+    expect(rule).not.toMatch(/display:\s*flex/)
+    expect(rule).not.toMatch(/align-items:\s*center/)
+  })
+
   it('屏幕播放页封面仍保持 1:1 + cover（不被 MV 改动波及）', () => {
     const ruleStart = css.indexOf('.now-playing-cover {')
     const ruleEnd = css.indexOf('}', ruleStart)
