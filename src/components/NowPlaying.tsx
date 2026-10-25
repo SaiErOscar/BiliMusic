@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronDown, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat,
-  Heart, Volume2, VolumeX, Search, Music, Loader2, Maximize2, Minimize2, X, MessageCircle, ExternalLink, ThumbsUp, RefreshCw, ChevronUp, RotateCcw, Star, Monitor,
+  Heart, Volume2, VolumeX, Search, Music, Loader2, Maximize2, Minimize2, X, MessageCircle, ExternalLink, ThumbsUp, RefreshCw, ChevronUp, RotateCcw, Star, Monitor, Sparkles,
 } from 'lucide-react'
 import DownloadButton from '@/components/DownloadButton'
 import BiliFavoriteDialog from '@/components/BiliFavoriteDialog'
@@ -15,6 +15,8 @@ import { useDesktopLyricVisible } from '@/hooks/useDesktopLyric'
 import PlayerSlider from '@/components/PlayerSlider'
 import LyricsView from '@/components/LyricsView'
 import AudioVisualizer from '@/components/AudioVisualizer'
+import { enhanceLyrics } from '@/services/aiLyrics'
+import { getAiConfig, isAiSupported, saveAiConfig } from '@/services/ai'
 import {
   searchMultiSourceRound,
   initialMultiSourceState,
@@ -49,6 +51,7 @@ export default function NowPlaying() {
   const [fullscreen, setFullscreen] = useState(false)
   // v1.4.11-pre2 封面取景：记录封面固有比例，contain 模式下用它驱动容器高度
   const [coverAspect, setCoverAspect] = useState(1)
+
   const followCoverAspect = shouldFollowCoverAspect(settings.coverFit) && coverAspect > 0
   const [controlsVisible, setControlsVisible] = useState(true)
   const [commentsOpen, setCommentsOpen] = useState(false)
@@ -599,6 +602,31 @@ function LyricsPanel({
   currentTime: number
 }) {
   const { status, result, choose, retry, offset, adjustOffset, resetOffset } = lyrics
+
+  // v1.4.11-pre6 AI 歌词增强：单键切换「生成 → 还原」
+  const [aiLyricBusy, setAiLyricBusy] = useState(false)
+  const toggleAiLyric = async () => {
+    if (lyrics.hasAiEnhance) {
+      lyrics.clearAiEnhance()
+      return
+    }
+    if (!lyrics.rawResult?.lines?.length) return
+    setAiLyricBusy(true)
+    try {
+      const config = await getAiConfig()
+      // 先落盘：主进程按已存配置下发代理与密钥
+      await saveAiConfig(config)
+      const { result: enhanced } = await enhanceLyrics(config, lyrics.rawResult.lines, 'translate', {
+        title: track.title,
+        artist: track.artist,
+      })
+      lyrics.applyAiEnhance(enhanced)
+    } catch {
+      // 失败静默：播放页不适合弹错误框，用户可到设置页「测试连接」排查
+    } finally {
+      setAiLyricBusy(false)
+    }
+  }
   // v1.4.9-pre2 歌词双语开关：LyricsPanel 是独立组件，需自行读取设置
   // （顶层 NowPlaying 的 settings 不在本作用域内）
   const { settings } = useAppSettings()
@@ -738,6 +766,19 @@ function LyricsPanel({
             <Search size={15} />
             <span>切换歌词</span>
           </button>
+          {/* v1.4.11-pre6 AI 歌词增强：翻译 / 逐句赏析，仅叠加显示、不改原歌词 */}
+          {isAiSupported() && (
+            <button
+              type="button"
+              className="lyrics-panel__ctrl-btn"
+              onClick={() => void toggleAiLyric()}
+              disabled={aiLyricBusy}
+              title="用 AI 翻译或逐句赏析当前歌词（只影响显示）"
+            >
+              <Sparkles size={15} />
+              <span>{aiLyricBusy ? '处理中…' : lyrics.hasAiEnhance ? '还原歌词' : 'AI 增强'}</span>
+            </button>
+          )}
           {status === 'ok' && (
             <div className="lyrics-panel__offset">
               <button type="button" onClick={() => adjustOffset(-200)} title="歌词提前 0.2s">

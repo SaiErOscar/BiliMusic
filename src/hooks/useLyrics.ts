@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import type { Track } from '@/types'
 import {
   getLyricForTrack,
@@ -21,6 +21,13 @@ export function useLyrics(track: Track | null, enabled: boolean) {
   const [result, setResult] = useState<LyricResult | null>(null)
   const [offset, setOffset] = useState(0)
   const reqIdRef = useRef(0)
+  /**
+   * v1.4.11-pre6 AI 歌词增强叠加层：行号 → 增强文本。
+   *
+   * 独立于 result 存放，渲染时再合并——这样关掉开关/切歌即时还原，
+   * 原始歌词（含官方 tlyric）始终是权威，也不会污染歌词缓存与 .lrc 导出。
+   */
+  const [aiEnhance, setAiEnhance] = useState<Map<number, string> | null>(null)
 
   const load = useCallback(async (t: Track) => {
     const reqId = ++reqIdRef.current
@@ -78,8 +85,15 @@ export function useLyrics(track: Track | null, enabled: boolean) {
   const retry = useCallback(() => {
     if (!track) return
     clearLyricCache(track.id)
+    setAiEnhance(null)
     load(track)
   }, [track, load])
+
+  /** 清掉 AI 增强叠加层（切歌、关闭开关时调用） */
+  const clearAiEnhance = useCallback(() => setAiEnhance(null), [])
+
+  /** 应用 AI 增强结果；行号越界的直接忽略 */
+  const applyAiEnhance = useCallback((map: Map<number, string>) => setAiEnhance(map), [])
 
   const adjustOffset = useCallback((deltaMs: number) => {
     if (!track) return
@@ -109,5 +123,33 @@ export function useLyrics(track: Track | null, enabled: boolean) {
     }
   }, [track, result, offset])
 
-  return { status, result, choose, retry, offset, adjustOffset, resetOffset }
+  /**
+   * 渲染用的歌词结果：把 AI 增强按行号叠到 translation 上。
+   * 没有增强时原样返回，避免无谓的对象重建触发下游重渲染。
+   */
+  const displayResult = useMemo(() => {
+    if (!result || !aiEnhance || !aiEnhance.size) return result
+    return {
+      ...result,
+      lines: result.lines.map((line, i) => {
+        const text = aiEnhance.get(i)
+        return text ? { ...line, translation: text } : line
+      }),
+    }
+  }, [result, aiEnhance])
+
+  return {
+    status,
+    result: displayResult,
+    /** 原始结果（不含 AI 叠加），供需要权威歌词的调用方使用 */
+    rawResult: result,
+    choose,
+    retry,
+    offset,
+    adjustOffset,
+    resetOffset,
+    applyAiEnhance,
+    clearAiEnhance,
+    hasAiEnhance: !!aiEnhance?.size,
+  }
 }
