@@ -125,6 +125,101 @@ export function addRecentTrack(track: Track) {
   }
 }
 
+
+// ===== v1.4.12-pre1 播放行为埋点（AI 听歌画像的数据基础） =====
+//
+// 与「最近播放」分开：最近播放是给用户看的列表（只留 50 条、无统计），
+// 这里是给画像用的聚合数据，需要累计次数与时长、且不能被列表截断。
+// 存 localStorage 单键，按 id 索引；只记本地、不上传。
+
+const PLAY_STATS_KEY = 'bilimusic_play_stats'
+
+export interface PlayStat {
+  id: string
+  title: string
+  artist: string
+  /** 起播次数（含未听完） */
+  plays: number
+  /** 累计实际播放秒数 */
+  seconds: number
+  /** 完整听完的次数（听到结尾 90% 以上） */
+  completions: number
+  /** 首次播放时间（ISO） */
+  firstAt: string
+  /** 最近播放时间（ISO） */
+  lastAt: string
+}
+
+/** 最多保留多少首的统计，防止无限增长 */
+export const PLAY_STATS_LIMIT = 500
+
+export function loadPlayStats(): Record<string, PlayStat> {
+  try {
+    const raw = localStorage.getItem(PLAY_STATS_KEY)
+    if (!raw) return {}
+    const obj = JSON.parse(raw) as Record<string, PlayStat>
+    return obj && typeof obj === 'object' ? obj : {}
+  } catch {
+    return {}
+  }
+}
+
+function savePlayStats(stats: Record<string, PlayStat>): void {
+  // 超出上限时按最近播放时间裁剪，保留最近听过的
+  const entries = Object.entries(stats)
+  if (entries.length > PLAY_STATS_LIMIT) {
+    entries.sort((a, b) => (b[1].lastAt || '').localeCompare(a[1].lastAt || ''))
+    stats = Object.fromEntries(entries.slice(0, PLAY_STATS_LIMIT))
+  }
+  safeSetItem(PLAY_STATS_KEY, JSON.stringify(stats))
+}
+
+/** 记录一次起播（在真正开始播放时调用，切歌时先结算上一首） */
+export function recordPlayStart(track: Track): void {
+  try {
+    const stats = loadPlayStats()
+    const now = new Date().toISOString()
+    const prev = stats[track.id]
+    stats[track.id] = {
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      plays: (prev?.plays || 0) + 1,
+      seconds: prev?.seconds || 0,
+      completions: prev?.completions || 0,
+      firstAt: prev?.firstAt || now,
+      lastAt: now,
+    }
+    savePlayStats(stats)
+  } catch { /* 埋点失败不影响播放 */ }
+}
+
+/**
+ * 结算一段实际播放时长。
+ *
+ * @param seconds 本段播放了多少秒（调用方按实际推进量给，不是墙钟时间）
+ * @param completed 是否听到结尾（>=90% 视为听完）
+ */
+export function recordPlayProgress(trackId: string, seconds: number, completed = false): void {
+  if (!trackId || !Number.isFinite(seconds) || seconds <= 0) return
+  try {
+    const stats = loadPlayStats()
+    const cur = stats[trackId]
+    if (!cur) return // 没有起播记录就不凭空造一条
+    cur.seconds = Math.round((cur.seconds + seconds) * 10) / 10
+    if (completed) cur.completions += 1
+    stats[trackId] = cur
+    savePlayStats(stats)
+  } catch { /* ignore */ }
+}
+
+/** 清空播放统计（隐私入口，设置页提供） */
+export function clearPlayStats(): void {
+  try {
+    localStorage.removeItem(PLAY_STATS_KEY)
+    window.dispatchEvent(new CustomEvent('bilimusic:play-stats-changed'))
+  } catch { /* ignore */ }
+}
 export function loadFavoriteTracks(): Track[] {
   try {
     const raw = localStorage.getItem(FAVORITES_KEY)

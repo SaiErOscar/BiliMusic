@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createContext, useContext } from 'react'
 import type { Track, RepeatMode } from '@/types'
 import { useAppSettings } from '@/hooks/useAppSettings'
-import { toggleFavoriteTrack, loadFavoriteTracks, addRecentTrack } from '@/utils/storage'
+import { toggleFavoriteTrack, loadFavoriteTracks, addRecentTrack, recordPlayStart, recordPlayProgress } from '@/utils/storage'
 import { resolveAudioPlayableUrl, releaseAudioPlayableUrl } from '@/services/http'
 import { ensureAudioGraph, disposeAudioGraph } from '@/services/audioGraph'
 import { normalizePlaybackRate } from '@/utils/playbackRate'
@@ -403,6 +403,42 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (currentTrack) addRecentTrack(currentTrack)
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTrack?.id])
+
+  // v1.4.12-pre1 播放行为埋点：起播记一次，并在切歌/卸载时结算上一首的收听时长
+  const playStatRef = useRef<{ id: string; lastPos: number; maxRatio: number } | null>(null)
+  useEffect(() => {
+    if (!currentTrack) return
+    recordPlayStart(currentTrack)
+    playStatRef.current = { id: currentTrack.id, lastPos: 0, maxRatio: 0 }
+    return () => {
+      const s = playStatRef.current
+      if (!s) return
+      // 卸载/切歌时按已推进的秒数结算；听完判定用最大进度比
+      recordPlayProgress(s.id, s.lastPos, s.maxRatio >= 0.9)
+      playStatRef.current = null
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTrack?.id])
+
+  // timeupdate 里累计实际推进量（只记正向增量，拖动进度条不计入）
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    const onTime = () => {
+      const s = playStatRef.current
+      if (!s) return
+      const pos = audio.currentTime
+      const delta = pos - s.lastPos
+      // 只接受 0~2 秒的正向增量：跳转/回退/卡顿都不会污染统计
+      if (delta > 0 && delta <= 2) s.lastPos = pos
+      const dur = audio.duration
+      if (dur && Number.isFinite(dur) && dur > 0) {
+        s.maxRatio = Math.max(s.maxRatio, Math.min(1, pos / dur))
+      }
+    }
+    audio.addEventListener('timeupdate', onTime)
+    return () => audio.removeEventListener('timeupdate', onTime)
   }, [currentTrack?.id])
 
   // 当 currentTrack 变化时加载并播放音频

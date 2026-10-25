@@ -31,6 +31,7 @@ import BackupModal from '@/components/BackupModal'
 import FontSelect from '@/components/FontSelect'
 import ColorField from '@/components/ColorField'
 import AiPlaylistPanel from '@/components/AiPlaylistPanel'
+import AiPortraitPanel from '@/components/AiPortraitPanel'
 import { useTheme } from '@/hooks/useTheme'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { selectDownloadFolder } from '@/services/api'
@@ -575,6 +576,8 @@ export default function Settings() {
             <SettingsGroup title="AI 助手" icon={<Sparkles size={20} />}>
               {/* v1.4.11-pre5 智能歌单放在组首：配置行较长，放组尾会落到首屏之外 */}
               <AiPlaylistPanel config={aiConfig} Row={SettingsRow} />
+              {/* v1.4.12-pre1 听歌画像 */}
+              <AiPortraitPanel config={aiConfig} Row={SettingsRow} />
               <SettingsRow label="服务预设" description="OpenAI 兼容格式；选预设填入地址与模型，仍可手改">
                 <select
                   className="settings-select"
