@@ -10,6 +10,7 @@
  */
 
 import { platform } from '@/platform'
+import { recordUsage } from '@/services/aiUsage'
 import type { AiProviderConfig, AiSettings } from '@/types'
 
 /** 该环境是否支持 AI（桌面端才有主进程加密存储） */
@@ -162,6 +163,11 @@ export async function aiChat(config: AiProviderConfig, options: AiChatOptions): 
     }
     const text = data.choices?.[0]?.message?.content
     if (!text) throw new Error('模型返回内容为空')
+    // v1.4.13-pre1 成本可见：记一次调用与估算 token
+    recordUsage(
+      options.messages.reduce((a, m) => a + m.content.length, 0),
+      text.length,
+    )
     return text
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
@@ -196,4 +202,9 @@ export async function testAiConnection(config: AiProviderConfig): Promise<{ ok: 
 export const AI_PRESETS = [
   { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
   { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
+  // v1.4.13-pre1 扩充国内常见 OpenAI 兼容服务：纯数据表，换服务商不必手填
+  { id: 'moonshot', label: 'Kimi（月之暗面）', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+  { id: 'dashscope', label: '通义千问（阿里）', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+  { id: 'zhipu', label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
+  { id: 'siliconflow', label: '硅基流动', baseUrl: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-7B-Instruct' },
 ] as const

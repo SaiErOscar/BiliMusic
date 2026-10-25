@@ -37,11 +37,16 @@ describe('AI 接口地址归一化（v1.4.11-pre3）', () => {
 })
 
 describe('AI 预设（OpenAI 兼容 + DeepSeek）', () => {
-  it('两个预设都在，且地址符合 OpenAI 兼容格式', () => {
-    expect(AI_PRESETS.map((p) => p.id).sort()).toEqual(['deepseek', 'openai'])
+  it('预设都符合 OpenAI 兼容格式，且必含 OpenAI 与 DeepSeek', () => {
+    const ids = AI_PRESETS.map((p) => p.id)
+    expect(ids).toContain('openai')
+    expect(ids).toContain('deepseek')
+    // v1.4.13-pre1 扩充了国内常见服务，这里只约束格式不锁数量
+    expect(ids.length).toBeGreaterThanOrEqual(2)
     for (const p of AI_PRESETS) {
       expect(p.baseUrl.startsWith('https://')).toBe(true)
       expect(p.model.length).toBeGreaterThan(0)
+      expect(p.label.length).toBeGreaterThan(0)
     }
   })
 

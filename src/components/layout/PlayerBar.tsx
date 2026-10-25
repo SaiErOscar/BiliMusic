@@ -391,7 +391,7 @@ export default function PlayerBar() {
                   height: 14,
                   padding: '0 3px',
                   borderRadius: 999,
-                  background: '#ff375f',
+                  background: 'var(--color-primary)',
                   color: '#fff',
                   border: '2px solid var(--color-background)',
                   fontSize: 8,
@@ -473,7 +473,7 @@ export default function PlayerBar() {
                     borderRadius: 8,
                     border: 'none',
                     background: 'rgba(255, 55, 95, 0.15)',
-                    color: '#ff375f',
+                    color: 'var(--color-primary)',
                     fontSize: 12,
                     cursor: 'pointer',
                     textAlign: 'left',
@@ -510,7 +510,7 @@ export default function PlayerBar() {
                 height: 15,
                 padding: '0 3px',
                 borderRadius: 999,
-                background: '#ff375f',
+                background: 'var(--color-primary)',
                 color: '#fff',
                 border: '2px solid var(--color-background)',
                 fontSize: 9,
@@ -621,7 +621,7 @@ function TransportButton({
       type="button"
       aria-label={ariaLabel}
       onClick={onClick}
-        whileHover={{ y: -1, color: active ? '#ff375f' : 'var(--player-text)' }}
+        whileHover={{ y: -1, color: active ? 'var(--color-primary)' : 'var(--player-text)' }}
       whileTap={{ scale: 0.9 }}
       transition={{ duration: 0.18 }}
       style={{
@@ -630,7 +630,9 @@ function TransportButton({
         padding: 0,
         background: 'none',
         border: 'none',
-        color: active ? '#ff375f' : 'var(--player-subtle-text)',
+        // v1.4.13-pre1：激活态原为硬编码 #ff375f，不随主题变色（顺序播放按钮因此一直是粉色）。
+        // 改用主题主色，与其它主控件口径统一。
+        color: active ? 'var(--color-primary)' : 'var(--player-subtle-text)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -661,7 +663,7 @@ function IconButton({
       whileHover={{
         scale: 1.04,
         backgroundColor: active ? 'rgba(255, 55, 95, 0.16)' : 'var(--player-hover)',
-        color: active ? '#ff375f' : 'var(--player-text)',
+        color: active ? 'var(--color-primary)' : 'var(--player-text)',
       }}
       whileTap={{ scale: 0.9 }}
       transition={{ duration: 0.18 }}
@@ -672,7 +674,7 @@ function IconButton({
         borderRadius: 999,
         border: 'none',
         background: active ? 'rgba(255, 55, 95, 0.12)' : 'transparent',
-        color: active ? '#ff375f' : 'var(--player-subtle-text)',
+        color: active ? 'var(--color-primary)' : 'var(--player-subtle-text)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',

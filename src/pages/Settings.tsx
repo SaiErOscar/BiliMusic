@@ -37,6 +37,7 @@ import { useAppSettings } from '@/hooks/useAppSettings'
 import { selectDownloadFolder } from '@/services/api'
 import { isMvExportSupported } from '@/services/mvExport'
 import { AI_PRESETS, aiUnsupportedReason, getAiConfig, isAiSupported, saveAiConfig, testAiConnection } from '@/services/ai'
+import { clearUsage, formatUsage, loadUsage } from '@/services/aiUsage'
 import type { AiSettings } from '@/types'
 import { platform, isNativeApp } from '@/platform'
 import { usePlayer, useSleepRemainingText, formatMediaKeyName } from '@/contexts/PlayerContext'
@@ -124,6 +125,37 @@ export default function Settings() {
   })
   const [aiMessage, setAiMessage] = useState('')
   const [aiTesting, setAiTesting] = useState(false)
+
+  // v1.4.13-pre1 用户画像：外部文件编辑 + 学习记录
+  const [profileMessage, setProfileMessage] = useState('')
+
+  // v1.4.13-pre1 AI 用量统计（本地，估算值）
+  const [usageText, setUsageText] = useState(() => formatUsage(loadUsage()))
+
+  const openProfile = async () => {
+    const cap = platform.userProfile
+    if (!cap) { setProfileMessage('当前平台不支持'); return }
+    const r = await cap.open()
+    setProfileMessage(r.ok ? '已用系统编辑器打开画像文件，保存后即刻生效' : (r.message || '打开失败'))
+  }
+  const revealProfile = async () => {
+    const cap = platform.userProfile
+    if (!cap) return
+    const r = await cap.reveal()
+    setProfileMessage(r.ok ? '已在文件管理器中定位画像文件' : (r.message || '定位失败'))
+  }
+  const applyLearned = async () => {
+    const cap = platform.userProfile
+    if (!cap) return
+    const r = await cap.applyLearned()
+    setProfileMessage(r.message)
+  }
+  const clearLearned = async () => {
+    const cap = platform.userProfile
+    if (!cap) return
+    await cap.clearLearned()
+    setProfileMessage('已清除学习记录（不影响你手写的画像）')
+  }
 
   useEffect(() => {
     if (!isAiSupported()) return
@@ -626,6 +658,125 @@ export default function Settings() {
 
 
         <div className="settings-column">
+          {/* v1.4.11-pre3 AI 底座：Provider 配置。密钥不写注册表、经 safeStorage 加密落盘，
+              并随「导出全部数据」一并导出。
+              放在右栏首位：组内 5 行，最小窗口下也落在首屏内。
+              v1.4.11-pre4：不再静默隐藏——能力缺失时显示一行原因，
+              否则 OTA 渲染补丁把渲染层锁旧版时，用户只会看到「设置里没有 AI」而无从排查。 */}
+          {!isAiSupported() ? (
+            <SettingsGroup title="AI 助手" icon={<Sparkles size={20} />}>
+              <SettingsRow label="不可用" stacked description={aiUnsupportedReason()}>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>AI 配置需要桌面端主进程支持</span>
+              </SettingsRow>
+            </SettingsGroup>
+          ) : (
+            <SettingsGroup title="AI 助手" icon={<Sparkles size={20} />}>
+              {/* v1.4.12-pre2 推荐触发方式：默认「点击后推荐」，非点击不消耗 API */}
+              <SettingsRow label="推荐方式" description="发现页 AI 推荐板块的触发方式；点击方式不点不消耗 API">
+                <select
+                  className="settings-select"
+                  value={aiConfig.recommendMode}
+                  onChange={(e) => patchAiConfig({ recommendMode: e.target.value as AiSettings['recommendMode'] })}
+                >
+                  <option value="click">点击后推荐（省费用）</option>
+                  <option value="auto">自动推荐（打开即生成）</option>
+                  <option value="off">不推荐（不显示板块）</option>
+                </select>
+              </SettingsRow>
+              {/* 用户画像与「听歌画像」不同：后者由播放统计自动生成，这里由用户自己写。
+                  隐私口径写进 description，不单占一行（板块有 7 行上限）。 */}
+              <SettingsRow
+                label="用户画像"
+                description={profileMessage || '点「编辑」用系统编辑器打开本地文件修改。与「听歌画像」不同：后者由播放统计自动生成，这里由你写。只存本地，仅在使用 AI 功能时发送给你配置的 AI 服务商，绝不上传开发者'}
+              >
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <ActionButton onClick={() => void openProfile()}>编辑</ActionButton>
+                  <ActionButton onClick={() => void revealProfile()}>定位文件</ActionButton>
+                  <ActionButton onClick={() => void applyLearned()}>应用学习结果</ActionButton>
+                  <ActionButton onClick={() => void clearLearned()}>清除学习记录</ActionButton>
+                </div>
+              </SettingsRow>
+              {/* v1.4.11-pre5 智能歌单放在组首：配置行较长，放组尾会落到首屏之外 */}
+              <AiPlaylistPanel config={aiConfig} Row={SettingsRow} />
+              {/* v1.4.12-pre1 听歌画像 */}
+              <AiPortraitPanel config={aiConfig} Row={SettingsRow} />
+              <SettingsRow label="服务预设" description="OpenAI 兼容格式；选预设填入地址与模型，仍可手改">
+                <select
+                  className="settings-select"
+                  value={AI_PRESETS.find((p) => p.baseUrl === aiConfig.baseUrl)?.id || ''}
+                  onChange={(e) => {
+                    const preset = AI_PRESETS.find((p) => p.id === e.target.value)
+                    if (preset) patchAiConfig({ baseUrl: preset.baseUrl, model: preset.model })
+                  }}
+                >
+                  <option value="">自定义</option>
+                  {AI_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                </select>
+              </SettingsRow>
+              <SettingsRow label="地址与模型" stacked description="地址填到 /v1 即可，路径会自动补全">
+                <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+                  <input
+                    className="settings-input"
+                    type="url"
+                    placeholder="https://api.deepseek.com/v1"
+                    value={aiConfig.baseUrl}
+                    onChange={(e) => patchAiConfig({ baseUrl: e.target.value })}
+                  />
+                  <input
+                    className="settings-input"
+                    type="text"
+                    placeholder="deepseek-chat"
+                    value={aiConfig.model}
+                    onChange={(e) => patchAiConfig({ model: e.target.value })}
+                  />
+                </div>
+              </SettingsRow>
+              <SettingsRow label="API 密钥" stacked description="经系统加密后存本地，不写注册表、不进明文配置">
+                <input
+                  className="settings-input"
+                  type="password"
+                  placeholder="sk-..."
+                  value={aiConfig.apiKey}
+                  onChange={(e) => patchAiConfig({ apiKey: e.target.value })}
+                />
+              </SettingsRow>
+              {/* stacked：代理行同时有下拉与地址输入框，非 stacked 时说明文字被挤成逐字竖排（v1.4.9 踩过的坑） */}
+              <SettingsRow label="代理" stacked description="默认跟随系统代理；选手动后独占使用下方地址">
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
+                  <select
+                    className="settings-select"
+                    value={aiConfig.proxyMode}
+                    onChange={(e) => patchAiConfig({ proxyMode: e.target.value as AiSettings['proxyMode'] })}
+                  >
+                    <option value="system">跟随系统</option>
+                    <option value="manual">手动指定</option>
+                  </select>
+                  {aiConfig.proxyMode === 'manual' && (
+                    <input
+                      className="settings-input"
+                      type="text"
+                      placeholder="http://127.0.0.1:7890"
+                      value={aiConfig.proxyUrl}
+                      onChange={(e) => patchAiConfig({ proxyUrl: e.target.value })}
+                    />
+                  )}
+                </div>
+              </SettingsRow>
+              {/* v1.4.13-pre1 用量统计并入本行（板块有 7 行上限），description 同时承载状态与用量 */}
+              <SettingsRow label="保存与测试" description={aiMessage || usageText || '先保存，再测试地址、密钥、模型与代理是否都通'}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <ActionButton onClick={() => void persistAiConfig(aiConfig)}>保存</ActionButton>
+                  <ActionButton onClick={() => void runAiTest()} disabled={aiTesting}>
+                    {aiTesting ? '测试中…' : '测试连接'}
+                  </ActionButton>
+                  <ActionButton onClick={() => { clearUsage(); setUsageText(formatUsage(loadUsage())) }}>清零用量</ActionButton>
+                </div>
+              </SettingsRow>
+            </SettingsGroup>
+          )}
+
 
 
 
@@ -714,124 +865,6 @@ export default function Settings() {
             </SettingsRow>
           </SettingsGroup>
 
-          {/* v1.4.11-pre3 AI 底座：Provider 配置。密钥不写注册表、经 safeStorage 加密落盘，
-              并随「导出全部数据」一并导出。
-              放在右栏首位：组内 5 行，最小窗口下也落在首屏内。
-              v1.4.11-pre4：不再静默隐藏——能力缺失时显示一行原因，
-              否则 OTA 渲染补丁把渲染层锁旧版时，用户只会看到「设置里没有 AI」而无从排查。 */}
-          {!isAiSupported() ? (
-            <SettingsGroup title="AI 助手" icon={<Sparkles size={20} />}>
-              <SettingsRow label="不可用" stacked description={aiUnsupportedReason()}>
-                <span style={{ fontSize: 12, opacity: 0.7 }}>AI 配置需要桌面端主进程支持</span>
-              </SettingsRow>
-            </SettingsGroup>
-          ) : (
-            <SettingsGroup title="AI 助手" icon={<Sparkles size={20} />}>
-              {/* v1.4.12-pre2 推荐触发方式：默认「点击后推荐」，非点击不消耗 API */}
-              <SettingsRow label="推荐方式" description="发现页 AI 推荐板块的触发方式；点击方式不点不消耗 API">
-                <select
-                  className="settings-select"
-                  value={aiConfig.recommendMode}
-                  onChange={(e) => patchAiConfig({ recommendMode: e.target.value as AiSettings['recommendMode'] })}
-                >
-                  <option value="click">点击后推荐（省费用）</option>
-                  <option value="auto">自动推荐（打开即生成）</option>
-                  <option value="off">不推荐（不显示板块）</option>
-                </select>
-              </SettingsRow>
-              {/* 用户画像与「听歌画像」不同：后者由播放统计自动生成，这里由用户自己写。
-                  隐私口径写进 description，不单占一行（板块有 7 行上限）。 */}
-              <SettingsRow
-                label="用户画像"
-                stacked
-                description="你对自己的描述，让推荐更贴合。与「听歌画像」不同：后者由播放统计自动生成，这里由你写。只存本地，仅在使用 AI 功能时发送给你配置的 AI 服务商，绝不上传开发者"
-              >
-                <textarea
-                  className="settings-input"
-                  rows={3}
-                  placeholder="例如：喜欢安静的女声和钢琴，写代码时不想听人声，讨厌过于吵闹的电子乐"
-                  value={aiConfig.userProfile.text}
-                  onChange={(e) => patchAiConfig({ userProfile: { text: e.target.value, updatedAt: new Date().toISOString() } })}
-                />
-              </SettingsRow>
-              {/* v1.4.11-pre5 智能歌单放在组首：配置行较长，放组尾会落到首屏之外 */}
-              <AiPlaylistPanel config={aiConfig} Row={SettingsRow} />
-              {/* v1.4.12-pre1 听歌画像 */}
-              <AiPortraitPanel config={aiConfig} Row={SettingsRow} />
-              <SettingsRow label="服务预设" description="OpenAI 兼容格式；选预设填入地址与模型，仍可手改">
-                <select
-                  className="settings-select"
-                  value={AI_PRESETS.find((p) => p.baseUrl === aiConfig.baseUrl)?.id || ''}
-                  onChange={(e) => {
-                    const preset = AI_PRESETS.find((p) => p.id === e.target.value)
-                    if (preset) patchAiConfig({ baseUrl: preset.baseUrl, model: preset.model })
-                  }}
-                >
-                  <option value="">自定义</option>
-                  {AI_PRESETS.map((p) => (
-                    <option key={p.id} value={p.id}>{p.label}</option>
-                  ))}
-                </select>
-              </SettingsRow>
-              <SettingsRow label="地址与模型" stacked description="地址填到 /v1 即可，路径会自动补全">
-                <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-                  <input
-                    className="settings-input"
-                    type="url"
-                    placeholder="https://api.deepseek.com/v1"
-                    value={aiConfig.baseUrl}
-                    onChange={(e) => patchAiConfig({ baseUrl: e.target.value })}
-                  />
-                  <input
-                    className="settings-input"
-                    type="text"
-                    placeholder="deepseek-chat"
-                    value={aiConfig.model}
-                    onChange={(e) => patchAiConfig({ model: e.target.value })}
-                  />
-                </div>
-              </SettingsRow>
-              <SettingsRow label="API 密钥" stacked description="经系统加密后存本地，不写注册表、不进明文配置">
-                <input
-                  className="settings-input"
-                  type="password"
-                  placeholder="sk-..."
-                  value={aiConfig.apiKey}
-                  onChange={(e) => patchAiConfig({ apiKey: e.target.value })}
-                />
-              </SettingsRow>
-              {/* stacked：代理行同时有下拉与地址输入框，非 stacked 时说明文字被挤成逐字竖排（v1.4.9 踩过的坑） */}
-              <SettingsRow label="代理" stacked description="默认跟随系统代理；选手动后独占使用下方地址">
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
-                  <select
-                    className="settings-select"
-                    value={aiConfig.proxyMode}
-                    onChange={(e) => patchAiConfig({ proxyMode: e.target.value as AiSettings['proxyMode'] })}
-                  >
-                    <option value="system">跟随系统</option>
-                    <option value="manual">手动指定</option>
-                  </select>
-                  {aiConfig.proxyMode === 'manual' && (
-                    <input
-                      className="settings-input"
-                      type="text"
-                      placeholder="http://127.0.0.1:7890"
-                      value={aiConfig.proxyUrl}
-                      onChange={(e) => patchAiConfig({ proxyUrl: e.target.value })}
-                    />
-                  )}
-                </div>
-              </SettingsRow>
-              <SettingsRow label="保存与测试" description={aiMessage || '先保存，再测试地址、密钥、模型与代理是否都通'}>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <ActionButton onClick={() => void persistAiConfig(aiConfig)}>保存</ActionButton>
-                  <ActionButton onClick={() => void runAiTest()} disabled={aiTesting}>
-                    {aiTesting ? '测试中…' : '测试连接'}
-                  </ActionButton>
-                </div>
-              </SettingsRow>
-            </SettingsGroup>
-          )}
         </div>
 
           {/* 账号与关于横跨整行（.settings-span → grid-column: 1 / -1），保持两栏通栏布局 */}

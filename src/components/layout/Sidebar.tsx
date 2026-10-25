@@ -441,7 +441,7 @@ export default function Sidebar() {
                     border: 'none',
                     borderRadius: 8,
                     background: 'transparent',
-                    color: '#ff375f',
+                    color: 'var(--color-primary)',
                     fontSize: 13,
                     fontWeight: 500,
                     cursor: 'pointer',

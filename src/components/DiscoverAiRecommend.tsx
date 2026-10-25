@@ -8,9 +8,10 @@
  *
  * 组件自己管请求与错误态，不污染 Discover 页的数据流。
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Sparkles, RefreshCw } from 'lucide-react'
 import { getAiConfig, isAiSupported } from '@/services/ai'
+import { platform } from '@/platform'
 import { generateRecommendation, type AiRecommendation } from '@/services/aiRecommend'
 import { usePlayer } from '@/contexts/PlayerContext'
 import { toHttpsUrl } from '@/services/bilibiliApi'
@@ -27,6 +28,8 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [data, setData] = useState<AiRecommendation | null>(null)
+  /** v1.4.13-pre1：本轮已播放过的曲目 id，用于判定哪些被跳过 */
+  const playedRef = useRef<Set<string>>(new Set())
 
   // 读取设置（模式与 Provider 配置都在这）
   useEffect(() => {
@@ -41,6 +44,15 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
 
   const load = useCallback(async () => {
     if (!settings) return
+    // v1.4.13-pre1 学习信号：换一批时把上一批里「一首都没播」的记作跳过
+    if (data && platform.userProfile) {
+      for (const t of data.tracks) {
+        if (!playedRef.current.has(t.id)) {
+          void platform.userProfile.record('skipped', t.artist + '|' + t.title).catch(() => {})
+        }
+      }
+    }
+    playedRef.current = new Set()
     setBusy(true)
     setError('')
     try {
@@ -110,6 +122,9 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
                 onPlayTrack(t)
                 // 顺手加入播放队列，避免只播一首就停
                 if (!player.queue.some((q) => q.id === t.id)) player.addToQueue(t)
+                // v1.4.13-pre1 学习信号：记下「被播放」，与跳过互斥
+                playedRef.current.add(t.id)
+                void platform.userProfile?.record('played', t.artist + '|' + t.title).catch(() => {})
               }}
             >
               <img src={toHttpsUrl(t.coverUrl)} alt="" loading="lazy" />

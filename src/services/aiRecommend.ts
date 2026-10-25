@@ -14,7 +14,49 @@ import { aiChat } from '@/services/ai'
 import { summarize, renderSummary } from '@/services/aiPortrait'
 import { loadPlayStats } from '@/utils/storage'
 import { buildCandidatePool, type AiPlaylistCandidate } from '@/services/aiPlaylist'
+import { platform } from '@/platform'
 import type { AiSettings, Track } from '@/types'
+
+/**
+ * v1.4.13-pre1 读取画像上下文：手写画像（外部文件）+ 学习信号摘要。
+ *
+ * 每次调用都现读文件而不是缓存——用户用编辑器改完即刻生效，
+ * 这正是把画像搬出设置页的初衷。读不到就返回空，不阻断 AI 功能。
+ */
+export async function loadProfileContext(): Promise<{ profile: string; learned: string }> {
+  const cap = platform.userProfile
+  if (!cap) return { profile: '', learned: '' }
+  try {
+    const [read, learnedRaw] = await Promise.all([cap.read(), cap.getLearned()])
+    const learned = renderLearnedSummary(learnedRaw)
+    return { profile: (read?.text || '').trim(), learned }
+  } catch {
+    return { profile: '', learned: '' }
+  }
+}
+
+/** 把学习信号渲染成紧凑文本（渲染逻辑与主进程保持同一口径） */
+function renderLearnedSummary(raw: unknown): string {
+  const s = raw as
+    | { played?: Record<string, number>; skipped?: Record<string, number>; playlistSaved?: { times: number; tracks: number }; lyricReverted?: number }
+    | null
+  if (!s) return ''
+  const top = (rec?: Record<string, number>) =>
+    Object.entries(rec || {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([k, v]) => k + ' ×' + v)
+  const lines: string[] = []
+  const played = top(s.played)
+  const skipped = top(s.skipped)
+  if (played.length) lines.push('常被播放：' + played.join('、'))
+  if (skipped.length) lines.push('常被跳过：' + skipped.join('、'))
+  if (s.playlistSaved && s.playlistSaved.times > 0) {
+    lines.push('AI 歌单被保存 ' + s.playlistSaved.times + ' 次，累计 ' + s.playlistSaved.tracks + ' 首')
+  }
+  if (s.lyricReverted && s.lyricReverted > 0) lines.push('歌词增强被还原 ' + s.lyricReverted + ' 次')
+  return lines.join('\n')
+}
 
 export interface AiRecommendation {
   /** 问候语（结合时段与环境，一两句） */
@@ -94,7 +136,8 @@ export async function generateRecommendation(input: RecommendInput): Promise<AiR
   const ctx = timeContext(now)
   const portrait = summarize(loadPlayStats(), 'month')
   const hasHistory = portrait.totalPlays > 0
-  const userText = (settings.userProfile?.text || '').trim()
+  // v1.4.13-pre1：画像改读外部文件 + 学习信号，不再从 settings 里取
+  const { profile: userText, learned } = await loadProfileContext()
 
   const system = [
     '你是音乐 App 的推荐助手。请像朋友打招呼一样，先写一两句问候，再推荐几首歌。',
@@ -109,12 +152,13 @@ export async function generateRecommendation(input: RecommendInput): Promise<AiR
   const userLines = [
     '当前时间：' + ctx.label + '（' + ctx.hour + ' 点）',
     '用户自述偏好：' + (userText || '（未填写）'),
+    learned ? '从使用中观察到的偏好：\n' + learned : '',
     '最近一个月的听歌状况：',
     hasHistory ? renderSummary(portrait, 'month') : '（暂无播放记录）',
     '',
     '候选曲目：',
     pool.map((c) => c.index + '. ' + c.track.title + (c.track.artist ? ' - ' + c.track.artist : '')).join('\n'),
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 
   const reply = await aiChat(settings, {
     messages: [

@@ -40,6 +40,22 @@ export const electronPlatform: Platform = {
       ? { platform: a.platform, persistentStorage: a.persistentStorage, notifyRendererReady: a.notifyRendererReady }
       : undefined
   },
+  /** v1.4.13-pre1 用户画像：外部文件编辑 + 学习记录 */
+  get userProfile() {
+    const a = api()
+    return a?.userProfile
+      ? {
+          read: a.userProfile.read,
+          open: a.userProfile.open,
+          reveal: a.userProfile.reveal,
+          getLearned: a.userProfile.getLearned,
+          applyLearned: a.userProfile.applyLearned,
+          clearLearned: a.userProfile.clearLearned,
+          record: a.userProfile.record,
+          recordPlaylist: a.userProfile.recordPlaylist,
+        }
+      : undefined
+  },
   /** v1.4.11-pre3 AI 底座：Provider 配置读写（密钥在主进程 safeStorage 加密落盘） */
   get aiConfig() {
     const a = api()

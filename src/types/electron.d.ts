@@ -307,6 +307,17 @@ declare global {
       deleteBackupFile?: (filePath: string) => Promise<{ ok: boolean; message?: string }>
       platform: string
       persistentStorage?: PersistentStorageApi
+      /** v1.4.13-pre1 用户画像：外部文件编辑 + 学习记录 */
+      userProfile?: {
+        read: () => Promise<{ text: string; path: string }>
+        open: () => Promise<{ ok: boolean; path?: string; message?: string }>
+        reveal: () => Promise<{ ok: boolean; path?: string; message?: string }>
+        getLearned: () => Promise<unknown>
+        applyLearned: () => Promise<{ ok: boolean; message: string }>
+        clearLearned: () => Promise<{ ok: boolean }>
+        record: (kind: 'played' | 'skipped' | 'lyricReverted', key?: string) => Promise<{ ok: boolean }>
+        recordPlaylist: (tracks: number) => Promise<{ ok: boolean }>
+      }
       /** v1.4.11-pre3 AI 底座：Provider 配置读写（密钥在主进程经 safeStorage 加密落盘） */
       aiConfig?: {
         get: () => Promise<import('./index').AiSettings>

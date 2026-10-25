@@ -73,6 +73,21 @@ export interface PlatformRuntime {
  * v1.4.11-pre3 AI 底座能力：Provider 配置读写。
  * 密钥在主进程经 safeStorage 加密落盘，渲染层只做透传；非桌面平台缺失即视为不支持 AI。
  */
+/**
+ * v1.4.13-pre1 用户画像外部文件：读取 / 打开 / 学习记录。
+ * 画像存 userData/user-profile.md，用系统编辑器改；应用只在显式「应用学习结果」时追加。
+ */
+export interface PlatformUserProfile {
+  read: () => Promise<{ text: string; path: string }>
+  open: () => Promise<{ ok: boolean; path?: string; message?: string }>
+  reveal: () => Promise<{ ok: boolean; path?: string; message?: string }>
+  getLearned: () => Promise<unknown>
+  applyLearned: () => Promise<{ ok: boolean; message: string }>
+  clearLearned: () => Promise<{ ok: boolean }>
+  record: (kind: 'played' | 'skipped' | 'lyricReverted', key?: string) => Promise<{ ok: boolean }>
+  recordPlaylist: (tracks: number) => Promise<{ ok: boolean }>
+}
+
 export interface PlatformAiConfig {
   get: () => Promise<AiSettings>
   set: (config: AiSettings) => Promise<{ ok: boolean }>
@@ -241,4 +256,6 @@ export interface Platform {
   mediaKeys?: PlatformMediaKeys
   /** v1.4.11-pre3 AI 底座：Provider 配置（密钥经 safeStorage 加密，桌面端专属） */
   aiConfig?: PlatformAiConfig
+  /** v1.4.13-pre1 用户画像外部文件 + 学习记录 */
+  userProfile?: PlatformUserProfile
 }

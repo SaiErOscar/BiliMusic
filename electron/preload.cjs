@@ -101,6 +101,18 @@ const aiConfig = {
   set: (config) => ipcRenderer.invoke('ai:set-config', config),
 }
 
+// v1.4.13-pre1 用户画像：外部文件编辑 + 学习记录
+const userProfile = {
+  read: () => ipcRenderer.invoke('profile:read'),
+  open: () => ipcRenderer.invoke('profile:open'),
+  reveal: () => ipcRenderer.invoke('profile:reveal'),
+  getLearned: () => ipcRenderer.invoke('profile:get-learned'),
+  applyLearned: () => ipcRenderer.invoke('profile:apply-learned'),
+  clearLearned: () => ipcRenderer.invoke('profile:clear-learned'),
+  record: (kind, key) => ipcRenderer.invoke('profile:record', kind, key),
+  recordPlaylist: (tracks) => ipcRenderer.invoke('profile:record-playlist', tracks),
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
@@ -198,6 +210,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   persistentStorage,
   aiConfig,
+  userProfile,
   biliApi,
   lyricsApi,
 })

@@ -263,7 +263,7 @@ export default function PlayQueue({ open, onClose }: { open: boolean; onClose: (
                       padding: '0 14px',
                       border: 'none',
                       borderRadius: 999,
-                      background: selected.size === 0 ? 'var(--queue-row-active)' : '#ff375f',
+                      background: selected.size === 0 ? 'var(--queue-row-active)' : 'var(--color-primary)',
                       color: selected.size === 0 ? 'var(--queue-text-4)' : '#fff',
                       display: 'flex',
                       alignItems: 'center',
@@ -503,7 +503,7 @@ function Equalizer({ active }: { active: boolean }) {
           style={{
             width: 3,
             borderRadius: 999,
-            background: '#ff375f',
+            background: 'var(--color-primary)',
             boxShadow: '0 0 10px rgba(255, 55, 95, 0.65)',
           }}
         />
@@ -516,8 +516,8 @@ function SelectionBox({ selected, disabled }: { selected: boolean; disabled: boo
   return (
     <motion.span
       animate={{
-        backgroundColor: selected ? '#ff375f' : 'var(--queue-selbox-bg)',
-        borderColor: selected ? '#ff375f' : 'var(--queue-selbox-border)',
+        backgroundColor: selected ? 'var(--color-primary)' : 'var(--queue-selbox-bg)',
+        borderColor: selected ? 'var(--color-primary)' : 'var(--queue-selbox-border)',
       }}
       style={{
         width: 16,
@@ -569,7 +569,7 @@ function IconButton({
   danger?: boolean
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void
 }) {
-  const activeColor = danger ? '#ff453a' : '#ff375f'
+  const activeColor = danger ? '#ff453a' : 'var(--color-primary)'
 
   return (
     <motion.button

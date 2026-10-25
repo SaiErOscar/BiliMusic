@@ -11,6 +11,7 @@ import { registerSystemFontsHandlers } from './systemFonts'
 import { registerColorPickerHandlers } from './colorPicker'
 import { registerBackupHandlers } from './backup'
 import { registerAiHandlers } from './ai'
+import { registerProfileHandlers } from './profile'
 import { registerMvExportHandlers, killMvExportChildren } from './mvExport'
 import { registerMediaKeysIpc, unregisterAllMediaKeys } from './mediaKeys'
 
@@ -731,6 +732,8 @@ app.whenReady().then(() => {
   registerMvExportHandlers()
   // v1.4.11-pre3 AI 底座：Provider 配置（safeStorage 加密落盘）+ 代理下发
   registerAiHandlers()
+  // v1.4.13-pre1 用户画像外部文件 + 学习记录
+  registerProfileHandlers()
   registerMediaKeysIpc(() => mainWindow)
   registerMiniWindowHandlers({
     getMainWindow: () => mainWindow,
