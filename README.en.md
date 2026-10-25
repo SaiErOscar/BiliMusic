@@ -7,7 +7,7 @@
   <p>
     <a href="./README.md">中文</a>
     ·
-    <a href="./docs/CHANGELOG.md">Changelog v1.0.1 → v1.4.10</a>
+    <a href="./docs/CHANGELOG.md">Changelog v1.0.1 → v1.4.11</a>
     ·
     <a href="#-getting-started">Getting Started</a>
     ·
