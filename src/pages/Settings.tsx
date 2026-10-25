@@ -37,7 +37,7 @@ import { useAppSettings } from '@/hooks/useAppSettings'
 import { selectDownloadFolder } from '@/services/api'
 import { isMvExportSupported } from '@/services/mvExport'
 import { AI_PRESETS, aiUnsupportedReason, getAiConfig, isAiSupported, saveAiConfig, testAiConnection } from '@/services/ai'
-import type { AiProviderConfig } from '@/types'
+import type { AiSettings } from '@/types'
 import { platform, isNativeApp } from '@/platform'
 import { usePlayer, useSleepRemainingText, formatMediaKeyName } from '@/contexts/PlayerContext'
 import { SLEEP_PRESET_MINUTES } from '@/utils/sleepTimer'
@@ -118,8 +118,9 @@ export default function Settings() {
   const [appVersion, setAppVersion] = useState('1.0.0')
 
   // v1.4.11-pre3 AI 底座：Provider 配置（密钥存主进程，经 safeStorage 加密落盘）
-  const [aiConfig, setAiConfig] = useState<AiProviderConfig>({
+  const [aiConfig, setAiConfig] = useState<AiSettings>({
     baseUrl: '', model: '', apiKey: '', proxyMode: 'system', proxyUrl: '',
+    recommendMode: 'click', userProfile: { text: '', updatedAt: '' },
   })
   const [aiMessage, setAiMessage] = useState('')
   const [aiTesting, setAiTesting] = useState(false)
@@ -129,9 +130,9 @@ export default function Settings() {
     void getAiConfig().then(setAiConfig).catch(() => {})
   }, [])
 
-  const patchAiConfig = (patch: Partial<AiProviderConfig>) => setAiConfig((c) => ({ ...c, ...patch }))
+  const patchAiConfig = (patch: Partial<AiSettings>) => setAiConfig((c) => ({ ...c, ...patch }))
 
-  const persistAiConfig = async (next: AiProviderConfig) => {
+  const persistAiConfig = async (next: AiSettings) => {
     try {
       await saveAiConfig(next)
       setAiMessage('已保存')
@@ -323,6 +324,9 @@ export default function Settings() {
       */}
       <div className="settings-grid">
         <div className="settings-column">
+
+
+        
           <SettingsGroup title="外观" icon={<Palette size={20} />}>
             <SettingsRow label="主题模式">
               <SegmentedControl
@@ -477,182 +481,6 @@ export default function Settings() {
             </SettingsRow>
           </SettingsGroup>
 
-          {/* v1.4.9-pre4 桌面歌词板块：歌词窗外观（配色/字号/粗细/字体/样式预设）。
-              放左栏与「外观」相邻——两者都是「视觉呈现」，语义连贯且高度配平。 */}
-          {!isNativeApp() && (
-            <SettingsGroup title="桌面歌词" icon={<AlignLeft size={20} />}>
-              <SettingsRow label="歌词文字颜色" description="桌面歌词的文字颜色（自动：从视频封面提主色）">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
-                  <ToggleSwitch checked={settings.autoTextColor} onChange={() => setAppSettings({ autoTextColor: !settings.autoTextColor })} />
-                  <ColorField value={settings.autoTextColor && settings.autoLyricTextColor ? settings.autoLyricTextColor : settings.lyricTextColor} onChange={(lyricTextColor) => setAppSettings({ lyricTextColor })} title={settings.autoTextColor ? '已启用自动颜色（封面提色）' : '点击从屏幕拾取文字颜色'} disabled={settings.autoTextColor} />
-                </div>
-              </SettingsRow>
-              <SettingsRow label="歌词按钮颜色" description="桌面歌词的播放/上一首等按钮颜色（自动：每 5 秒采样窗周围背景取对比色）">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
-                  <ToggleSwitch checked={settings.autoControlColor} onChange={() => setAppSettings({ autoControlColor: !settings.autoControlColor })} />
-                  <ColorField value={settings.autoControlColor && settings.autoLyricControlColor ? settings.autoLyricControlColor : settings.lyricControlColor} onChange={(lyricControlColor) => setAppSettings({ lyricControlColor })} title={settings.autoControlColor ? '已启用自动颜色（背景采样）' : '点击从屏幕拾取按钮颜色'} disabled={settings.autoControlColor} />
-                </div>
-              </SettingsRow>
-              <SettingsRow label="歌词字号" description="桌面歌词的文字大小（18-60px，桌面歌词窗内也可调）">
-                <input type="range" min={18} max={60} step={1} value={settings.lyricFontSize} onChange={(e) => setAppSettings({ lyricFontSize: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
-                <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontSize}</span>
-              </SettingsRow>
-              <SettingsRow label="歌词粗细" description="桌面歌词的文字粗细（400-900，桌面歌词窗内也可调）">
-                <input type="range" min={400} max={900} step={20} value={settings.lyricFontWeight} onChange={(e) => setAppSettings({ lyricFontWeight: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
-                <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontWeight}</span>
-              </SettingsRow>
-              <SettingsRow label="歌词字体" description="桌面歌词使用的字体（桌面歌词窗内也可调）">
-                <FontSelect value={settings.lyricFontFamily} onChange={(lyricFontFamily) => setAppSettings({ lyricFontFamily })} />
-              </SettingsRow>
-              <SettingsRow label="样式预设" description={lyricPresetMessage || `把当前歌词窗外观存为预设，最多 ${MAX_LYRIC_PRESETS} 个，同名覆盖`} stacked>
-                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-                  <input
-                    value={lyricPresetName}
-                    onChange={(e) => setLyricPresetName(e.target.value)}
-                    placeholder="预设名称"
-                    maxLength={MAX_PRESET_NAME_LENGTH}
-                    style={presetInputStyle}
-                  />
-                  <button type="button" onClick={saveLyricPreset} style={chipButtonStyle}>保存</button>
-                  {settings.lyricPresets.map((preset) => (
-                    <span key={preset.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                      <button type="button" onClick={() => applyLyricPreset(preset.id)} style={chipButtonStyle}>{preset.name}</button>
-                      <button type="button" onClick={() => deleteLyricPreset(preset.id)} title="删除预设" style={chipButtonStyle}>×</button>
-                    </span>
-                  ))}
-                </div>
-              </SettingsRow>
-            </SettingsGroup>
-          )}
-
-          <SettingsGroup title="播放页" icon={<Monitor size={20} />}>
-            {/*
-              v1.4.11-pre3 修正：封面取景原先排在「播放页」组末尾，实测在 1280×720 及更矮窗口下
-              落在首屏之外（top=665 / 容器可视高 603），用户报障「设置里找不到」。移到组首，
-              让它在最小窗口下也位于首屏内；组内其余顺序不变。
-              播放页与 MV 导出共用同一设置，保证成片与屏幕观感一致。
-            */}
-            <SettingsRow label="封面显示方式" description="播放页与导出的 MV 共用：裁剪铺满方框 / 保持原比例完整显示 / 拉伸填满（变形）">
-              <select
-                className="settings-select"
-                value={settings.coverFit}
-                onChange={(e) => setAppSettings({ coverFit: e.target.value as typeof settings.coverFit })}
-              >
-                <option value="cover">裁剪（铺满方框）</option>
-                <option value="contain">保持原比例（可能留白）</option>
-                <option value="fill">拉伸（填满，会变形）</option>
-              </select>
-            </SettingsRow>
-            {/* v1.4.10-pre1 音频可视化：播放页与 MV 导出画面共用这一开关，小字里要说清它影响导出。
-                桌面端此时播放源会切为 Blob（Web Audio 需同源音频），起播延迟略增，故默认关。 */}
-            <SettingsRow label="音频可视化" description="播放页与导出的 MV 显示频谱柱状图（开启后起播与导出略慢；勾选 MV 无控件导出时不含）">
-              <ToggleSwitch checked={settings.audioVisualizer} onChange={() => setAppSettings({ audioVisualizer: !settings.audioVisualizer })} />
-            </SettingsRow>
-            <SettingsRow label="歌词显示" description="播放页自动显示歌词">
-              <ToggleSwitch checked={settings.showLyrics} onChange={() => setAppSettings({ showLyrics: !settings.showLyrics })} />
-            </SettingsRow>
-            {/* v1.4.9-pre2 歌词双语：目前只有网易云源带翻译（tlyric），其余源无译文时行为不变 */}
-            <SettingsRow label="歌词双语" description="歌词行下方显示译文（仅网易云源提供翻译）">
-              <ToggleSwitch checked={settings.lyricBilingual} onChange={() => setAppSettings({ lyricBilingual: !settings.lyricBilingual })} />
-            </SettingsRow>
-          </SettingsGroup>
-        </div>
-
-        <div className="settings-column">
-          {/* v1.4.11-pre3 AI 底座：Provider 配置。密钥不写注册表、经 safeStorage 加密落盘，
-              并随「导出全部数据」一并导出。
-              放在右栏首位：组内 5 行，最小窗口下也落在首屏内。
-              v1.4.11-pre4：不再静默隐藏——能力缺失时显示一行原因，
-              否则 OTA 渲染补丁把渲染层锁旧版时，用户只会看到「设置里没有 AI」而无从排查。 */}
-          {!isAiSupported() ? (
-            <SettingsGroup title="AI 助手" icon={<Sparkles size={20} />}>
-              <SettingsRow label="不可用" stacked description={aiUnsupportedReason()}>
-                <span style={{ fontSize: 12, opacity: 0.7 }}>AI 配置需要桌面端主进程支持</span>
-              </SettingsRow>
-            </SettingsGroup>
-          ) : (
-            <SettingsGroup title="AI 助手" icon={<Sparkles size={20} />}>
-              {/* v1.4.11-pre5 智能歌单放在组首：配置行较长，放组尾会落到首屏之外 */}
-              <AiPlaylistPanel config={aiConfig} Row={SettingsRow} />
-              {/* v1.4.12-pre1 听歌画像 */}
-              <AiPortraitPanel config={aiConfig} Row={SettingsRow} />
-              <SettingsRow label="服务预设" description="OpenAI 兼容格式；选预设填入地址与模型，仍可手改">
-                <select
-                  className="settings-select"
-                  value={AI_PRESETS.find((p) => p.baseUrl === aiConfig.baseUrl)?.id || ''}
-                  onChange={(e) => {
-                    const preset = AI_PRESETS.find((p) => p.id === e.target.value)
-                    if (preset) patchAiConfig({ baseUrl: preset.baseUrl, model: preset.model })
-                  }}
-                >
-                  <option value="">自定义</option>
-                  {AI_PRESETS.map((p) => (
-                    <option key={p.id} value={p.id}>{p.label}</option>
-                  ))}
-                </select>
-              </SettingsRow>
-              <SettingsRow label="地址与模型" stacked description="地址填到 /v1 即可，路径会自动补全">
-                <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-                  <input
-                    className="settings-input"
-                    type="url"
-                    placeholder="https://api.deepseek.com/v1"
-                    value={aiConfig.baseUrl}
-                    onChange={(e) => patchAiConfig({ baseUrl: e.target.value })}
-                  />
-                  <input
-                    className="settings-input"
-                    type="text"
-                    placeholder="deepseek-chat"
-                    value={aiConfig.model}
-                    onChange={(e) => patchAiConfig({ model: e.target.value })}
-                  />
-                </div>
-              </SettingsRow>
-              <SettingsRow label="API 密钥" stacked description="经系统加密后存本地，不写注册表、不进明文配置">
-                <input
-                  className="settings-input"
-                  type="password"
-                  placeholder="sk-..."
-                  value={aiConfig.apiKey}
-                  onChange={(e) => patchAiConfig({ apiKey: e.target.value })}
-                />
-              </SettingsRow>
-              {/* stacked：代理行同时有下拉与地址输入框，非 stacked 时说明文字被挤成逐字竖排（v1.4.9 踩过的坑） */}
-              <SettingsRow label="代理" stacked description="默认跟随系统代理；选手动后独占使用下方地址">
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
-                  <select
-                    className="settings-select"
-                    value={aiConfig.proxyMode}
-                    onChange={(e) => patchAiConfig({ proxyMode: e.target.value as AiProviderConfig['proxyMode'] })}
-                  >
-                    <option value="system">跟随系统</option>
-                    <option value="manual">手动指定</option>
-                  </select>
-                  {aiConfig.proxyMode === 'manual' && (
-                    <input
-                      className="settings-input"
-                      type="text"
-                      placeholder="http://127.0.0.1:7890"
-                      value={aiConfig.proxyUrl}
-                      onChange={(e) => patchAiConfig({ proxyUrl: e.target.value })}
-                    />
-                  )}
-                </div>
-              </SettingsRow>
-              <SettingsRow label="保存与测试" description={aiMessage || '先保存，再测试地址、密钥、模型与代理是否都通'}>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <ActionButton onClick={() => void persistAiConfig(aiConfig)}>保存</ActionButton>
-                  <ActionButton onClick={() => void runAiTest()} disabled={aiTesting}>
-                    {aiTesting ? '测试中…' : '测试连接'}
-                  </ActionButton>
-                </div>
-              </SettingsRow>
-            </SettingsGroup>
-          )}
-
           <SettingsGroup title="下载" icon={<Download size={20} />}>
             <SettingsRow label="下载目录">
               <div className="settings-path">
@@ -791,6 +619,219 @@ export default function Settings() {
               {playlistTransferMessage && <span>{playlistTransferMessage}</span>}
             </div>
           </SettingsGroup>
+        </div>
+
+
+
+
+
+        <div className="settings-column">
+
+
+
+
+        
+          {!isNativeApp() && (
+            <SettingsGroup title="桌面歌词" icon={<AlignLeft size={20} />}>
+              <SettingsRow label="歌词文字颜色" description="桌面歌词的文字颜色（自动：从视频封面提主色）">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
+                  <ToggleSwitch checked={settings.autoTextColor} onChange={() => setAppSettings({ autoTextColor: !settings.autoTextColor })} />
+                  <ColorField value={settings.autoTextColor && settings.autoLyricTextColor ? settings.autoLyricTextColor : settings.lyricTextColor} onChange={(lyricTextColor) => setAppSettings({ lyricTextColor })} title={settings.autoTextColor ? '已启用自动颜色（封面提色）' : '点击从屏幕拾取文字颜色'} disabled={settings.autoTextColor} />
+                </div>
+              </SettingsRow>
+              <SettingsRow label="歌词按钮颜色" description="桌面歌词的播放/上一首等按钮颜色（自动：每 5 秒采样窗周围背景取对比色）">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
+                  <ToggleSwitch checked={settings.autoControlColor} onChange={() => setAppSettings({ autoControlColor: !settings.autoControlColor })} />
+                  <ColorField value={settings.autoControlColor && settings.autoLyricControlColor ? settings.autoLyricControlColor : settings.lyricControlColor} onChange={(lyricControlColor) => setAppSettings({ lyricControlColor })} title={settings.autoControlColor ? '已启用自动颜色（背景采样）' : '点击从屏幕拾取按钮颜色'} disabled={settings.autoControlColor} />
+                </div>
+              </SettingsRow>
+              <SettingsRow label="歌词字号" description="桌面歌词的文字大小（18-60px，桌面歌词窗内也可调）">
+                <input type="range" min={18} max={60} step={1} value={settings.lyricFontSize} onChange={(e) => setAppSettings({ lyricFontSize: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
+                <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontSize}</span>
+              </SettingsRow>
+              <SettingsRow label="歌词粗细" description="桌面歌词的文字粗细（400-900，桌面歌词窗内也可调）">
+                <input type="range" min={400} max={900} step={20} value={settings.lyricFontWeight} onChange={(e) => setAppSettings({ lyricFontWeight: Number(e.target.value) })} style={{ width: 140, accentColor: 'var(--color-primary)' }} />
+                <span style={{ marginLeft: 8, minWidth: 32, display: 'inline-block' }}>{settings.lyricFontWeight}</span>
+              </SettingsRow>
+              <SettingsRow label="歌词字体" description="桌面歌词使用的字体（桌面歌词窗内也可调）">
+                <FontSelect value={settings.lyricFontFamily} onChange={(lyricFontFamily) => setAppSettings({ lyricFontFamily })} />
+              </SettingsRow>
+              <SettingsRow label="样式预设" description={lyricPresetMessage || `把当前歌词窗外观存为预设，最多 ${MAX_LYRIC_PRESETS} 个，同名覆盖`} stacked>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+                  <input
+                    value={lyricPresetName}
+                    onChange={(e) => setLyricPresetName(e.target.value)}
+                    placeholder="预设名称"
+                    maxLength={MAX_PRESET_NAME_LENGTH}
+                    style={presetInputStyle}
+                  />
+                  <button type="button" onClick={saveLyricPreset} style={chipButtonStyle}>保存</button>
+                  {settings.lyricPresets.map((preset) => (
+                    <span key={preset.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                      <button type="button" onClick={() => applyLyricPreset(preset.id)} style={chipButtonStyle}>{preset.name}</button>
+                      <button type="button" onClick={() => deleteLyricPreset(preset.id)} title="删除预设" style={chipButtonStyle}>×</button>
+                    </span>
+                  ))}
+                </div>
+              </SettingsRow>
+            </SettingsGroup>
+          )}
+
+          {/* v1.4.9-pre4 桌面歌词板块：歌词窗外观（配色/字号/粗细/字体/样式预设）。
+              放左栏与「外观」相邻——两者都是「视觉呈现」，语义连贯且高度配平。 */}
+
+          <SettingsGroup title="播放页" icon={<Monitor size={20} />}>
+            {/*
+              v1.4.11-pre3 修正：封面取景原先排在「播放页」组末尾，实测在 1280×720 及更矮窗口下
+              落在首屏之外（top=665 / 容器可视高 603），用户报障「设置里找不到」。移到组首，
+              让它在最小窗口下也位于首屏内；组内其余顺序不变。
+              播放页与 MV 导出共用同一设置，保证成片与屏幕观感一致。
+            */}
+            <SettingsRow label="封面显示方式" description="播放页与导出的 MV 共用：裁剪铺满方框 / 保持原比例完整显示 / 拉伸填满（变形）">
+              <select
+                className="settings-select"
+                value={settings.coverFit}
+                onChange={(e) => setAppSettings({ coverFit: e.target.value as typeof settings.coverFit })}
+              >
+                <option value="cover">裁剪（铺满方框）</option>
+                <option value="contain">保持原比例（可能留白）</option>
+                <option value="fill">拉伸（填满，会变形）</option>
+              </select>
+            </SettingsRow>
+            {/* v1.4.10-pre1 音频可视化：播放页与 MV 导出画面共用这一开关，小字里要说清它影响导出。
+                桌面端此时播放源会切为 Blob（Web Audio 需同源音频），起播延迟略增，故默认关。 */}
+            <SettingsRow label="音频可视化" description="播放页与导出的 MV 显示频谱柱状图（开启后起播与导出略慢；勾选 MV 无控件导出时不含）">
+              <ToggleSwitch checked={settings.audioVisualizer} onChange={() => setAppSettings({ audioVisualizer: !settings.audioVisualizer })} />
+            </SettingsRow>
+            <SettingsRow label="歌词显示" description="播放页自动显示歌词">
+              <ToggleSwitch checked={settings.showLyrics} onChange={() => setAppSettings({ showLyrics: !settings.showLyrics })} />
+            </SettingsRow>
+            {/* v1.4.9-pre2 歌词双语：目前只有网易云源带翻译（tlyric），其余源无译文时行为不变 */}
+            <SettingsRow label="歌词双语" description="歌词行下方显示译文（仅网易云源提供翻译）">
+              <ToggleSwitch checked={settings.lyricBilingual} onChange={() => setAppSettings({ lyricBilingual: !settings.lyricBilingual })} />
+            </SettingsRow>
+          </SettingsGroup>
+
+          {/* v1.4.11-pre3 AI 底座：Provider 配置。密钥不写注册表、经 safeStorage 加密落盘，
+              并随「导出全部数据」一并导出。
+              放在右栏首位：组内 5 行，最小窗口下也落在首屏内。
+              v1.4.11-pre4：不再静默隐藏——能力缺失时显示一行原因，
+              否则 OTA 渲染补丁把渲染层锁旧版时，用户只会看到「设置里没有 AI」而无从排查。 */}
+          {!isAiSupported() ? (
+            <SettingsGroup title="AI 助手" icon={<Sparkles size={20} />}>
+              <SettingsRow label="不可用" stacked description={aiUnsupportedReason()}>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>AI 配置需要桌面端主进程支持</span>
+              </SettingsRow>
+            </SettingsGroup>
+          ) : (
+            <SettingsGroup title="AI 助手" icon={<Sparkles size={20} />}>
+              {/* v1.4.12-pre2 推荐触发方式：默认「点击后推荐」，非点击不消耗 API */}
+              <SettingsRow label="推荐方式" description="发现页 AI 推荐板块的触发方式；点击方式不点不消耗 API">
+                <select
+                  className="settings-select"
+                  value={aiConfig.recommendMode}
+                  onChange={(e) => patchAiConfig({ recommendMode: e.target.value as AiSettings['recommendMode'] })}
+                >
+                  <option value="click">点击后推荐（省费用）</option>
+                  <option value="auto">自动推荐（打开即生成）</option>
+                  <option value="off">不推荐（不显示板块）</option>
+                </select>
+              </SettingsRow>
+              {/* 用户画像与「听歌画像」不同：后者由播放统计自动生成，这里由用户自己写。
+                  隐私口径写进 description，不单占一行（板块有 7 行上限）。 */}
+              <SettingsRow
+                label="用户画像"
+                stacked
+                description="你对自己的描述，让推荐更贴合。与「听歌画像」不同：后者由播放统计自动生成，这里由你写。只存本地，仅在使用 AI 功能时发送给你配置的 AI 服务商，绝不上传开发者"
+              >
+                <textarea
+                  className="settings-input"
+                  rows={3}
+                  placeholder="例如：喜欢安静的女声和钢琴，写代码时不想听人声，讨厌过于吵闹的电子乐"
+                  value={aiConfig.userProfile.text}
+                  onChange={(e) => patchAiConfig({ userProfile: { text: e.target.value, updatedAt: new Date().toISOString() } })}
+                />
+              </SettingsRow>
+              {/* v1.4.11-pre5 智能歌单放在组首：配置行较长，放组尾会落到首屏之外 */}
+              <AiPlaylistPanel config={aiConfig} Row={SettingsRow} />
+              {/* v1.4.12-pre1 听歌画像 */}
+              <AiPortraitPanel config={aiConfig} Row={SettingsRow} />
+              <SettingsRow label="服务预设" description="OpenAI 兼容格式；选预设填入地址与模型，仍可手改">
+                <select
+                  className="settings-select"
+                  value={AI_PRESETS.find((p) => p.baseUrl === aiConfig.baseUrl)?.id || ''}
+                  onChange={(e) => {
+                    const preset = AI_PRESETS.find((p) => p.id === e.target.value)
+                    if (preset) patchAiConfig({ baseUrl: preset.baseUrl, model: preset.model })
+                  }}
+                >
+                  <option value="">自定义</option>
+                  {AI_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                </select>
+              </SettingsRow>
+              <SettingsRow label="地址与模型" stacked description="地址填到 /v1 即可，路径会自动补全">
+                <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+                  <input
+                    className="settings-input"
+                    type="url"
+                    placeholder="https://api.deepseek.com/v1"
+                    value={aiConfig.baseUrl}
+                    onChange={(e) => patchAiConfig({ baseUrl: e.target.value })}
+                  />
+                  <input
+                    className="settings-input"
+                    type="text"
+                    placeholder="deepseek-chat"
+                    value={aiConfig.model}
+                    onChange={(e) => patchAiConfig({ model: e.target.value })}
+                  />
+                </div>
+              </SettingsRow>
+              <SettingsRow label="API 密钥" stacked description="经系统加密后存本地，不写注册表、不进明文配置">
+                <input
+                  className="settings-input"
+                  type="password"
+                  placeholder="sk-..."
+                  value={aiConfig.apiKey}
+                  onChange={(e) => patchAiConfig({ apiKey: e.target.value })}
+                />
+              </SettingsRow>
+              {/* stacked：代理行同时有下拉与地址输入框，非 stacked 时说明文字被挤成逐字竖排（v1.4.9 踩过的坑） */}
+              <SettingsRow label="代理" stacked description="默认跟随系统代理；选手动后独占使用下方地址">
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
+                  <select
+                    className="settings-select"
+                    value={aiConfig.proxyMode}
+                    onChange={(e) => patchAiConfig({ proxyMode: e.target.value as AiSettings['proxyMode'] })}
+                  >
+                    <option value="system">跟随系统</option>
+                    <option value="manual">手动指定</option>
+                  </select>
+                  {aiConfig.proxyMode === 'manual' && (
+                    <input
+                      className="settings-input"
+                      type="text"
+                      placeholder="http://127.0.0.1:7890"
+                      value={aiConfig.proxyUrl}
+                      onChange={(e) => patchAiConfig({ proxyUrl: e.target.value })}
+                    />
+                  )}
+                </div>
+              </SettingsRow>
+              <SettingsRow label="保存与测试" description={aiMessage || '先保存，再测试地址、密钥、模型与代理是否都通'}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <ActionButton onClick={() => void persistAiConfig(aiConfig)}>保存</ActionButton>
+                  <ActionButton onClick={() => void runAiTest()} disabled={aiTesting}>
+                    {aiTesting ? '测试中…' : '测试连接'}
+                  </ActionButton>
+                </div>
+              </SettingsRow>
+            </SettingsGroup>
+          )}
         </div>
 
           {/* 账号与关于横跨整行（.settings-span → grid-column: 1 / -1），保持两栏通栏布局 */}

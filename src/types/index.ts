@@ -154,6 +154,31 @@ export interface AiProviderConfig {
   proxyUrl: string
 }
 
+/**
+ * v1.4.12-pre2 推荐触发方式。
+ * auto = 打开发现页即生成；click = 点按钮才请求（默认，省费用）；off = 不显示推荐板块
+ */
+export type AiRecommendMode = 'auto' | 'click' | 'off'
+
+/**
+ * v1.4.12-pre2 用户画像 —— 与「听歌画像」是两件事：
+ * - 听歌画像：由播放统计自动聚合的听歌习惯摘要（只读、数据驱动）
+ * - 用户画像：用户可自行查看与修改的自我描述（偏好、场景、禁忌），用于个性化推荐
+ *
+ * 隐私口径（必须在 UI 写明）：**只存本地；仅在使用 AI 功能时随请求发送给你所配置的
+ * AI 服务商；绝不上传开发者**——本应用没有任何开发者侧上报通道。
+ */
+export interface AiUserProfile {
+  text: string
+  updatedAt: string
+}
+
+/** 完整 AI 设置 = Provider 配置 + 推荐模式 + 用户画像 */
+export interface AiSettings extends AiProviderConfig {
+  recommendMode: AiRecommendMode
+  userProfile: AiUserProfile
+}
+
 export type NavItem = {
   icon: string
   label: string

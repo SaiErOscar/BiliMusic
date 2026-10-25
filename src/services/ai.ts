@@ -10,7 +10,7 @@
  */
 
 import { platform } from '@/platform'
-import type { AiProviderConfig } from '@/types'
+import type { AiProviderConfig, AiSettings } from '@/types'
 
 /** 该环境是否支持 AI（桌面端才有主进程加密存储） */
 export function isAiSupported(): boolean {
@@ -32,13 +32,18 @@ export function aiUnsupportedReason(): string {
   return '当前平台不支持 AI 配置（移动端无系统级加密存储）'
 }
 
-export async function getAiConfig(): Promise<AiProviderConfig> {
+export async function getAiConfig(): Promise<AiSettings> {
   const cap = platform.aiConfig
-  if (!cap) return { baseUrl: '', model: '', apiKey: '', proxyMode: 'system', proxyUrl: '' }
+  if (!cap) {
+    return {
+      baseUrl: '', model: '', apiKey: '', proxyMode: 'system', proxyUrl: '',
+      recommendMode: 'click', userProfile: { text: '', updatedAt: '' },
+    }
+  }
   return cap.get()
 }
 
-export async function saveAiConfig(config: AiProviderConfig): Promise<{ ok: boolean }> {
+export async function saveAiConfig(config: AiSettings): Promise<{ ok: boolean }> {
   const cap = platform.aiConfig
   if (!cap) throw new Error('当前平台不支持 AI 配置')
   return cap.set(config)

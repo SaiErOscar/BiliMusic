@@ -18,25 +18,45 @@ const CONFIG_FILE = 'ai.json'
 /** 代理模式：system = 跟随系统（默认）；manual = 用下面配置的地址 */
 export type AiProxyMode = 'system' | 'manual'
 
-export interface AiProviderConfig {
-  /** OpenAI 兼容 baseURL，如 https://api.deepseek.com/v1 */
-  baseUrl: string
-  /** 模型名，如 deepseek-chat */
-  model: string
-  /** 内存明文；落盘时经 safeStorage 加密 */
-  apiKey: string
-  /** 代理模式，缺省 system */
-  proxyMode: AiProxyMode
-  /** 手动代理地址，如 http://127.0.0.1:7890；proxyMode=system 时忽略 */
-  proxyUrl: string
+/**
+ * v1.4.12-pre2 推荐触发方式。
+ * - auto：打开发现页即自动生成（消耗 API）
+ * - click：显示「获取推荐」按钮，用户点击后才请求（默认，省费用）
+ * - off：发现页不显示推荐板块
+ */
+export type AiRecommendMode = 'auto' | 'click' | 'off'
+
+/**
+ * v1.4.12-pre2 用户画像（与「听歌画像」是两件事）：
+ * - 听歌画像 = 由播放统计自动聚合出的听歌习惯摘要（只读、数据驱动）
+ * - 用户画像 = 用户可自行编辑的自我描述（偏好、场景、禁忌），用于个性化推荐
+ *
+ * 隐私口径（用户明确要求，必须在 UI 里写清）：
+ * **只存本地；仅在使用 AI 功能时随请求发送给你所配置的 AI 服务商；
+ * 绝不上传开发者**。本应用没有开发者侧的任何上报通道。
+ */
+export interface AiUserProfile {
+  /** 自由文本自我描述，作为推荐上下文 */
+  text: string
+  /** 最近更新时间，用于 UI 展示 */
+  updatedAt: string
 }
 
-const DEFAULT_CONFIG: AiProviderConfig = {
+export interface AiSettings extends AiProviderConfig {
+  /** 推荐触发方式，缺省 click */
+  recommendMode: AiRecommendMode
+  /** 用户自述画像 */
+  userProfile: AiUserProfile
+}
+
+const DEFAULT_SETTINGS: AiSettings = {
   baseUrl: '',
   model: '',
   apiKey: '',
   proxyMode: 'system',
   proxyUrl: '',
+  recommendMode: 'click',
+  userProfile: { text: '', updatedAt: '' },
 }
 
 function configPath(): string {
@@ -47,9 +67,9 @@ function configPath(): string {
  * 读取配置。密文解不开（换机器/DPAPI 失效）时返回空密钥而非抛错，
  * 让用户能在设置页重新填一次，不至于整个 AI 功能不可用。
  */
-async function readConfig(): Promise<AiProviderConfig> {
+async function readConfig(): Promise<AiSettings> {
   try {
-    const raw = JSON.parse(await fs.readFile(configPath(), 'utf8')) as Partial<AiProviderConfig> & { apiKey?: string }
+    const raw = JSON.parse(await fs.readFile(configPath(), 'utf8')) as Partial<AiSettings> & { apiKey?: string }
     let apiKey = ''
     if (raw.apiKey?.startsWith('enc:')) {
       if (safeStorage.isEncryptionAvailable()) {
@@ -69,9 +89,14 @@ async function readConfig(): Promise<AiProviderConfig> {
       apiKey,
       proxyMode: raw.proxyMode === 'manual' ? 'manual' : 'system',
       proxyUrl: raw.proxyUrl || '',
+      recommendMode: raw.recommendMode === 'auto' || raw.recommendMode === 'off' ? raw.recommendMode : 'click',
+      userProfile: {
+        text: raw.userProfile?.text || '',
+        updatedAt: raw.userProfile?.updatedAt || '',
+      },
     }
   } catch {
-    return { ...DEFAULT_CONFIG }
+    return { ...DEFAULT_SETTINGS }
   }
 }
 
@@ -79,13 +104,18 @@ async function readConfig(): Promise<AiProviderConfig> {
  * 写配置。加密不可用时直接抛错——宁可存不进去，也不落明文。
  * 用户会在设置页看到明确提示，而不是密钥悄悄以明文躺在磁盘上。
  */
-async function writeConfig(cfg: AiProviderConfig): Promise<void> {
+async function writeConfig(cfg: AiSettings): Promise<void> {
   const payload = {
     baseUrl: cfg.baseUrl,
     model: cfg.model,
     apiKey: '',
     proxyMode: cfg.proxyMode === 'manual' ? 'manual' : 'system',
     proxyUrl: cfg.proxyUrl,
+    recommendMode: cfg.recommendMode === 'auto' || cfg.recommendMode === 'off' ? cfg.recommendMode : 'click',
+    userProfile: {
+      text: String(cfg.userProfile?.text || ''),
+      updatedAt: cfg.userProfile?.updatedAt || '',
+    },
   }
   if (cfg.apiKey) {
     if (!safeStorage.isEncryptionAvailable()) {

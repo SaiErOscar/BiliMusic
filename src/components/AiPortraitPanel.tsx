@@ -8,11 +8,11 @@ import { ActionButton } from '@/components/AppleMusicPage'
 import { PORTRAIT_RANGE_LABELS, generatePortrait, type PortraitRange, type PortraitSummary } from '@/services/aiPortrait'
 import { clearPlayStats } from '@/utils/storage'
 import { saveAiConfig } from '@/services/ai'
-import type { AiProviderConfig } from '@/types'
+import type { AiSettings } from '@/types'
 import type { RowRenderer } from '@/components/AiPlaylistPanel'
 
 interface Props {
-  config: AiProviderConfig
+  config: AiSettings
   Row: RowRenderer
 }
 

@@ -9,7 +9,7 @@ import { useState, type ReactNode } from 'react'
 import { ActionButton } from '@/components/AppleMusicPage'
 import { generateAiPlaylist, saveAiPlaylist, type AiPlaylistResult } from '@/services/aiPlaylist'
 import { saveAiConfig } from '@/services/ai'
-import type { AiProviderConfig } from '@/types'
+import type { AiSettings } from '@/types'
 
 /** 行容器签名，与 Settings.tsx 的 SettingsRow 对齐（只用到这三个字段） */
 export type RowRenderer = (props: {
@@ -21,7 +21,7 @@ export type RowRenderer = (props: {
 
 interface Props {
   /** 当前 AI 配置；生成前会先落盘，保证主进程按最新代理/密钥发请求 */
-  config: AiProviderConfig
+  config: AiSettings
   /** 由设置页注入的 SettingsRow */
   Row: RowRenderer
 }

@@ -7,7 +7,7 @@
 // 用户名、各类数据）经 PBKDF2-SHA256 派生密钥后用 AES-256-GCM 加密为 ct。
 // 口令不落盘、不存储：忘记即无法解密。
 
-import type { AppSettings, AiProviderConfig, DownloadRecord, Playlist, ThemeMode, Tombstone, Track } from '@/types'
+import type { AppSettings, AiSettings, DownloadRecord, Playlist, ThemeMode, Tombstone, Track } from '@/types'
 import { platform } from '@/platform'
 import {
   DEFAULT_APP_SETTINGS,
@@ -87,7 +87,7 @@ export interface BackupPayload {
    * 整个 .bmback 本身由用户口令经 PBKDF2+AES-GCM 加密，密钥落在密文负载里，
    * 与数据库口令同一保护级别，不额外降级。
    */
-  aiConfig?: AiProviderConfig | null
+  aiConfig?: AiSettings | null
 }
 
 // 信封（base64 文件里编码的对象）；meta 明文，密文负载在 ct
@@ -192,7 +192,7 @@ export async function collectBackup(): Promise<BackupPayload> {
  * 非桌面平台（无 aiConfig capability）返回 null；主进程读失败也降级为 null，
  * 备份是「能导出多少算多少」，不能因为一个可选能力整体失败。
  */
-async function loadAiConfigForBackup(): Promise<AiProviderConfig | null> {
+async function loadAiConfigForBackup(): Promise<AiSettings | null> {
   try {
     if (!platform.aiConfig) return null
     const cfg = await platform.aiConfig.get()

@@ -309,8 +309,8 @@ declare global {
       persistentStorage?: PersistentStorageApi
       /** v1.4.11-pre3 AI 底座：Provider 配置读写（密钥在主进程经 safeStorage 加密落盘） */
       aiConfig?: {
-        get: () => Promise<import('./index').AiProviderConfig>
-        set: (config: import('./index').AiProviderConfig) => Promise<{ ok: boolean }>
+        get: () => Promise<import('./index').AiSettings>
+        set: (config: import('./index').AiSettings) => Promise<{ ok: boolean }>
       }
       biliApi: BiliApi
       lyricsApi: LyricsApi

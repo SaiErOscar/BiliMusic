@@ -20,7 +20,7 @@ import type {
   PersistentStorageApi,
   WebdavResult,
 } from '@/types/electron'
-import type { AiProviderConfig } from '@/types'
+import type { AiSettings } from '@/types'
 
 /** 下载能力：音频/视频下载、下载目录、歌词文件、字节进度订阅；v1.4.6-pre4 增下载记录文件定位三方法 */
 export type PlatformDownload = Pick<
@@ -74,8 +74,8 @@ export interface PlatformRuntime {
  * 密钥在主进程经 safeStorage 加密落盘，渲染层只做透传；非桌面平台缺失即视为不支持 AI。
  */
 export interface PlatformAiConfig {
-  get: () => Promise<AiProviderConfig>
-  set: (config: AiProviderConfig) => Promise<{ ok: boolean }>
+  get: () => Promise<AiSettings>
+  set: (config: AiSettings) => Promise<{ ok: boolean }>
 }
 
 /** 字体能力：枚举系统字体。字段可选，缺失时调用方回退内置保底列表（非桌面平台） */
