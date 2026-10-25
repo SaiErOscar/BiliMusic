@@ -4041,6 +4041,27 @@ body {
 }
 
 /*
+ * v1.4.11-pre5：设置行里的 ActionButton（.am-action）原本是给深色 Hero 区设计的，
+ * 白字 + backdrop-filter 毛玻璃。放进浅色设置面板后白字落在浅底上几乎不可见，
+ * 且离屏渲染下 backdrop-filter 不生效，按钮退化成一块空白胶囊。
+ * 这里在设置行作用域内改用主题前景色与实心浅底。
+ */
+.settings-row__control .am-action {
+  color: var(--color-text);
+  background: rgba(127, 127, 127, 0.12);
+  border: 1px solid rgba(127, 127, 127, 0.22);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+  min-height: 34px;
+  padding: 0 14px;
+}
+
+.settings-row__control .am-action:disabled {
+  opacity: 0.5;
+}
+
+/*
  * v1.4.9-pre3：控件区不可压缩的一排（如睡眠定时的六个药丸按钮）改为纵向堆叠。
  * 根因同 v1.3.9-beta1 的标签竖排——space-between 行里右侧控件 flex:0 0 auto 抢光宽度，
  * 左侧文字列被压到 min-content（中文即单字宽）而逐字换行。这里不再靠给文字列加

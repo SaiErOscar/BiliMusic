@@ -14,8 +14,10 @@ const backupSrc = readFileSync(path.resolve(__dirname, '../src/utils/backup.ts')
 const preloadSrc = readFileSync(path.resolve(__dirname, '../electron/preload.cjs'), 'utf8').replace(/\r\n/g, '\n')
 
 describe('AI 接口地址归一化（v1.4.11-pre3）', () => {
-  it('补全缺失的 /v1 与 /chat/completions', () => {
-    expect(resolveChatUrl('https://api.deepseek.com')).toBe('https://api.deepseek.com/v1/chat/completions')
+  it('补全缺失的 /chat/completions（DeepSeek 规范地址不带 /v1）', () => {
+    // v1.4.11-pre5：DeepSeek 官方 base URL 是 https://api.deepseek.com，
+    // 其 chat 端点在 /chat/completions 而非 /v1/chat/completions
+    expect(resolveChatUrl('https://api.deepseek.com')).toBe('https://api.deepseek.com/chat/completions')
     expect(resolveChatUrl('https://api.deepseek.com/v1')).toBe('https://api.deepseek.com/v1/chat/completions')
   })
 
@@ -39,14 +41,13 @@ describe('AI 预设（OpenAI 兼容 + DeepSeek）', () => {
     expect(AI_PRESETS.map((p) => p.id).sort()).toEqual(['deepseek', 'openai'])
     for (const p of AI_PRESETS) {
       expect(p.baseUrl.startsWith('https://')).toBe(true)
-      expect(p.baseUrl).toContain('/v1')
       expect(p.model.length).toBeGreaterThan(0)
     }
   })
 
-  it('DeepSeek 预设指向 deepseek-chat', () => {
+  it('DeepSeek 预设指向 deepseek-chat，地址不带 /v1', () => {
     const ds = AI_PRESETS.find((p) => p.id === 'deepseek')
-    expect(ds?.baseUrl).toBe('https://api.deepseek.com/v1')
+    expect(ds?.baseUrl).toBe('https://api.deepseek.com')
     expect(ds?.model).toBe('deepseek-chat')
   })
 })

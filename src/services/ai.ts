@@ -44,6 +44,51 @@ export async function saveAiConfig(config: AiProviderConfig): Promise<{ ok: bool
   return cap.set(config)
 }
 
+/**
+ * 把 HTTP 状态码翻译成可操作的中文说明。
+ *
+ * v1.4.11-pre5：按 DeepSeek 官方错误码表对齐（用户提供了该表并要求照此优化）。
+ * 各家 OpenAI 兼容服务基本沿用同一套语义，因此对 OpenAI 也通用。
+ * 除了说「错在哪」，还要说「怎么办」——这是原实现只给状态码的短板。
+ */
+export function describeHttpError(status: number, body = ''): string {
+  const detail = extractApiMessage(body)
+  const suffix = detail ? `（服务端说明：${detail}）` : ''
+  switch (status) {
+    case 400:
+      return `400 请求格式错误：请求体格式有误，请检查模型名与参数${suffix}`
+    case 401:
+      return `401 认证失败：API 密钥不正确或已失效，请重新复制密钥${suffix}`
+    case 402:
+      return `402 余额不足：请前往服务商控制台充值后重试${suffix}`
+    case 403:
+      return `403 无权限：该密钥无权访问此模型，请确认模型名与账号权限${suffix}`
+    case 404:
+      return `404 接口不存在：请检查 API 地址，DeepSeek 应为 https://api.deepseek.com${suffix}`
+    case 422:
+      return `422 参数错误：请求参数不合法，请检查模型名是否可用${suffix}`
+    case 429:
+      return `429 请求速率达到上限：请求过快或并发过高，请稍后重试${suffix}`
+    case 500:
+      return `500 服务器内部故障：服务商侧问题，请稍后重试${suffix}`
+    case 503:
+      return `503 服务器繁忙：服务暂时不可用，请稍后重试${suffix}`
+    default:
+      return `请求失败（${status}）${suffix}`
+  }
+}
+
+/** 从错误响应体里抽出可读信息；解析不了就截断原文 */
+function extractApiMessage(body: string): string {
+  if (!body) return ''
+  try {
+    const j = JSON.parse(body) as { error?: { message?: string }; message?: string }
+    return (j.error?.message || j.message || '').slice(0, 160)
+  } catch {
+    return body.slice(0, 160)
+  }
+}
+
 export interface AiChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
@@ -66,6 +111,9 @@ export function resolveChatUrl(baseUrl: string): string {
   if (!trimmed) return ''
   if (/\/chat\/completions$/.test(trimmed)) return trimmed
   if (/\/v\d+$/.test(trimmed)) return `${trimmed}/chat/completions`
+  // DeepSeek 的规范 base URL 不带 /v1（https://api.deepseek.com），
+  // 其 chat 端点实际在 /chat/completions 而非 /v1/chat/completions。
+  if (/^https?:\/\/api\.deepseek\.com$/i.test(trimmed)) return `${trimmed}/chat/completions`
   return `${trimmed}/v1/chat/completions`
 }
 
@@ -99,12 +147,9 @@ export async function aiChat(config: AiProviderConfig, options: AiChatOptions): 
       signal: controller.signal,
     })
 
-    if (resp.status === 401 || resp.status === 403) throw new Error('API 密钥无效或无权限（401/403）')
-    if (resp.status === 404) throw new Error('接口地址不存在，请检查 API 地址是否含 /v1（404）')
-    if (resp.status === 429) throw new Error('请求过于频繁或额度不足（429）')
     if (!resp.ok) {
       const body = await resp.text().catch(() => '')
-      throw new Error(`请求失败（${resp.status}）${body ? '：' + body.slice(0, 200) : ''}`)
+      throw new Error(describeHttpError(resp.status, body))
     }
 
     const data = (await resp.json()) as {
@@ -136,8 +181,14 @@ export async function testAiConnection(config: AiProviderConfig): Promise<{ ok: 
   }
 }
 
-/** v1.4.11-pre3 内置 Provider 预设：OpenAI 兼容格式 + DeepSeek（用户指定范围） */
+/**
+ * v1.4.11-pre3 内置 Provider 预设：OpenAI 兼容格式 + DeepSeek（用户指定范围）。
+ *
+ * v1.4.11-pre5 修正：DeepSeek 官方 base URL 是 `https://api.deepseek.com`（不带 /v1），
+ * 官方文档给的另一种写法是 `https://api.deepseek.com/v1`，两者都接受；
+ * 这里统一用不带 /v1 的规范形式，由 resolveChatUrl 补全路径。
+ */
 export const AI_PRESETS = [
   { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-  { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
 ] as const
