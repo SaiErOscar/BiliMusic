@@ -18,6 +18,39 @@ const stageSrc = readFileSync(path.resolve(__dirname, '../src/components/MvExpor
 const typesSrc = readFileSync(path.resolve(__dirname, '../src/types/index.ts'), 'utf8').replace(/\r\n/g, '\n')
 const storageSrc = readFileSync(path.resolve(__dirname, '../src/utils/storage.ts'), 'utf8').replace(/\r\n/g, '\n')
 
+// v1.4.11-pre3：封面取景设置必须留在「播放页」组首屏内。
+// 用户报障「设置里找不到」，实测根因不是缺失而是位置——原先排在组末尾，
+// 1280×720 窗口下 top=665 而容器可视高仅 603，整行落在首屏外，需滚动才可见。
+// 这类「存在但看不见」的缺陷，静态断言只能守「顺序」，真实可见性靠离屏 DOM 量。
+describe('封面取景设置位于播放页组首屏内（v1.4.11-pre3）', () => {
+  const groupStart = () => settingsSrc.indexOf('<SettingsGroup title="播放页"')
+  const groupEnd = () => settingsSrc.indexOf('</SettingsGroup>', groupStart())
+
+  it('封面显示方式排在「播放页」组的第一行', () => {
+    const start = groupStart()
+    expect(start).toBeGreaterThan(-1)
+    const group = settingsSrc.slice(start, groupEnd())
+    // 先整块剥掉 JSX 注释再比位置：组首那段说明注释里也写着「封面显示方式」，
+    // 直接 indexOf 会命中注释而不是真正的行
+    const code = group.replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+    // 用组内第一处「真实行标签」定位，避开组标题里 icon={<Monitor .../>} 的干扰
+    const firstLabel = code.search(/<SettingsRow label="/)
+    const coverRow = code.indexOf('<SettingsRow label="封面显示方式"')
+    expect(coverRow).toBeGreaterThan(-1)
+    // 组内第一行就应该是它——任何行插到前面都会把它重新推回首屏外
+    expect(coverRow).toBe(firstLabel)
+  })
+
+  it('设置项三档取值与默认值一致（cover 保持已发布观感）', () => {
+    const start = groupStart()
+    const group = settingsSrc.slice(start, groupEnd())
+    for (const mode of ['cover', 'contain', 'fill']) {
+      expect(group).toContain(`value="${mode}"`)
+    }
+    expect(storageSrc).toMatch(/coverFit:\s*'cover'/)
+  })
+})
+
 describe('睡眠定时行不再竖排（v1.4.9-pre3）', () => {
   it('睡眠定时行显式声明 stacked，走纵向堆叠布局', () => {
     // 抓「睡眠定时」这个 SettingsRow 开标签到 children 之间那一段

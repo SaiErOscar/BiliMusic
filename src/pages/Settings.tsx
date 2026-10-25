@@ -487,6 +487,23 @@ export default function Settings() {
 
         <div className="settings-column">
           <SettingsGroup title="播放页" icon={<Monitor size={20} />}>
+            {/*
+              v1.4.11-pre3 修正：封面取景原先排在「播放页」组末尾，实测在 1280×720 及更矮窗口下
+              落在首屏之外（top=665 / 容器可视高 603），用户报障「设置里找不到」。移到组首，
+              让它在最小窗口下也位于首屏内；组内其余顺序不变。
+              播放页与 MV 导出共用同一设置，保证成片与屏幕观感一致。
+            */}
+            <SettingsRow label="封面显示方式" description="播放页与导出的 MV 共用：裁剪铺满方框 / 保持原比例完整显示 / 拉伸填满（变形）">
+              <select
+                className="settings-select"
+                value={settings.coverFit}
+                onChange={(e) => setAppSettings({ coverFit: e.target.value as typeof settings.coverFit })}
+              >
+                <option value="cover">裁剪（铺满方框）</option>
+                <option value="contain">保持原比例（可能留白）</option>
+                <option value="fill">拉伸（填满，会变形）</option>
+              </select>
+            </SettingsRow>
             {/* v1.4.10-pre1 音频可视化：播放页与 MV 导出画面共用这一开关，小字里要说清它影响导出。
                 桌面端此时播放源会切为 Blob（Web Audio 需同源音频），起播延迟略增，故默认关。 */}
             <SettingsRow label="音频可视化" description="播放页与导出的 MV 显示频谱柱状图（开启后起播与导出略慢；勾选 MV 无控件导出时不含）">
@@ -498,18 +515,6 @@ export default function Settings() {
             {/* v1.4.9-pre2 歌词双语：目前只有网易云源带翻译（tlyric），其余源无译文时行为不变 */}
             <SettingsRow label="歌词双语" description="歌词行下方显示译文（仅网易云源提供翻译）">
               <ToggleSwitch checked={settings.lyricBilingual} onChange={() => setAppSettings({ lyricBilingual: !settings.lyricBilingual })} />
-            </SettingsRow>
-            {/* v1.4.11-pre2 封面取景：播放页与 MV 导出共用同一设置，保证成片与屏幕观感一致 */}
-            <SettingsRow label="封面显示方式" description="播放页与导出的 MV 共用：裁剪铺满方框 / 保持原比例完整显示 / 拉伸填满（变形）">
-              <select
-                className="settings-select"
-                value={settings.coverFit}
-                onChange={(e) => setAppSettings({ coverFit: e.target.value as typeof settings.coverFit })}
-              >
-                <option value="cover">裁剪（铺满方框）</option>
-                <option value="contain">保持原比例（可能留白）</option>
-                <option value="fill">拉伸（填满，会变形）</option>
-              </select>
             </SettingsRow>
           </SettingsGroup>
 
