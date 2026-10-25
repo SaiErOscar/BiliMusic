@@ -17,6 +17,21 @@ export function isAiSupported(): boolean {
   return !!platform.aiConfig
 }
 
+/**
+ * 不支持 AI 时的原因描述，用于在设置页给出可见提示而不是静默隐藏。
+ *
+ * v1.4.11-pre4 教训：pre3 的 AI 分组用 `isAiSupported() &&` 静默隐藏，
+ * 而 OTA 渲染补丁把渲染层锁在旧版本时该能力探测必然失败，
+ * 表现成「装了新包但设置里没有 AI」且没有任何线索。宁可显示一行说明。
+ */
+export function aiUnsupportedReason(): string {
+  if (platform.aiConfig) return ''
+  if (typeof window === 'undefined' || !window.electronAPI) {
+    return 'AI 需要桌面端主进程支持，当前环境未加载桌面桥（若刚升级，请完全退出并重新打开应用）'
+  }
+  return '当前平台不支持 AI 配置（移动端无系统级加密存储）'
+}
+
 export async function getAiConfig(): Promise<AiProviderConfig> {
   const cap = platform.aiConfig
   if (!cap) return { baseUrl: '', model: '', apiKey: '', proxyMode: 'system', proxyUrl: '' }

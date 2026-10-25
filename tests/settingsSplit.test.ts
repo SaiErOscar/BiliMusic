@@ -57,6 +57,13 @@ function countRows(fragment: string): number {
  * 这里只做相对比较，绝对值不必精确；目的是让「按高度配平」有可回归的量化口径。
  */
 function estimateHeight(fragment: string): number {
+  // v1.4.11-pre4：AI 分组有「不可用」降级分支与正常分支两份，二者互斥渲染。
+  // 静态估算必须只算正常分支，否则两栏高度被高估而误判失衡。
+  const withoutFallback = fragment.replace(
+    /\{!isAiSupported\(\) \? \([\s\S]*?\) : \(/,
+    '(',
+  )
+  fragment = withoutFallback
   let height = 0
   // 板块头
   height += (fragment.match(/<SettingsGroup\b/g) || []).length * 60

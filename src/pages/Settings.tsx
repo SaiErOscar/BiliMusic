@@ -34,7 +34,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { selectDownloadFolder } from '@/services/api'
 import { isMvExportSupported } from '@/services/mvExport'
-import { AI_PRESETS, getAiConfig, isAiSupported, saveAiConfig, testAiConnection } from '@/services/ai'
+import { AI_PRESETS, aiUnsupportedReason, getAiConfig, isAiSupported, saveAiConfig, testAiConnection } from '@/services/ai'
 import type { AiProviderConfig } from '@/types'
 import { platform, isNativeApp } from '@/platform'
 import { usePlayer, useSleepRemainingText, formatMediaKeyName } from '@/contexts/PlayerContext'
@@ -560,9 +560,17 @@ export default function Settings() {
 
         <div className="settings-column">
           {/* v1.4.11-pre3 AI 底座：Provider 配置。密钥不写注册表、经 safeStorage 加密落盘，
-              并随「导出全部数据」一并导出。桌面端专属，移动端整组不渲染。
-              放在右栏首位：组内 5 行，最小窗口下也落在首屏内。 */}
-          {isAiSupported() && (
+              并随「导出全部数据」一并导出。
+              放在右栏首位：组内 5 行，最小窗口下也落在首屏内。
+              v1.4.11-pre4：不再静默隐藏——能力缺失时显示一行原因，
+              否则 OTA 渲染补丁把渲染层锁旧版时，用户只会看到「设置里没有 AI」而无从排查。 */}
+          {!isAiSupported() ? (
+            <SettingsGroup title="AI 助手" icon={<Sparkles size={20} />}>
+              <SettingsRow label="不可用" stacked description={aiUnsupportedReason()}>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>AI 配置需要桌面端主进程支持</span>
+              </SettingsRow>
+            </SettingsGroup>
+          ) : (
             <SettingsGroup title="AI 助手" icon={<Sparkles size={20} />}>
               <SettingsRow label="服务预设" description="OpenAI 兼容格式；选预设填入地址与模型，仍可手改">
                 <select
