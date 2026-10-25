@@ -5166,3 +5166,112 @@ body {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(250%); }
 }
+
+/* ==== v1.4.12-pre3 发现页 AI 推荐板块 ==== */
+.discover-ai {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.discover-ai__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.discover-ai__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+}
+.discover-ai__ctx {
+  font-size: 12px;
+  opacity: 0.62;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.14);
+}
+.discover-ai__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(127, 127, 127, 0.22);
+  background: rgba(127, 127, 127, 0.1);
+  color: var(--color-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.discover-ai__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.discover-ai__greeting {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  opacity: 0.9;
+}
+.discover-ai__hint,
+.discover-ai__error {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  opacity: 0.7;
+}
+.discover-ai__error {
+  color: #e5484d;
+  opacity: 1;
+}
+.discover-ai__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+.discover-ai__item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(127, 127, 127, 0.08);
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+}
+.discover-ai__item img {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex: 0 0 auto;
+  background: rgba(127, 127, 127, 0.16);
+}
+.discover-ai__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.discover-ai__meta strong,
+.discover-ai__meta span,
+.discover-ai__meta em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.discover-ai__meta strong {
+  font-size: 13px;
+}
+.discover-ai__meta span {
+  font-size: 12px;
+  opacity: 0.66;
+}
+.discover-ai__meta em {
+  font-size: 11px;
+  font-style: normal;
+  opacity: 0.55;
+}
