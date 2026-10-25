@@ -5,6 +5,35 @@
 
 ---
 
+## v1.4.11-pre2 — 封面显示方式可选（裁剪 / 保持原比例 / 拉伸）
+
+**发布日期：2026-10-24**（插队预览版第二轮：封面取景线收尾）
+
+### 新增（播放页 + MV 导出）
+
+- **封面显示方式做成设置项**：设置 → 播放页新增「封面显示方式」，三档——`裁剪（铺满方框）` / `保持原比例（可能留白）` / `拉伸（填满，会变形）`。**播放页与导出的 MV 共用同一开关**，成片与屏幕观感一致。默认「裁剪」，与 v1.4.10 / v1.4.11-pre1 已发布行为完全相同，升级用户观感零变化。
+- **保持原比例时容器跟随封面**：选「保持原比例」后，1:1 方框改为按封面真实比例推导高度，频谱柱因此贴到图片真实下缘，而不是浮在留白下方。设 1:1.6 的比例上限，防止 9:16 竖版封面把 1280×720 的成片撑爆（3:4、2:3 未超限，保留真实比例）。
+
+### 实现要点
+
+- 新增 `src/utils/coverFit.ts`（`COVER_ASPECT_LIMIT` / `shouldFollowCoverAspect` / `coverAspectRatio`），播放页 `NowPlaying` 与导出舞台 `MvExportStage` 共用同一份换算，不各写一份。
+- 设置字段链路对齐既有 `mvCleanExport`：`types` 增 `CoverFitMode` 与 `AppSettings.coverFit` → `storage` 默认 `cover` → `Settings` 下拉 → `DownloadButton` 与 `batchDownloadStore` → `ExportMvOptions` → `electron/mvExport.ts` 归一化（脏值统一退回 `cover`）→ `__mvInit` → `MvExportStage`。
+- 跟随状态用显式 `is-follow-aspect` 类，不用 `[style*="aspect-ratio"]` 属性选择器——后者依赖内联样式的序列化形式，脆弱。
+- 舞台 `__mvReady` 改为等封面 `naturalWidth` 就绪后再置 true；否则 contain 模式下主进程捕获的首帧还是 1:1 容器，成片开头会跳一下。
+- 设置项放在「播放页」分组而非 `isMvExportSupported()` 分支内：它同时作用于播放页，移动端也需可见。
+
+### 测试与实测
+
+- 新增 `tests/coverFit.test.ts` 7 项（横竖版比例换算、1:1.6 上限钳制、封面未就绪退回 1:1 防 NaN）；`tests/mvAndLayout.test.ts` 中「舞台不得出现 `naturalWidth`」的旧断言改为限定用途（必然与 `coverAspectRatio` 同现，且 `StaticVisualizerCanvas` 内不得出现）。vitest **286 项全绿**，tsc 0 error。
+- Electron 离屏舞台实测 3 档 × 4 比例：`cover` 恒 420×420 铺满；`contain` 16:9→420×236.3、1:1→420×420、3:4→420×560、9:16→420×672（被上限钳制）；`fill` 恒 420×420 铺满。
+- 频谱柱贴合 3 档 × 3 比例共 9 组，left / width / bottom 偏差**全部为 0**；`contain` 下柱子正确贴图片真实下缘。
+
+### 评估后刻意未改
+
+- **不改主进程封面缩放**：`fetchCoverDataUrl` 仍按原图长边等比缩放到 800，裁切/拉伸只发生在显示层——三种模式共用同一张源图，切换不需要重新导出。
+- **`fill` 不做警告提示**：变形是该模式的预期语义，设置项小字已写明「会变形」。
+
+---
 ## v1.4.11-pre1 — MV 导出封面严格锁进 1:1 预留位
 
 **发布日期：2026-10-24**（插队预览版：只修 MV 导出封面取景，其余改动延后）

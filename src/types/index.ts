@@ -120,7 +120,19 @@ export interface AppSettings {
   // v1.4.9-pre3 MV 无控件导出：隐藏进度条/时间/播放按钮/音量/循环，只留封面、歌曲信息、
   // 歌词与水印（对应播放页「鼠标静止后控件淡出」的纯净观感）
   mvCleanExport: boolean
+  // v1.4.11-pre2 封面取景（播放页与 MV 导出共用同一开关，保证两端观感统一）：
+  //   cover   = 裁切居中铺满方框，不拉伸不留白（默认，与 v1.4.10/pre1 现状一致）
+  //   contain = 保持原比例完整显示，比例不符时留白
+  //   fill    = 非等比拉伸填满方框（画面会变形）
+  // contain 时容器改为跟随封面真实比例（见 useCoverAspect / COVER_ASPECT_LIMIT）
+  coverFit: CoverFitMode
 }
+
+/**
+ * v1.4.11-pre2 封面取景模式。
+ * 命名对齐 CSS object-fit 的三个取值，便于直接把模式名映射成样式，不必再维护一张对照表。
+ */
+export type CoverFitMode = 'cover' | 'contain' | 'fill'
 
 export type NavItem = {
   icon: string

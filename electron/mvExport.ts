@@ -66,6 +66,12 @@ export interface MvExportPayload {
    * clean 为 true 时一律不显示（无控件导出不含可视化）。分析失败只降级为「无柱子」，不中断导出。
    */
   visualizer?: boolean
+  /**
+   * v1.4.11-pre2 封面取景（AppSettings.coverFit，与播放页共用）：
+   * cover 裁切铺满 / contain 保持原比例 / fill 拉伸。缺省按 cover 处理，
+   * 保证老版本渲染层或旧 payload 的取景行为不变。
+   */
+  coverFit?: string
   /** 流畅度档位（快速/标准/流畅/极致），缺省取标准 */
   smoothness?: string
   /** 自定义输出目录（下载目录），MV 落在其下 MV/ 子目录 */
@@ -562,6 +568,8 @@ async function openStage(
         clean: payload.clean === true,
         // v1.4.10-pre1 音频可视化：舞台据此在封面下缘画频谱柱（clean 时不传，等于不显示）
         visualizer: payload.visualizer === true && payload.clean !== true,
+        // v1.4.11-pre2 封面取景：归一成三个合法值之一，脏值退回 cover（= 已发布行为）
+        coverFit: payload.coverFit === 'contain' || payload.coverFit === 'fill' ? payload.coverFit : 'cover',
         spectrum: spectrum?.base64,
         spectrumHz: spectrum?.hz,
         spectrumBars: spectrum?.bars,

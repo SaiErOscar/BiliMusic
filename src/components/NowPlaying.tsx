@@ -25,6 +25,7 @@ import {
 } from '@/services/lyrics'
 import { getVideoComments, type VideoComment } from '@/services/api'
 import { platform } from '@/platform'
+import { coverAspectRatio, shouldFollowCoverAspect } from '@/utils/coverFit'
 
 const sliderTheme = {
   ['--track-bg']: 'rgba(255,255,255,0.18)',
@@ -46,6 +47,9 @@ export default function NowPlaying() {
   const lyrics = useLyrics(track, expanded && settings.showLyrics)
   const duration = liveDuration || track?.duration || 0
   const [fullscreen, setFullscreen] = useState(false)
+  // v1.4.11-pre2 封面取景：记录封面固有比例，contain 模式下用它驱动容器高度
+  const [coverAspect, setCoverAspect] = useState(1)
+  const followCoverAspect = shouldFollowCoverAspect(settings.coverFit) && coverAspect > 0
   const [controlsVisible, setControlsVisible] = useState(true)
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [biliFavOpen, setBiliFavOpen] = useState(false)
@@ -258,7 +262,12 @@ export default function NowPlaying() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ ...spring, delay: 0.08 }}
             >
-              <div className="now-playing-cover-wrap">
+              {/* v1.4.11-pre2 封面取景：contain 时容器跟随封面真实比例（上限见 coverFit.ts），
+                  让柱子与图片下缘保持贴合；cover/fill 保持 1:1 方框 */}
+              <div
+                className={`now-playing-cover-wrap${followCoverAspect ? ' is-follow-aspect' : ''}`}
+                style={followCoverAspect ? { aspectRatio: String(coverAspect) } : undefined}
+              >
                 <motion.div
                   className="now-playing-cover-glow"
                   animate={{ opacity: player.isPlaying ? [0.35, 0.72, 0.4] : 0.26 }}
@@ -272,6 +281,11 @@ export default function NowPlaying() {
                   loading="eager"
                   decoding="sync"
                   draggable={false}
+                  style={{ objectFit: settings.coverFit }}
+                  onLoad={(e) => {
+                    const img = e.currentTarget
+                    setCoverAspect(coverAspectRatio(img.naturalWidth, img.naturalHeight))
+                  }}
                   initial={false}
                   animate={{ opacity: 1, scale: 1, rotateX: 0 }}
                   transition={spring}

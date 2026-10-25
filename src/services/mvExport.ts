@@ -10,7 +10,7 @@ import { platform } from '@/platform'
 import { getVideoDetail, getPlayUrl, getBestAudioUrl, type AudioQualityPreference } from '@/services/bilibiliApi'
 import { getLyricForTrack } from '@/services/lyrics'
 import type { MvExportProgress } from '@/types/electron'
-import type { Track } from '@/types'
+import type { Track, CoverFitMode } from '@/types'
 
 export type { MvExportProgress }
 
@@ -27,6 +27,11 @@ export interface ExportMvOptions {
    * 显示频谱柱状图（主进程离线分析音频后注入舞台）。clean 为 true 时不显示。
    */
   visualizer?: boolean
+  /**
+   * v1.4.11-pre2 封面取景（AppSettings.coverFit，与播放页共用同一设置）：
+   * cover 裁切铺满 / contain 保持原比例 / fill 拉伸。缺省按 cover 处理。
+   */
+  coverFit?: CoverFitMode
   /** 流畅度档位（快速/标准/流畅/极致），缺省标准（AppSettings.mvSmoothness） */
   smoothness?: string
   outputDir?: string

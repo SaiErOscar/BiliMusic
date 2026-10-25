@@ -53,6 +53,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   lyricBilingual: false,
   // v1.4.9-pre3 MV 无控件导出默认关：保持既有导出画面（含控件）不变
   mvCleanExport: false,
+  // v1.4.11-pre2 封面取景默认 cover：与 v1.4.10/pre1 已发布行为一致，
+  // 升级用户观感零变化；contain / fill 作为显式可选项。
+  coverFit: 'cover',
 }
 
 function notifySettingsChanged() {

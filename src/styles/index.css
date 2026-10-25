@@ -2200,6 +2200,11 @@ body {
   border-radius: 0 0 18px 18px;
 }
 
+/*
+ * v1.4.11-pre2：取景方式改由设置（coverFit）内联下发 object-fit，这里只留兜底 cover。
+ * 容器恒为 1:1；contain 模式下容器会内联 aspect-ratio 跟随封面真实比例（上限见 utils/coverFit.ts），
+ * 此时图片填满容器、由 object-fit: contain 决定留白，柱子仍贴容器下缘 = 图片下缘。
+ */
 .now-playing-cover {
   position: relative;
   width: 100%;
@@ -2210,6 +2215,16 @@ body {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.13);
   box-shadow: 0 32px 72px rgba(0, 0, 0, 0.52), inset 0 1px rgba(255, 255, 255, 0.18);
+}
+
+/*
+ * 容器跟随封面比例时（contain 模式，见 utils/coverFit.ts）：图片必须铺满容器高度，
+ * 否则图片自身的 aspect-ratio:1 会把它压回方形，与跟随后的容器比例不一致而露出背景。
+ * 用显式类名而不是属性选择器，避免依赖内联样式的序列化形式。
+ */
+.now-playing-cover-wrap.is-follow-aspect .now-playing-cover {
+  height: 100%;
+  aspect-ratio: auto;
 }
 
 /*
@@ -2259,6 +2274,16 @@ body {
   position: relative;
   aspect-ratio: 1;
   width: 100%;
+}
+
+/*
+ * v1.4.11-pre2 封面取景（contain）下容器跟随封面比例：此时容器不再是 1:1，
+ * 由内联 aspect-ratio 决定；图片本就绝对定位铺满容器，object-fit: contain 负责留白，
+ * 柱子（贴容器下缘）自然落在图片真实下缘。cover/fill 不带这个类，保持 1:1 方框。
+ */
+.now-playing-cover-wrap--mv.is-follow-aspect {
+  /* 竖版封面被 coverFit.ts 钳到 1:1.6，容器不会高过左侧栏可用空间 */
+  max-height: 100%;
 }
 
 .now-playing-meta {

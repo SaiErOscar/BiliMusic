@@ -317,10 +317,16 @@ describe('MV 导出跟随音频可视化（v1.4.10-pre1）', () => {
   })
 
   it('MV 舞台的柱子贴封面显示区下缘（封面裁切铺满后即容器底边）', () => {
-    // 封面 1:1 裁切铺满后，封面显示区 = 容器，柱子直接贴容器四边由 CSS 定位，
-    // 不再按 contain 缩放规则量「图片实际显示下缘」
-    expect(stageSrc).not.toContain('naturalWidth')
+    // 封面铺满后，封面显示区 = 容器，柱子直接贴容器四边由 CSS 定位，
+    // 不再按 contain 缩放规则量「图片实际显示下缘」再内联下发。
+    // v1.4.11-pre2 起 naturalWidth 有了另一处正当用途——contain 模式下算容器跟随比例
+    // （见 utils/coverFit.ts），所以不能再笼统断言它不出现，改为限定用途：
     expect(stageSrc).not.toContain('imageBottom')
+    // 只允许服务于「容器跟随比例」这一处，不得回流到画布定位：
+    // 断言它必然与 coverAspectRatio 同时出现，且画布组件没有拿到它
+    expect(stageSrc).toContain('coverAspectRatio(cover.naturalWidth')
+    const canvasFn = stageSrc.slice(stageSrc.indexOf('function StaticVisualizerCanvas'))
+    expect(canvasFn).not.toContain('naturalWidth')
     expect(stageSrc).not.toContain('VISUALIZER_CANVAS_HEIGHT')
     expect(css).toContain('.now-playing-visualizer--mv')
     // 画布定位沿用播放页那一套：贴左、贴底、满宽

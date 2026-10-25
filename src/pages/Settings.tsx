@@ -499,6 +499,18 @@ export default function Settings() {
             <SettingsRow label="歌词双语" description="歌词行下方显示译文（仅网易云源提供翻译）">
               <ToggleSwitch checked={settings.lyricBilingual} onChange={() => setAppSettings({ lyricBilingual: !settings.lyricBilingual })} />
             </SettingsRow>
+            {/* v1.4.11-pre2 封面取景：播放页与 MV 导出共用同一设置，保证成片与屏幕观感一致 */}
+            <SettingsRow label="封面显示方式" description="播放页与导出的 MV 共用：裁剪铺满方框 / 保持原比例完整显示 / 拉伸填满（变形）">
+              <select
+                className="settings-select"
+                value={settings.coverFit}
+                onChange={(e) => setAppSettings({ coverFit: e.target.value as typeof settings.coverFit })}
+              >
+                <option value="cover">裁剪（铺满方框）</option>
+                <option value="contain">保持原比例（可能留白）</option>
+                <option value="fill">拉伸（填满，会变形）</option>
+              </select>
+            </SettingsRow>
           </SettingsGroup>
 
           <SettingsGroup title="下载" icon={<Download size={20} />}>

@@ -5,6 +5,8 @@ import PlayerSlider from '@/components/PlayerSlider'
 import type { LyricLine } from '@/services/lyrics'
 import { barsAtTime, decodeSpectrum, type DecodedSpectrum } from '@/utils/spectrumDecode'
 import { drawVisualizerBars } from '@/services/visualizerDraw'
+import { coverAspectRatio, shouldFollowCoverAspect } from '@/utils/coverFit'
+import type { CoverFitMode } from '@/types'
 
 /**
  * v1.4.6-pre3 方案 A：MV 导出专用离屏渲染舞台（#/mv-export 路由）。
@@ -45,6 +47,11 @@ interface MvStagePayload {
   spectrumHz?: number
   /** 每帧桶数（v1.4.10-pre1 为 40） */
   spectrumBars?: number
+  /**
+   * v1.4.11-pre2 封面取景（AppSettings.coverFit，与播放页共用同一设置）：
+   * cover 裁切铺满 / contain 保持原比例 / fill 拉伸。缺省按 cover 处理。
+   */
+  coverFit?: CoverFitMode
 }
 
 function formatTime(seconds: number): string {
@@ -113,6 +120,9 @@ export default function MvExportStage() {
       cover?.decode().catch(() => {}),
     ]).then(() => {
       if (cancelled) return
+      // v1.4.11-pre2：contain 模式下容器高度取决于封面比例，必须等 naturalWidth 就绪再报 ready，
+      // 否则主进程捕获到的首帧可能还是 1:1 容器（比例跟随生效前），成片开头会跳一下
+      if (cover?.naturalWidth) setCoverAspect(coverAspectRatio(cover.naturalWidth, cover.naturalHeight))
       setLayoutSettled((n) => n + 1)
       window.__mvReady = true
     })
@@ -128,6 +138,10 @@ export default function MvExportStage() {
   const lyrics = payload?.lyrics || []
   // v1.4.9-pre3 无控件导出：缺省 false，保持既有含控件画面
   const clean = payload?.clean === true
+  // v1.4.11-pre2 封面取景：缺省 cover（与已发布行为一致）
+  const coverFit: CoverFitMode = payload?.coverFit || 'cover'
+  const [coverAspect, setCoverAspect] = useState(1)
+  const followCoverAspect = shouldFollowCoverAspect(coverFit) && coverAspect > 0
 
   // v1.4.10-pre1 音频可视化：开启且非无控件导出时才有柱子。
   // 导出舞台没有实时音频，柱高完全由当前时间索引预分析好的频谱时间线——
@@ -188,16 +202,22 @@ export default function MvExportStage() {
 
       <div className="now-playing-main">
         <section className="now-playing-left">
-          <div className="now-playing-cover-wrap now-playing-cover-wrap--mv">
+          {/* v1.4.11-pre2 封面取景：contain 时容器跟随封面真实比例（上限见 coverFit.ts），
+              让柱子贴图片真实下缘；cover/fill 保持 1:1 方框 */}
+          <div
+            className={`now-playing-cover-wrap now-playing-cover-wrap--mv${followCoverAspect ? ' is-follow-aspect' : ''}`}
+            style={followCoverAspect ? { aspectRatio: String(coverAspect) } : undefined}
+          >
             <div className="now-playing-cover-glow" style={{ opacity: 0.4 }} />
             <img
-              // v1.4.10-pre3：封面与播放页同一取景语义——1:1 裁切铺满（object-fit: cover），
-              // 16:9 封面只显示中间最大的正方形区域，不拉伸也不留白；
+              // v1.4.11-pre2：取景由设置决定（cover 裁切 / contain 原比例 / fill 拉伸），
+              // 与播放页共用同一 coverFit，保证成片与屏幕观感一致；
               // 阴影仍用与导出画面相称的那一版。
               className="now-playing-cover now-playing-cover--mv"
               src={track.coverUrl}
               alt={track.title}
               draggable={false}
+              style={{ objectFit: coverFit }}
             />
             {/* v1.4.10-pre1：柱子叠在封面显示区下缘，与播放页同一绘制实现 */}
             {showVisualizer && spectrum && (

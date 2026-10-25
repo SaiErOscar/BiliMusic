@@ -181,6 +181,8 @@ export default function DownloadButton({
         clean: settings.mvCleanExport,
         // v1.4.10-pre1 音频可视化跟随：与播放页同开关（无控件导出时主进程一律不显示）
         visualizer: settings.audioVisualizer,
+        // v1.4.11-pre2 封面取景：与播放页共用同一设置
+        coverFit: settings.coverFit,
         smoothness: settings.mvSmoothness,
         outputDir: settings.downloadDir || undefined,
         onProgress: (p) => {
