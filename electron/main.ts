@@ -10,6 +10,7 @@ import { registerMiniWindowHandlers, onMainWindowActivityChanged, destroyLyricWi
 import { registerSystemFontsHandlers } from './systemFonts'
 import { registerColorPickerHandlers } from './colorPicker'
 import { registerBackupHandlers } from './backup'
+import { registerAiHandlers } from './ai'
 import { registerMvExportHandlers, killMvExportChildren } from './mvExport'
 import { registerMediaKeysIpc, unregisterAllMediaKeys } from './mediaKeys'
 
@@ -728,6 +729,8 @@ app.whenReady().then(() => {
   registerColorPickerHandlers()
   registerBackupHandlers()
   registerMvExportHandlers()
+  // v1.4.11-pre3 AI 底座：Provider 配置（safeStorage 加密落盘）+ 代理下发
+  registerAiHandlers()
   registerMediaKeysIpc(() => mainWindow)
   registerMiniWindowHandlers({
     getMainWindow: () => mainWindow,

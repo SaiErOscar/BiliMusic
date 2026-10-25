@@ -40,6 +40,11 @@ export const electronPlatform: Platform = {
       ? { platform: a.platform, persistentStorage: a.persistentStorage, notifyRendererReady: a.notifyRendererReady }
       : undefined
   },
+  /** v1.4.11-pre3 AI 底座：Provider 配置读写（密钥在主进程 safeStorage 加密落盘） */
+  get aiConfig() {
+    const a = api()
+    return a?.aiConfig ? { get: a.aiConfig.get, set: a.aiConfig.set } : undefined
+  },
   /** v1.4.4-pre1：系统字体枚举（UI 层 FontSelect 用，非 Electron 走内置保底列表） */
   get fonts() {
     const a = api()

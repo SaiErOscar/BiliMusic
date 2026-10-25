@@ -95,6 +95,12 @@ const persistentStorage = {
   removeItem: (key) => ipcRenderer.invoke('persistent-storage:remove', key),
 }
 
+// v1.4.11-pre3 AI 底座：Provider 配置读写（密钥在主进程经 safeStorage 加密落盘）
+const aiConfig = {
+  get: () => ipcRenderer.invoke('ai:get-config'),
+  set: (config) => ipcRenderer.invoke('ai:set-config', config),
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
@@ -191,6 +197,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   platform: process.platform,
   persistentStorage,
+  aiConfig,
   biliApi,
   lyricsApi,
 })

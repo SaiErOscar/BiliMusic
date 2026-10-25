@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Cloud,
   CloudDownload,
+  Sparkles,
   CloudUpload,
   FileDown,
   FileUp,
@@ -33,6 +34,8 @@ import { useTheme } from '@/hooks/useTheme'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { selectDownloadFolder } from '@/services/api'
 import { isMvExportSupported } from '@/services/mvExport'
+import { AI_PRESETS, getAiConfig, isAiSupported, saveAiConfig, testAiConnection } from '@/services/ai'
+import type { AiProviderConfig } from '@/types'
 import { platform, isNativeApp } from '@/platform'
 import { usePlayer, useSleepRemainingText, formatMediaKeyName } from '@/contexts/PlayerContext'
 import { SLEEP_PRESET_MINUTES } from '@/utils/sleepTimer'
@@ -111,6 +114,44 @@ export default function Settings() {
     setLyricPresetMessage(preset ? `已删除「${preset.name}」` : '')
   }
   const [appVersion, setAppVersion] = useState('1.0.0')
+
+  // v1.4.11-pre3 AI 底座：Provider 配置（密钥存主进程，经 safeStorage 加密落盘）
+  const [aiConfig, setAiConfig] = useState<AiProviderConfig>({
+    baseUrl: '', model: '', apiKey: '', proxyMode: 'system', proxyUrl: '',
+  })
+  const [aiMessage, setAiMessage] = useState('')
+  const [aiTesting, setAiTesting] = useState(false)
+
+  useEffect(() => {
+    if (!isAiSupported()) return
+    void getAiConfig().then(setAiConfig).catch(() => {})
+  }, [])
+
+  const patchAiConfig = (patch: Partial<AiProviderConfig>) => setAiConfig((c) => ({ ...c, ...patch }))
+
+  const persistAiConfig = async (next: AiProviderConfig) => {
+    try {
+      await saveAiConfig(next)
+      setAiMessage('已保存')
+    } catch (err) {
+      setAiMessage(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const runAiTest = async () => {
+    setAiTesting(true)
+    setAiMessage('测试中…')
+    try {
+      // 先落盘再测：代理由主进程按已存配置下发，不保存就测的是旧代理
+      await saveAiConfig(aiConfig)
+      const r = await testAiConnection(aiConfig)
+      setAiMessage(r.message)
+    } catch (err) {
+      setAiMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAiTesting(false)
+    }
+  }
   const [updateStatus, setUpdateStatus] = useState('')
   const [updateAction, setUpdateAction] = useState<'restart' | 'reload' | null>(null)
   const [cacheMsg, setCacheMsg] = useState('')
@@ -483,9 +524,7 @@ export default function Settings() {
               </SettingsRow>
             </SettingsGroup>
           )}
-        </div>
 
-        <div className="settings-column">
           <SettingsGroup title="播放页" icon={<Monitor size={20} />}>
             {/*
               v1.4.11-pre3 修正：封面取景原先排在「播放页」组末尾，实测在 1280×720 及更矮窗口下
@@ -517,6 +556,88 @@ export default function Settings() {
               <ToggleSwitch checked={settings.lyricBilingual} onChange={() => setAppSettings({ lyricBilingual: !settings.lyricBilingual })} />
             </SettingsRow>
           </SettingsGroup>
+        </div>
+
+        <div className="settings-column">
+          {/* v1.4.11-pre3 AI 底座：Provider 配置。密钥不写注册表、经 safeStorage 加密落盘，
+              并随「导出全部数据」一并导出。桌面端专属，移动端整组不渲染。
+              放在右栏首位：组内 5 行，最小窗口下也落在首屏内。 */}
+          {isAiSupported() && (
+            <SettingsGroup title="AI 助手" icon={<Sparkles size={20} />}>
+              <SettingsRow label="服务预设" description="OpenAI 兼容格式；选预设填入地址与模型，仍可手改">
+                <select
+                  className="settings-select"
+                  value={AI_PRESETS.find((p) => p.baseUrl === aiConfig.baseUrl)?.id || ''}
+                  onChange={(e) => {
+                    const preset = AI_PRESETS.find((p) => p.id === e.target.value)
+                    if (preset) patchAiConfig({ baseUrl: preset.baseUrl, model: preset.model })
+                  }}
+                >
+                  <option value="">自定义</option>
+                  {AI_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                </select>
+              </SettingsRow>
+              <SettingsRow label="地址与模型" stacked description="地址填到 /v1 即可，路径会自动补全">
+                <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+                  <input
+                    className="settings-input"
+                    type="url"
+                    placeholder="https://api.deepseek.com/v1"
+                    value={aiConfig.baseUrl}
+                    onChange={(e) => patchAiConfig({ baseUrl: e.target.value })}
+                  />
+                  <input
+                    className="settings-input"
+                    type="text"
+                    placeholder="deepseek-chat"
+                    value={aiConfig.model}
+                    onChange={(e) => patchAiConfig({ model: e.target.value })}
+                  />
+                </div>
+              </SettingsRow>
+              <SettingsRow label="API 密钥" stacked description="经系统加密后存本地，不写注册表、不进明文配置">
+                <input
+                  className="settings-input"
+                  type="password"
+                  placeholder="sk-..."
+                  value={aiConfig.apiKey}
+                  onChange={(e) => patchAiConfig({ apiKey: e.target.value })}
+                />
+              </SettingsRow>
+              {/* stacked：代理行同时有下拉与地址输入框，非 stacked 时说明文字被挤成逐字竖排（v1.4.9 踩过的坑） */}
+              <SettingsRow label="代理" stacked description="默认跟随系统代理；选手动后独占使用下方地址">
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
+                  <select
+                    className="settings-select"
+                    value={aiConfig.proxyMode}
+                    onChange={(e) => patchAiConfig({ proxyMode: e.target.value as AiProviderConfig['proxyMode'] })}
+                  >
+                    <option value="system">跟随系统</option>
+                    <option value="manual">手动指定</option>
+                  </select>
+                  {aiConfig.proxyMode === 'manual' && (
+                    <input
+                      className="settings-input"
+                      type="text"
+                      placeholder="http://127.0.0.1:7890"
+                      value={aiConfig.proxyUrl}
+                      onChange={(e) => patchAiConfig({ proxyUrl: e.target.value })}
+                    />
+                  )}
+                </div>
+              </SettingsRow>
+              <SettingsRow label="保存与测试" description={aiMessage || '先保存，再测试地址、密钥、模型与代理是否都通'}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <ActionButton onClick={() => void persistAiConfig(aiConfig)}>保存</ActionButton>
+                  <ActionButton onClick={() => void runAiTest()} disabled={aiTesting}>
+                    {aiTesting ? '测试中…' : '测试连接'}
+                  </ActionButton>
+                </div>
+              </SettingsRow>
+            </SettingsGroup>
+          )}
 
           <SettingsGroup title="下载" icon={<Download size={20} />}>
             <SettingsRow label="下载目录">

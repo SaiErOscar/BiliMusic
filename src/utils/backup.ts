@@ -7,7 +7,7 @@
 // 用户名、各类数据）经 PBKDF2-SHA256 派生密钥后用 AES-256-GCM 加密为 ct。
 // 口令不落盘、不存储：忘记即无法解密。
 
-import type { AppSettings, DownloadRecord, Playlist, ThemeMode, Tombstone, Track } from '@/types'
+import type { AppSettings, AiProviderConfig, DownloadRecord, Playlist, ThemeMode, Tombstone, Track } from '@/types'
 import { platform } from '@/platform'
 import {
   DEFAULT_APP_SETTINGS,
@@ -81,6 +81,13 @@ export interface BackupPayload {
   lyricOffsets: Record<string, number>
   settings: AppSettings
   theme: ThemeMode
+  /**
+   * v1.4.11-pre3 AI Provider 配置（含 API 密钥）。
+   * 用户明确要求「导出所有数据时一定要一并导出」，因此这里带上明文密钥——
+   * 整个 .bmback 本身由用户口令经 PBKDF2+AES-GCM 加密，密钥落在密文负载里，
+   * 与数据库口令同一保护级别，不额外降级。
+   */
+  aiConfig?: AiProviderConfig | null
 }
 
 // 信封（base64 文件里编码的对象）；meta 明文，密文负载在 ct
@@ -175,6 +182,25 @@ export async function collectBackup(): Promise<BackupPayload> {
     lyricOffsets: loadLyricOffsetMap(),
     settings: loadAppSettings(),
     theme: (readStoredItemSync(THEME_MODE_KEY) as ThemeMode) || 'system',
+    // AI 配置随备份一并导出（用户明确要求）。取不到就置 null，不让备份因它失败。
+    aiConfig: await loadAiConfigForBackup(),
+  }
+}
+
+/**
+ * v1.4.11-pre3：备份用的 AI 配置读取。
+ * 非桌面平台（无 aiConfig capability）返回 null；主进程读失败也降级为 null，
+ * 备份是「能导出多少算多少」，不能因为一个可选能力整体失败。
+ */
+async function loadAiConfigForBackup(): Promise<AiProviderConfig | null> {
+  try {
+    if (!platform.aiConfig) return null
+    const cfg = await platform.aiConfig.get()
+    // 空配置不入备份，避免导入时用空值覆盖已填好的设置
+    if (!cfg.baseUrl && !cfg.apiKey && !cfg.model) return null
+    return cfg
+  } catch {
+    return null
   }
 }
 
@@ -292,6 +318,13 @@ export function applyBackup(payload: BackupPayload): ApplyResult {
 
   // 设置：整份覆盖（导入确认框已明示），与默认值合并防字段缺失
   saveAppSettings({ ...DEFAULT_APP_SETTINGS, ...(payload.settings || {}) } as AppSettings)
+
+  // v1.4.11-pre3 AI 配置：备份里有就写回主进程（密钥重新经 safeStorage 加密落盘）。
+  // applyBackup 是同步函数，这里只能 fire-and-forget；写失败不阻断整体恢复——
+  // AI 是可选能力，用户可稍后在设置页重填密钥。
+  if (payload.aiConfig && platform.aiConfig) {
+    void platform.aiConfig.set(payload.aiConfig).catch(() => {})
+  }
 
   // 深浅色模式：写回存储并即时应用到 DOM（v1.4.3-pre7 修复：主题此前未纳入备份）
   if (payload.theme) {

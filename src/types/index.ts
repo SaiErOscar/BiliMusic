@@ -134,6 +134,26 @@ export interface AppSettings {
  */
 export type CoverFitMode = 'cover' | 'contain' | 'fill'
 
+/**
+ * v1.4.11-pre3 AI 底座：OpenAI 兼容 Provider 配置。
+ *
+ * 密钥安全口径（用户明确要求）：绝不写注册表、必须加密落盘、导出全部数据时一并导出。
+ * 落盘在主进程完成（electron/ai.ts，safeStorage 加密），渲染层这份结构只是透传载体，
+ * 不进 localStorage、不进 AppSettings。
+ */
+export interface AiProviderConfig {
+  /** OpenAI 兼容 baseURL，如 https://api.deepseek.com/v1 */
+  baseUrl: string
+  /** 模型名，如 deepseek-chat */
+  model: string
+  /** API 密钥（内存明文；落盘由主进程加密） */
+  apiKey: string
+  /** 代理模式：system = 跟随系统（默认）；manual = 独占使用 proxyUrl */
+  proxyMode: 'system' | 'manual'
+  /** 手动代理地址，如 http://127.0.0.1:7890 */
+  proxyUrl: string
+}
+
 export type NavItem = {
   icon: string
   label: string

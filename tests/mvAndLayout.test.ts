@@ -327,7 +327,7 @@ describe('MV 导出跟随音频可视化（v1.4.10-pre1）', () => {
   it('分析失败只降级为无柱子，不中断导出', () => {
     expect(mainSrc).toContain('频谱分析失败，导出将不含音频可视化')
     // 分析入口内部吞错返回 null，runExport 侧把 null 当「可视化关闭」继续跑
-    expect(mainSrc).toMatch(/return \{ base64: encodeTimelineBase64\(timeline\)[\s\S]*?\n    return null\n  \}/)
+    expect(mainSrc).toMatch(/return \{ base64: encodeTimelineBase64\(timeline\)[\s\S]*?\n {4}return null\n {2}\}/)
   })
 
   it('舞台按时间索引频谱绘制，且不引入任何重绘循环', () => {
