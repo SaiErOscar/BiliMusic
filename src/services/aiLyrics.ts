@@ -12,6 +12,7 @@
 import { aiChat, type AiChatMessage } from '@/services/ai'
 import type { AiProviderConfig } from '@/types'
 import type { LyricLine } from '@/services/lyrics'
+import { loadProfileContext, renderProfileContext } from '@/services/aiProfileContext'
 
 /** 单批最多送多少行（长歌词分批，控制 token 与失败面） */
 export const AI_LYRIC_BATCH = 40
@@ -64,7 +65,13 @@ export function pickTranslatableIndexes(lines: LyricLine[]): number[] {
   return idx
 }
 
-function buildMessages(mode: AiLyricMode, batch: { index: number; text: string }[], title: string, artist: string): AiChatMessage[] {
+function buildMessages(
+  mode: AiLyricMode,
+  batch: { index: number; text: string }[],
+  title: string,
+  artist: string,
+  contextText = '',
+): AiChatMessage[] {
   const task = mode === 'translate'
     ? '把每一行歌词翻译成简体中文。若原文已是中文，则改写成更自然通顺的表达；不要解释，不要加注释。'
     : '为每一行歌词写一句简短赏析（不超过 30 字），说明它的意象、情绪或修辞。不要复述原句，不要写成长篇评论。'
@@ -77,7 +84,10 @@ function buildMessages(mode: AiLyricMode, batch: { index: number; text: string }
     '3. 只输出 JSON 数组，不要任何解释文字或代码围栏；',
     '4. 输出格式：[{"index":行号,"text":"处理结果"}]',
   ].join('\n')
-  const user = '歌曲：' + title + (artist ? ' - ' + artist : '') + '\n歌词：\n' + JSON.stringify(batch, null, 0)
+  const user =
+    (contextText ? contextText + '\n\n' : '')
+    + '歌曲：' + title + (artist ? ' - ' + artist : '')
+    + '\n歌词：\n' + JSON.stringify(batch, null, 0)
   return [
     { role: 'system', content: system },
     { role: 'user', content: user },
@@ -103,13 +113,22 @@ export async function enhanceLyrics(
     batches.push(indexes.slice(i, i + AI_LYRIC_BATCH).map((idx) => ({ index: idx, text: lines[idx].text })))
   }
 
+  // v1.4.13-pre2 画像注入：让翻译/赏析贴合用户口味（例如讨厌过度解读）
+  const contextText = renderProfileContext(await loadProfileContext())
+
   const result = new Map<number, string>()
   let failedBatches = 0
   const CONCURRENCY = 3
   for (let i = 0; i < batches.length; i += CONCURRENCY) {
     const slice = batches.slice(i, i + CONCURRENCY)
     const settled = await Promise.allSettled(
-      slice.map((batch) => aiChat(config, { messages: buildMessages(mode, batch, meta.title, meta.artist), temperature: 0.3, timeoutMs: 90000 })),
+      slice.map((batch) =>
+        aiChat(config, {
+          messages: buildMessages(mode, batch, meta.title, meta.artist, contextText),
+          temperature: 0.3,
+          timeoutMs: 90000,
+        }),
+      ),
     )
     settled.forEach((s, k) => {
       if (s.status === 'rejected') {

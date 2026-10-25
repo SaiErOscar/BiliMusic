@@ -9,6 +9,7 @@ import { useState, type ReactNode } from 'react'
 import { ActionButton } from '@/components/AppleMusicPage'
 import { generateAiPlaylist, saveAiPlaylist, type AiPlaylistResult } from '@/services/aiPlaylist'
 import { saveAiConfig } from '@/services/ai'
+import { platform } from '@/platform'
 import type { AiSettings } from '@/types'
 
 /** 行容器签名，与 Settings.tsx 的 SettingsRow 对齐（只用到这三个字段） */
@@ -56,6 +57,8 @@ export default function AiPlaylistPanel({ config, Row }: Props) {
     if (!preview) return
     try {
       const saved = saveAiPlaylist(preview)
+      // v1.4.13-pre2 学习信号：保存说明这批选择被认可
+      void platform.userProfile?.recordPlaylist(preview.tracks.length).catch(() => {})
       setMessage('已保存歌单「' + saved.name + '」，共 ' + preview.tracks.length + ' 首')
       setPreview(null)
       setIntent('')

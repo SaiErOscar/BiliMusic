@@ -14,49 +14,9 @@ import { aiChat } from '@/services/ai'
 import { summarize, renderSummary } from '@/services/aiPortrait'
 import { loadPlayStats } from '@/utils/storage'
 import { buildCandidatePool, type AiPlaylistCandidate } from '@/services/aiPlaylist'
-import { platform } from '@/platform'
+import { loadProfileContext } from '@/services/aiProfileContext'
 import type { AiSettings, Track } from '@/types'
 
-/**
- * v1.4.13-pre1 读取画像上下文：手写画像（外部文件）+ 学习信号摘要。
- *
- * 每次调用都现读文件而不是缓存——用户用编辑器改完即刻生效，
- * 这正是把画像搬出设置页的初衷。读不到就返回空，不阻断 AI 功能。
- */
-export async function loadProfileContext(): Promise<{ profile: string; learned: string }> {
-  const cap = platform.userProfile
-  if (!cap) return { profile: '', learned: '' }
-  try {
-    const [read, learnedRaw] = await Promise.all([cap.read(), cap.getLearned()])
-    const learned = renderLearnedSummary(learnedRaw)
-    return { profile: (read?.text || '').trim(), learned }
-  } catch {
-    return { profile: '', learned: '' }
-  }
-}
-
-/** 把学习信号渲染成紧凑文本（渲染逻辑与主进程保持同一口径） */
-function renderLearnedSummary(raw: unknown): string {
-  const s = raw as
-    | { played?: Record<string, number>; skipped?: Record<string, number>; playlistSaved?: { times: number; tracks: number }; lyricReverted?: number }
-    | null
-  if (!s) return ''
-  const top = (rec?: Record<string, number>) =>
-    Object.entries(rec || {})
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
-      .map(([k, v]) => k + ' ×' + v)
-  const lines: string[] = []
-  const played = top(s.played)
-  const skipped = top(s.skipped)
-  if (played.length) lines.push('常被播放：' + played.join('、'))
-  if (skipped.length) lines.push('常被跳过：' + skipped.join('、'))
-  if (s.playlistSaved && s.playlistSaved.times > 0) {
-    lines.push('AI 歌单被保存 ' + s.playlistSaved.times + ' 次，累计 ' + s.playlistSaved.tracks + ' 首')
-  }
-  if (s.lyricReverted && s.lyricReverted > 0) lines.push('歌词增强被还原 ' + s.lyricReverted + ' 次')
-  return lines.join('\n')
-}
 
 export interface AiRecommendation {
   /** 问候语（结合时段与环境，一两句） */

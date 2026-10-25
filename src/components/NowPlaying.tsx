@@ -608,6 +608,8 @@ function LyricsPanel({
   const toggleAiLyric = async () => {
     if (lyrics.hasAiEnhance) {
       lyrics.clearAiEnhance()
+      // v1.4.13-pre2 学习信号：还原说明这次增强不合口味
+      void platform.userProfile?.record('lyricReverted').catch(() => {})
       return
     }
     if (!lyrics.rawResult?.lines?.length) return

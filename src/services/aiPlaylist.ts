@@ -11,6 +11,7 @@
 import { aiChat, type AiChatMessage } from '@/services/ai'
 import { loadFavoriteTracks, loadRecentTracks, loadDownloadRecords, createPlaylist, addTrackToPlaylist } from '@/utils/storage'
 import type { AiProviderConfig, Playlist, Track } from '@/types'
+import { loadProfileContext, renderProfileContext } from '@/services/aiProfileContext'
 
 /** 单次最多喂给模型的候选曲目数（控制 token 成本与延迟） */
 export const AI_PLAYLIST_POOL_LIMIT = 120
@@ -114,9 +115,19 @@ export async function generateAiPlaylist(
     '{"name":"歌单名（不超过 20 字）","description":"一句话说明（不超过 40 字）","indexes":[编号,...]}',
   ].join('\n')
 
+  // v1.4.13-pre2 画像注入：手写画像 + 学习信号，让「用完 AI 后的选择」影响后续结果
+  const contextText = renderProfileContext(await loadProfileContext())
+  const contextLines = contextText ? [contextText] : []
+
   const messages: AiChatMessage[] = [
     { role: 'system', content: systemLines },
-    { role: 'user', content: '场景/情绪：' + trimmedIntent + '\n\n候选曲目：\n' + renderPool(pool) },
+    {
+      role: 'user',
+      content:
+        (contextLines.length ? contextLines.join('\n\n') + '\n\n' : '')
+        + '场景/情绪：' + trimmedIntent
+        + '\n\n候选曲目：\n' + renderPool(pool),
+    },
   ]
 
   const reply = await aiChat(config, { messages, temperature: 0.4, timeoutMs: 90000 })
