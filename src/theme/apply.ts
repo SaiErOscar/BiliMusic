@@ -33,6 +33,21 @@ export function currentResolvedMode(): ResolvedMode {
   return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
 }
 
+/**
+ * v1.4.13-pre3 主题化图标：把当前主题与明暗同步给主进程，换窗口与托盘图标。
+ *
+ * 自定义基色没有预生成图标，主进程会回落到默认图标——这是刻意的降级，
+ * 不为了一个图标去运行时重新着色。
+ */
+function syncThemedIcon(themeId: string, mode: ResolvedMode): void {
+  try {
+    const api = window.electronAPI as { applyThemeIcon?: (id: string, m: string) => Promise<unknown> } | undefined
+    void api?.applyThemeIcon?.(themeId || 'default', mode)
+  } catch {
+    /* 图标同步失败不影响主题本身 */
+  }
+}
+
 /** 按当前设置重算品牌色 token（设置变更、备份导入后调用） */
 export function refreshBrandTokens(mode?: ResolvedMode): void {
   const resolved = mode ?? currentResolvedMode()
@@ -44,6 +59,7 @@ export function refreshBrandTokens(mode?: ResolvedMode): void {
   })
   if (Object.keys(tokens).length === 0) clearThemeTokens()
   else applyThemeTokens(tokens)
+  syncThemedIcon(settings.themeId, resolved)
 }
 
 /** 应用明暗模式并重算品牌色 */

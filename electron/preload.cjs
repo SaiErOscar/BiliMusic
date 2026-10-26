@@ -211,6 +211,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   persistentStorage,
   aiConfig,
   userProfile,
+  // v1.4.13-pre3 主题化图标：切换主题后让主进程换窗口与托盘图标
+  applyThemeIcon: (themeId, mode) => ipcRenderer.invoke('theme:apply-icon', themeId, mode),
   biliApi,
   lyricsApi,
 })

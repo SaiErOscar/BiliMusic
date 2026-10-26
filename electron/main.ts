@@ -157,6 +157,34 @@ function loadAppIcon(fileName = 'icon.png') {
   return nativeImage.createFromPath(iconPath)
 }
 
+/**
+ * v1.4.13-pre3 主题化图标：按当前主题取对应配色的图标。
+ *
+ * 图标集由 scripts/make-theme-icons.cjs 预生成（同设计、不同主色），放在 electron/icons/。
+ * 找不到对应文件时回落到默认图标——自定义基色没有预生成图标，就走这条回落。
+ */
+function loadThemedIcon(themeId: string, mode: 'light' | 'dark', kind: 'icon' | 'tray' = 'icon') {
+  const name = kind + '-' + themeId + '-' + mode + '.png'
+  const base = process.env.VITE_DEV_SERVER_URL ? path.join(__dirname, '../electron') : __dirname
+  const themed = nativeImage.createFromPath(path.join(base, 'icons', name))
+  if (!themed.isEmpty()) return themed
+  return loadAppIcon(kind === 'tray' ? 'tray.png' : 'icon.png')
+}
+
+/** 把当前主题的图标应用到主窗口与托盘 */
+function applyThemedIcons(themeId: string, mode: 'light' | 'dark') {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setIcon(loadThemedIcon(themeId, mode, 'icon'))
+    }
+    if (tray) {
+      tray.setImage(loadThemedIcon(themeId, mode, 'tray').resize({ width: 32, height: 32 }))
+    }
+  } catch {
+    /* 图标切换失败不影响主流程 */
+  }
+}
+
 function createTrayIcon() {
   const trayIcon = isHarmonyOS ? loadAppIcon('tray.png') : loadAppIcon()
   // 托盘图标尺寸较小，缩放到 32px 以兼顾标准与高 DPI 显示
@@ -734,6 +762,11 @@ app.whenReady().then(() => {
   registerAiHandlers()
   // v1.4.13-pre1 用户画像外部文件 + 学习记录
   registerProfileHandlers()
+  // v1.4.13-pre3 主题化图标：渲染层切换主题后通知主进程换图
+  ipcMain.handle('theme:apply-icon', (_e, themeId: string, mode: 'light' | 'dark') => {
+    applyThemedIcons(String(themeId || 'default'), mode === 'dark' ? 'dark' : 'light')
+    return { ok: true }
+  })
   registerMediaKeysIpc(() => mainWindow)
   registerMiniWindowHandlers({
     getMainWindow: () => mainWindow,

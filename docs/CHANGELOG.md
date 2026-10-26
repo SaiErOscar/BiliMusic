@@ -5,6 +5,30 @@
 
 ---
 
+## v1.4.13-pre3 — 主题化图标
+
+**发布日期：2026-10-25**
+
+### 新增
+
+- **同设计、多配色的应用图标集**：以现有图标为形状母版，按 5 套内置主题 × 明暗两态生成 10 张 PNG（`icon-<themeId>-<mode>.png`）。重着色时按原像素亮度映射到目标主色，保留原有的高光与阴影层次，形状完全一致。
+- **随主题实时切换**：切换主题配色或明暗模式后，窗口标题栏图标与托盘图标立即换成对应配色。
+- **回落策略**：自定义基色没有预生成图标，自动回落到默认图标——不为一个图标去做运行时重新着色。
+
+### 实现要点
+
+- `scripts/make-theme-icons.cjs`：纯 Node 实现的 PNG 解码/编码（含 PNG 滤波还原与 CRC32），不引入图像库依赖。按主题主色重着色后输出到 `electron/icons/`。
+- 主进程 `loadThemedIcon(themeId, mode, kind)` 按名取图，`nativeImage.isEmpty()` 判定失败即回落默认图标；`applyThemedIcons()` 同时更新主窗口与托盘。
+- 新增 IPC `theme:apply-icon`，渲染层 `refreshBrandTokens()` 在主题或明暗变化时调用——覆盖设置页切换、备份导入、系统明暗跟随三条路径。
+- 构建脚本 `copy-preload` 增加图标集复制到 `dist-electron/icons`。
+
+### 测试与实测
+
+- 新增 `tests/themeIcons.test.ts` 6 项：5 套主题 × 明暗两版图标齐全、PNG 魔数合法、主进程按主题取图且有回落、窗口与托盘都换图、有独立 IPC、渲染层在主题变化时同步。
+- vitest **374 项全绿**，tsc / eslint 0 error。
+- Electron 实测：`dist-electron/icons` 下 10 张图标齐全，`nativeImage.createFromPath` 全部加载成功（1024×1024）。
+
+---
 ## v1.4.13-pre2 — 学习结果注入三个 AI 功能
 
 **发布日期：2026-10-25**
