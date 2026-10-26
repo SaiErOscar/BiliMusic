@@ -20,7 +20,7 @@
 - `scripts/make-theme-icons.cjs`：纯 Node 实现的 PNG 解码/编码（含 PNG 滤波还原与 CRC32），不引入图像库依赖。按主题主色重着色后输出到 `electron/icons/`。
 - 主进程 `loadThemedIcon(themeId, mode, kind)` 按名取图，`nativeImage.isEmpty()` 判定失败即回落默认图标；`applyThemedIcons()` 同时更新主窗口与托盘。
 - 新增 IPC `theme:apply-icon`，渲染层 `refreshBrandTokens()` 在主题或明暗变化时调用——覆盖设置页切换、备份导入、系统明暗跟随三条路径。
-- 构建脚本 `copy-preload` 增加图标集复制到 `dist-electron/icons`。
+- **图标集必须放在 asar 外**（`extraResources` → `resources/icons`）：实测 `nativeImage.createFromPath` 读 asar 内路径返回空图（`isEmpty=true`），若打进 asar，所有主题图标会静默失效、全部回落到默认图标。这是本轮实际踩到并修正的坑。
 
 ### 测试与实测
 

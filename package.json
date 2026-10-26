@@ -141,6 +141,12 @@
       "node_modules/fluent-ffmpeg/**",
       "!node_modules/@capacitor/**",
       "!node_modules/@capacitor/android/capacitor/build/**"
+    ],
+    "extraResources": [
+      {
+        "from": "electron/icons",
+        "to": "icons"
+      }
     ]
   }
 }

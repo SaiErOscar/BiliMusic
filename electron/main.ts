@@ -165,8 +165,12 @@ function loadAppIcon(fileName = 'icon.png') {
  */
 function loadThemedIcon(themeId: string, mode: 'light' | 'dark', kind: 'icon' | 'tray' = 'icon') {
   const name = kind + '-' + themeId + '-' + mode + '.png'
-  const base = process.env.VITE_DEV_SERVER_URL ? path.join(__dirname, '../electron') : __dirname
-  const themed = nativeImage.createFromPath(path.join(base, 'icons', name))
+  // 打包后图标集放在 resources/icons（extraResources），**不能**放进 asar：
+  // 实测 nativeImage.createFromPath 读 asar 内路径返回空图，会导致所有主题图标静默失效。
+  const base = process.env.VITE_DEV_SERVER_URL
+    ? path.join(__dirname, '../electron')
+    : path.join(process.resourcesPath || __dirname, 'icons')
+  const themed = nativeImage.createFromPath(path.join(base, name))
   if (!themed.isEmpty()) return themed
   return loadAppIcon(kind === 'tray' ? 'tray.png' : 'icon.png')
 }
