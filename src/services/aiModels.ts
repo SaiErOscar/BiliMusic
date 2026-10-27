@@ -18,21 +18,41 @@ export interface ModelOption {
   label: string
 }
 
-/** 内置回落表：接口不可达时至少能用 */
+/**
+ * 内置回落表：接口不可达时至少能用。
+ *
+ * v1.4.13-pre4 二次修正：按用户要求，**每个预设带自己的模型列表**，
+ * 不再所有预设都摊一份 DeepSeek 的名字；展示一律用产品名（如 Deepseek-V4-Pro），
+ * 不暴露接口名。
+ */
 export const FALLBACK_MODELS: Record<string, ModelOption[]> = {
   'api.deepseek.com': [
-    { id: 'deepseek-flash', label: 'DeepSeek Flash' },
-    { id: 'deepseek-pro', label: 'DeepSeek Pro' },
-    { id: 'deepseek-chat', label: 'DeepSeek Chat（旧名）' },
-    { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner（旧名）' },
+    { id: 'deepseek-v4-pro', label: 'Deepseek-V4-Pro' },
+    { id: 'deepseek-v4.1-flash', label: 'Deepseek-V4.1-Flash 1017' },
+    { id: 'deepseek-flash', label: 'Deepseek-Flash' },
+    { id: 'deepseek-pro', label: 'Deepseek-Pro' },
   ],
   'api.openai.com': [
     { id: 'gpt-4o-mini', label: 'GPT-4o mini' },
     { id: 'gpt-4o', label: 'GPT-4o' },
+    { id: 'gpt-5.5', label: 'GPT-5.5' },
   ],
-  'api.moonshot.cn': [{ id: 'moonshot-v1-8k', label: 'Kimi v1 8K' }],
-  'dashscope.aliyuncs.com': [{ id: 'qwen-plus', label: '通义千问 Plus' }],
-  'open.bigmodel.cn': [{ id: 'glm-4-flash', label: 'GLM-4 Flash' }],
+  'api.moonshot.cn': [
+    { id: 'kimi-k3', label: 'Kimi-K3' },
+    { id: 'kimi-k2.6', label: 'Kimi-K2.6' },
+    { id: 'moonshot-v1-8k', label: 'Moonshot v1 8K' },
+  ],
+  'dashscope.aliyuncs.com': [
+    { id: 'qwen-plus', label: 'Qwen-Plus' },
+    { id: 'qwen-max', label: 'Qwen-Max' },
+  ],
+  'open.bigmodel.cn': [
+    { id: 'glm-5.3', label: 'GLM-5.3' },
+    { id: 'glm-4-flash', label: 'GLM-4-Flash' },
+  ],
+  'api.siliconflow.cn': [
+    { id: 'Qwen/Qwen2.5-7B-Instruct', label: 'Qwen2.5-7B-Instruct' },
+  ],
 }
 
 /** 从 baseURL 里取主机名，用于匹配回落表 */

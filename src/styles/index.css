@@ -4015,6 +4015,17 @@ body {
   /* v1.3.9-beta1 fix: was only min-width:0 with no flex-grow, squeezed to min-content by the control in a space-between row, CJK label wrapped one glyph per line */
   flex: 1 1 auto;
   min-width: 0;
+  /*
+   * v1.4.13-pre4 二次修正：min-width:0 允许压缩到 0，右侧控件一多（输入框+按钮）
+   * 左侧文字列就被压到单字宽，中文逐字竖排。这里给出一个不可再压的下限，
+   * 中文标签至少保留 5 个字宽；再窄就交给 stacked 纵向排布，而不是逐字折行。
+   */
+  min-width: 7em;
+}
+
+/* 文字列拿到下限后，控件区允许收缩，避免两侧硬顶 */
+.settings-row__control {
+  flex: 0 1 auto;
 }
 
 .settings-row__text strong {

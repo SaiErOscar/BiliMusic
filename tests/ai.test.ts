@@ -44,9 +44,11 @@ describe('AI 预设（OpenAI 兼容 + DeepSeek）', () => {
     // v1.4.13-pre1 扩充了国内常见服务，这里只约束格式不锁数量
     expect(ids.length).toBeGreaterThanOrEqual(2)
     for (const p of AI_PRESETS) {
+      expect(p.label.length).toBeGreaterThan(0)
+      // WorkBuddy 是预设但不是一个 baseUrl（走面板登录），其余必须是 https 地址
+      if (p.id === 'workbuddy') continue
       expect(p.baseUrl.startsWith('https://')).toBe(true)
       expect(p.model.length).toBeGreaterThan(0)
-      expect(p.label.length).toBeGreaterThan(0)
     }
   })
 

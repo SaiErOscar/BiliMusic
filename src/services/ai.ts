@@ -254,4 +254,6 @@ export const AI_PRESETS = [
   { id: 'dashscope', label: '通义千问（阿里）', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
   { id: 'zhipu', label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
   { id: 'siliconflow', label: '硅基流动', baseUrl: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-7B-Instruct' },
+  // v1.4.13-pre4 WorkBuddy 作为一种预设：选中后弹出面板完成登录/模型选择
+  { id: 'workbuddy', label: 'WorkBuddy', baseUrl: '', model: '' },
 ] as const

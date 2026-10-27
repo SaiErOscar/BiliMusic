@@ -36,9 +36,10 @@ describe('主进程按主题取图', () => {
   })
 
   it('窗口与托盘都换图', () => {
-    // 实现改成先取 img 再 setIcon（为二次写入刷新 Windows 缓存）
-    expect(src).toContain('setIcon(img)')
-    expect(src).toContain('setImage(loadThemedIcon')
+    expect(src).toContain('mainWindow.setIcon(img)')
+    // 托盘用桌面图标缩放（白主体 + 主题色衬底），不再是单色 tray 图
+    expect(src).toContain('tray.setImage(trayImg)')
+    expect(src).toContain("loadThemedIcon(themeId, mode, 'icon').resize({ width: 32, height: 32 })")
   })
 
   it('有独立 IPC 供渲染层触发', () => {

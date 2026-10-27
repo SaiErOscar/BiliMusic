@@ -169,16 +169,52 @@ interface LoginSession {
 const sessions = new Map<string, LoginSession>()
 
 /** 申请 state 并返回授权地址，交给系统浏览器打开 */
+/**
+ * 从响应里取业务数据。
+ *
+ * 插件的 readJson + envelopeData：服务端把数据包在 `{code, data}` 里，
+ * 部分端点直接返回裸对象，两种都要兼容。
+ */
+function envelopeData(doc: Record<string, unknown>): Record<string, unknown> {
+  const d = doc['data']
+  return d && typeof d === 'object' && !Array.isArray(d) ? (d as Record<string, unknown>) : doc
+}
+
+function firstString(obj: Record<string, unknown>, keys: string[]): string {
+  for (const k of keys) {
+    const v = obj[k]
+    if (typeof v === 'string' && v.trim()) return v.trim()
+  }
+  return ''
+}
+
+/**
+ * 申请登录态。
+ *
+ * v1.4.13-pre4 修 404：插件用的是 **POST + body '{}'**，我用 GET 直接被网关拒。
+ * 这是实测出来的差异（用户报「申请登录态失败」），不是猜的。
+ */
 export async function startWebLogin(region: WorkBuddyRegion): Promise<{ key: string; url: string }> {
   const base = REGION_BASE[region]
   const resp = await fetch(`${base}${API_PREFIX}/auth/state?platform=workbuddy`, {
-    headers: { Accept: 'application/json' },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: '{}',
   })
-  if (!resp.ok) throw new Error(`申请登录态失败（${resp.status}）`)
-  const data = (await resp.json()) as Record<string, unknown>
-  const state = String(data['state'] || data['loginState'] || '')
-  const url = String(data['url'] || data['loginUrl'] || data['authUrl'] || '')
-  if (!state || !url) throw new Error('服务端未返回登录地址')
+  const text = await resp.text().catch(() => '')
+  let doc: Record<string, unknown> = {}
+  try {
+    doc = JSON.parse(text) as Record<string, unknown>
+  } catch {
+    throw new Error(`登录服务返回非 JSON（HTTP ${resp.status}）`)
+  }
+  const data = envelopeData(doc)
+  const state = firstString(data, ['state', 'State'])
+  if (!state) {
+    const msg = firstString(doc, ['message', 'msg', 'error_msg'])
+    throw new Error(`申请登录态失败（HTTP ${resp.status}）${msg ? '：' + msg : ''}`)
+  }
+  const url = firstString(data, ['authUrl', 'auth_url', 'url', 'Url']) || `${base}/login?state=${encodeURIComponent(state)}`
   const key = Math.random().toString(36).slice(2)
   sessions.set(key, { region, state, expiresAt: Date.now() + 10 * 60 * 1000 })
   return { key, url }
@@ -199,16 +235,26 @@ export async function pollWebLogin(key: string): Promise<
   }
   const base = REGION_BASE[s.region]
   const resp = await fetch(`${base}${API_PREFIX}/auth/token?state=${encodeURIComponent(s.state)}`, {
+    method: 'GET',
     headers: { Accept: 'application/json' },
   })
-  if (!resp.ok) return { status: 'pending' }
-  const data = (await resp.json()) as Record<string, unknown>
+  const text = await resp.text().catch(() => '')
+  let doc: Record<string, unknown> = {}
+  try {
+    doc = JSON.parse(text) as Record<string, unknown>
+  } catch {
+    return { status: 'pending' }
+  }
+  // 插件口径：pending 时返回业务错误码，只有 code 0 / 200 才带数据
+  const code = typeof doc['code'] === 'number' ? (doc['code'] as number) : -1
+  if (code !== 0 && code !== 200) return { status: 'pending' }
+  const data = envelopeData(doc)
   const token = pickToken(data)
   if (!token) return { status: 'pending' }
   const credential: WorkBuddyCredential = {
     accessToken: token,
     region: s.region,
-    account: String(data['uin'] || data['nickname'] || '') || undefined,
+    account: firstString(data, ['uin', 'nickname', 'NickName']) || undefined,
     expiresAt: pickExpiry(data),
   }
   s.credential = credential

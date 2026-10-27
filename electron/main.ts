@@ -190,16 +190,27 @@ function applyThemedIcons(themeId: string, mode: 'light' | 'dark') {
     const apply = () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         const img = loadThemedIcon(themeId, mode, 'icon')
-        mainWindow.setIcon(img)
-        // Windows 需要二次写入才能刷新已显示窗口的标题栏/任务栏图标
-        setTimeout(() => {
+        /*
+         * v1.4.13-pre4 三次修正：Windows 对已显示窗口的标题栏/任务栏图标有强缓存，
+         * 单次或两次 setIcon 都可能被吞。这里改成三连写（0 / 80 / 300ms），
+         * 并在每次之前把图标重新 createFromPath 一次——复用同一个 nativeImage
+         * 对象时系统会认为「没变化」而跳过重绘。
+         */
+        const push = () => {
           try {
-            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setIcon(img)
+            if (!mainWindow || mainWindow.isDestroyed()) return
+            mainWindow.setIcon(loadThemedIcon(themeId, mode, 'icon'))
           } catch { /* ignore */ }
-        }, 60)
+        }
+        mainWindow.setIcon(img)
+        setTimeout(push, 80)
+        setTimeout(push, 300)
       }
       if (tray) {
-        tray.setImage(loadThemedIcon(themeId, mode, 'tray').resize({ width: 32, height: 32 }))
+        // v1.4.13-pre4：托盘要的是「桌面图标那种」——内部保持纯白，外围衬主题色。
+        // 直接用 icon-*.png 缩放，既保留白色主体又有主题色底。
+        const trayImg = loadThemedIcon(themeId, mode, 'icon').resize({ width: 32, height: 32 })
+        tray.setImage(trayImg)
       }
     }
     apply()

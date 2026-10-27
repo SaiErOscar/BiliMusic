@@ -175,8 +175,29 @@ export default function Settings() {
 
   useEffect(() => {
     if (!isAiSupported()) return
-    void getAiConfig().then(setAiConfig).catch(() => {})
+    void getAiConfig().then((c) => { setAiConfig(c); aiLoadedRef.current = true }).catch(() => {})
   }, [])
+
+  /**
+   * 配置变化即保存（300ms 防抖）。
+   *
+   * 用「首次加载完成」闸门跳过挂载时的那一次，避免把默认值写回去覆盖已存配置。
+   */
+  const aiLoadedRef = useRef(false)
+  const aiSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!isAiSupported()) return
+    if (!aiLoadedRef.current) return
+    if (aiSaveTimer.current) clearTimeout(aiSaveTimer.current)
+    aiSaveTimer.current = setTimeout(() => {
+      void saveAiConfig(aiConfig).catch((err) => {
+        setAiMessage(err instanceof Error ? err.message : String(err))
+      })
+    }, 300)
+    return () => {
+      if (aiSaveTimer.current) clearTimeout(aiSaveTimer.current)
+    }
+  }, [aiConfig])
 
   /**
    * 改配置。
@@ -185,18 +206,15 @@ export default function Settings() {
    * 再回设置又变回默认」——因为发现页读的是主进程里的已存配置，而设置页改的只是本地状态。
    * 现在凡是走这个函数都立即持久化（防抖合并，避免连点下拉反复写盘）。
    */
-  const aiSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /**
+   * 改配置：只更新本地 state，**保存交给下方 useEffect**。
+   *
+   * v1.4.13-pre4 二次修正：上一版把 setTimeout 与 setAiMessage 写在 setAiConfig 的
+   * 更新函数里——那是 React 要求纯函数的副作用位置，StrictMode 双调用/并发渲染下
+   * 定时器会被清掉或重复注册，导致「改了没存」。
+   */
   const patchAiConfig = (patch: Partial<AiSettings>) => {
-    setAiConfig((c) => {
-      const next = { ...c, ...patch }
-      if (aiSaveTimer.current) clearTimeout(aiSaveTimer.current)
-      aiSaveTimer.current = setTimeout(() => {
-        void saveAiConfig(next).catch((err) => {
-          setAiMessage(err instanceof Error ? err.message : String(err))
-        })
-      }, 300)
-      return next
-    })
+    setAiConfig((c) => ({ ...c, ...patch }))
   }
 
   const persistAiConfig = async (next: AiSettings) => {
@@ -759,8 +777,13 @@ export default function Settings() {
                   className="settings-select"
                   value={AI_PRESETS.find((p) => p.baseUrl === aiConfig.baseUrl)?.id || ''}
                   onChange={(e) => {
+                    if (e.target.value === 'workbuddy') {
+                      // WorkBuddy 不是一个 baseUrl，选中即开面板走登录/模型选择
+                      setWbOpen(true)
+                      return
+                    }
                     const preset = AI_PRESETS.find((p) => p.id === e.target.value)
-                    if (preset) patchAiConfig({ baseUrl: preset.baseUrl, model: preset.model })
+                    if (preset) patchAiConfig({ source: 'provider', baseUrl: preset.baseUrl, model: preset.model })
                   }}
                 >
                   <option value="">自定义</option>
@@ -768,28 +791,19 @@ export default function Settings() {
                     <option key={p.id} value={p.id}>{p.label}</option>
                   ))}
                 </select>
-                <ActionButton
-                  onClick={() => {
-                    if (aiConfig.source === 'workbuddy') {
-                      patchAiConfig({ source: 'provider' })
-                      setAiMessage('已切回自定义 Provider')
-                    } else {
-                      setWbOpen(true)
-                    }
-                  }}
-                >
-                  {aiConfig.source === 'workbuddy' ? '切回 Provider' : 'WorkBuddy…'}
-                </ActionButton>
               </SettingsRow>
               <SettingsRow label="地址与模型" stacked description={modelSource || '地址填到 /v1 即可，路径会自动补全；模型从下拉选择'}>
                 <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-                  <input
-                    className="settings-input"
-                    type="url"
-                    placeholder="https://api.deepseek.com/v1"
-                    value={aiConfig.baseUrl}
-                    onChange={(e) => patchAiConfig({ baseUrl: e.target.value })}
-                  />
+                  {/* v1.4.13-pre4：地址默认收起，只有预设选「自定义」时才露出 */}
+                  {!aiConfig.baseUrl && (
+                    <input
+                      className="settings-input"
+                      type="url"
+                      placeholder="自定义 API 地址"
+                      value={aiConfig.baseUrl}
+                      onChange={(e) => patchAiConfig({ baseUrl: e.target.value })}
+                    />
+                  )}
                   <select
                     className="settings-select"
                     value={customModel ? '__custom__' : aiConfig.model}
