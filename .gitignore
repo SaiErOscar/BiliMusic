@@ -83,3 +83,5 @@ platform/HarmonyOS/oh_modules
 /_vzmv2*
 /release-rb/
 /release-pre*/
+dsh-connect-workbuddy/
+build/icon.ico

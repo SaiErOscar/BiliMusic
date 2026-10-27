@@ -168,6 +168,33 @@ export function registerProfileHandlers(): void {
     }
   })
   ipcMain.handle('profile:get-learned', async () => readLearned())
+  // v1.4.13-pre4 备份恢复：写回画像正文与学习信号
+  ipcMain.handle('profile:write-text', async (_e, text: string) => {
+    try {
+      const tmp = profilePath() + '.tmp'
+      await fs.mkdir(path.dirname(profilePath()), { recursive: true })
+      await fs.writeFile(tmp, String(text || ''), 'utf8')
+      await fs.rename(tmp, profilePath())
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) }
+    }
+  })
+  ipcMain.handle('profile:set-learned', async (_e, signals: unknown) => {
+    try {
+      const s = signals as Partial<LearnedSignals>
+      await writeLearned({
+        played: s?.played || {},
+        skipped: s?.skipped || {},
+        playlistSaved: s?.playlistSaved || { times: 0, tracks: 0 },
+        lyricReverted: s?.lyricReverted || 0,
+        updatedAt: '',
+      })
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) }
+    }
+  })
   ipcMain.handle('profile:apply-learned', async () => applyLearnedToProfile())
   ipcMain.handle('profile:clear-learned', async () => {
     await writeLearned({ ...EMPTY_LEARNED })

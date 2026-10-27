@@ -33,6 +33,7 @@ import {
 import { loadLyricOffsetMap, saveLyricOffsetMap } from '@/services/lyrics'
 import { getNavInfo } from '@/services/bilibiliApi'
 import { readStoredItemSync, writeStoredItem } from '@/utils/persistentStorage'
+import { loadPlayStats, savePlayStatsRaw } from '@/utils/storage'
 import { mergeItems } from '@/utils/sync'
 
 // 歌词偏移合并：本地优先（与 sync.ts 内部逻辑一致，就近定义避免额外导出）
@@ -88,6 +89,16 @@ export interface BackupPayload {
    * 与数据库口令同一保护级别，不额外降级。
    */
   aiConfig?: AiSettings | null
+  /**
+   * v1.4.13-pre4 补齐导出完整性：以下三项此前都没进备份，
+   * 但都是用户实际产生的数据，换机后丢失会让「导出所有数据」名不副实。
+   */
+  /** 用户画像文件正文（userData/user-profile.md） */
+  userProfileText?: string
+  /** 播放行为统计（次数/时长/完成数），AI 听歌画像的数据源 */
+  playStats?: Record<string, unknown>
+  /** AI 学习信号（ai-learned.json），影响后续推荐/歌单/歌词 */
+  aiLearned?: unknown
 }
 
 // 信封（base64 文件里编码的对象）；meta 明文，密文负载在 ct
@@ -184,6 +195,31 @@ export async function collectBackup(): Promise<BackupPayload> {
     theme: (readStoredItemSync(THEME_MODE_KEY) as ThemeMode) || 'system',
     // AI 配置随备份一并导出（用户明确要求）。取不到就置 null，不让备份因它失败。
     aiConfig: await loadAiConfigForBackup(),
+    // v1.4.13-pre4 导出完整性：画像文件、播放统计、学习信号
+    userProfileText: await loadProfileTextForBackup(),
+    playStats: loadPlayStats() as unknown as Record<string, unknown>,
+    aiLearned: await loadLearnedForBackup(),
+  }
+}
+
+/** 画像文件正文；非桌面平台或读不到返回空串 */
+async function loadProfileTextForBackup(): Promise<string> {
+  try {
+    if (!platform.userProfile) return ''
+    const r = await platform.userProfile.read()
+    return r?.text || ''
+  } catch {
+    return ''
+  }
+}
+
+/** AI 学习信号；读不到返回 null */
+async function loadLearnedForBackup(): Promise<unknown> {
+  try {
+    if (!platform.userProfile) return null
+    return await platform.userProfile.getLearned()
+  } catch {
+    return null
   }
 }
 
@@ -324,6 +360,21 @@ export function applyBackup(payload: BackupPayload): ApplyResult {
   // AI 是可选能力，用户可稍后在设置页重填密钥。
   if (payload.aiConfig && platform.aiConfig) {
     void platform.aiConfig.set(payload.aiConfig).catch(() => {})
+  }
+
+  // v1.4.13-pre4 恢复完整性：播放统计整份写回；画像与学习信号交给主进程
+  if (payload.playStats && typeof payload.playStats === 'object') {
+    try {
+      savePlayStatsRaw(payload.playStats as Record<string, never>)
+    } catch {
+      /* ignore */
+    }
+  }
+  if (payload.userProfileText !== undefined && platform.userProfile) {
+    void platform.userProfile.writeText?.(payload.userProfileText).catch(() => {})
+  }
+  if (payload.aiLearned && platform.userProfile) {
+    void platform.userProfile.setLearned?.(payload.aiLearned).catch(() => {})
   }
 
   // 深浅色模式：写回存储并即时应用到 DOM（v1.4.3-pre7 修复：主题此前未纳入备份）

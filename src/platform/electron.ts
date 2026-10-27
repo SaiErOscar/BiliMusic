@@ -40,6 +40,11 @@ export const electronPlatform: Platform = {
       ? { platform: a.platform, persistentStorage: a.persistentStorage, notifyRendererReady: a.notifyRendererReady }
       : undefined
   },
+  /** v1.4.13-pre4 WorkBuddy 国内/国际版 */
+  get workbuddy() {
+    const a = api()
+    return a?.workbuddy ? a.workbuddy : undefined
+  },
   /** v1.4.13-pre1 用户画像：外部文件编辑 + 学习记录 */
   get userProfile() {
     const a = api()
@@ -53,6 +58,8 @@ export const electronPlatform: Platform = {
           clearLearned: a.userProfile.clearLearned,
           record: a.userProfile.record,
           recordPlaylist: a.userProfile.recordPlaylist,
+          writeText: a.userProfile.writeText,
+          setLearned: a.userProfile.setLearned,
         }
       : undefined
   },

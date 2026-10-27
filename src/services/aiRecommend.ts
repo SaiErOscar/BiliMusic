@@ -18,6 +18,35 @@ import { loadProfileContext } from '@/services/aiProfileContext'
 import type { AiSettings, Track } from '@/types'
 
 
+/**
+ * v1.4.13-pre4 推荐去重：记录最近几轮推荐过的曲目，喂给模型作为「别再推」清单。
+ *
+ * 只存本地 sessionStorage：去重是会话内的体感优化，跨重启保留意义不大，
+ * 还会让「过一阵再推」永远推不出来。
+ */
+const RECENT_RECOMMEND_KEY = 'bilimusic_ai_recent_recommended'
+const RECENT_RECOMMEND_LIMIT = 40
+
+export function loadRecentlyRecommended(): string[] {
+  try {
+    const raw = sessionStorage.getItem(RECENT_RECOMMEND_KEY)
+    const arr = raw ? (JSON.parse(raw) as unknown) : []
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+export function rememberRecommended(tracks: { id: string }[]): void {
+  try {
+    const prev = loadRecentlyRecommended()
+    const merged = [...tracks.map((t) => t.id), ...prev.filter((id) => !tracks.some((t) => t.id === id))]
+    sessionStorage.setItem(RECENT_RECOMMEND_KEY, JSON.stringify(merged.slice(0, RECENT_RECOMMEND_LIMIT)))
+  } catch {
+    /* ignore */
+  }
+}
+
 export interface AiRecommendation {
   /** 问候语（结合时段与环境，一两句） */
   greeting: string
@@ -99,8 +128,18 @@ export async function generateRecommendation(input: RecommendInput): Promise<AiR
   // v1.4.13-pre1：画像改读外部文件 + 学习信号，不再从 settings 里取
   const { profile: userText, learned } = await loadProfileContext()
 
+  // v1.4.13-pre4 推荐去重：把最近推过的曲目告诉模型，别再推
+  const recently = new Set(loadRecentlyRecommended())
+  const freshPool = pool.filter((c) => !recently.has(c.track.id))
+  const usablePool = freshPool.length >= 3 ? freshPool : pool
+
+  // v1.4.13-pre4 人设：影响问候语的口吻，不影响挑选逻辑
+  const persona = (settings.persona || '').trim()
+  const personaLine = persona ? '你的说话风格：' + persona : ''
+
   const system = [
     '你是音乐 App 的推荐助手。请像朋友打招呼一样，先写一两句问候，再推荐几首歌。',
+    personaLine,
     '严格要求：',
     '1. 只能从候选清单里挑，index 必须是清单中真实存在的数字，不得编造；',
     '2. 推荐 ' + limit + ' 首左右，宁少勿滥；',
@@ -117,7 +156,7 @@ export async function generateRecommendation(input: RecommendInput): Promise<AiR
     hasHistory ? renderSummary(portrait, 'month') : '（暂无播放记录）',
     '',
     '候选曲目：',
-    pool.map((c) => c.index + '. ' + c.track.title + (c.track.artist ? ' - ' + c.track.artist : '')).join('\n'),
+    usablePool.map((c) => c.index + '. ' + c.track.title + (c.track.artist ? ' - ' + c.track.artist : '')).join('\n'),
   ].filter(Boolean).join('\n')
 
   const reply = await aiChat(settings, {
@@ -129,7 +168,7 @@ export async function generateRecommendation(input: RecommendInput): Promise<AiR
     timeoutMs: 90000,
   })
 
-  const { greeting, picked } = parseRecommendation(reply, pool)
+  const { greeting, picked } = parseRecommendation(reply, usablePool)
   if (!picked.length) throw new Error('模型没有选出可用曲目，稍后再试')
 
   const reasons: Record<string, string> = {}

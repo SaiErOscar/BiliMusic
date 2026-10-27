@@ -38,6 +38,8 @@ import { selectDownloadFolder } from '@/services/api'
 import { isMvExportSupported } from '@/services/mvExport'
 import { AI_PRESETS, aiUnsupportedReason, getAiConfig, isAiSupported, saveAiConfig, testAiConnection } from '@/services/ai'
 import { clearUsage, formatUsage, loadUsage } from '@/services/aiUsage'
+import { FALLBACK_MODELS, fetchModelOptions, hostOf, type ModelOption } from '@/services/aiModels'
+import WorkBuddyPanel from '@/components/WorkBuddyPanel'
 import type { AiSettings } from '@/types'
 import { platform, isNativeApp } from '@/platform'
 import { usePlayer, useSleepRemainingText, formatMediaKeyName } from '@/contexts/PlayerContext'
@@ -121,7 +123,7 @@ export default function Settings() {
   // v1.4.11-pre3 AI 底座：Provider 配置（密钥存主进程，经 safeStorage 加密落盘）
   const [aiConfig, setAiConfig] = useState<AiSettings>({
     baseUrl: '', model: '', apiKey: '', proxyMode: 'system', proxyUrl: '',
-    recommendMode: 'click', userProfile: { text: '', updatedAt: '' },
+    recommendMode: 'click', userProfile: { text: '', updatedAt: '' }, persona: '',
   })
   const [aiMessage, setAiMessage] = useState('')
   const [aiTesting, setAiTesting] = useState(false)
@@ -131,6 +133,20 @@ export default function Settings() {
 
   // v1.4.13-pre1 AI 用量统计（本地，估算值）
   const [usageText, setUsageText] = useState(() => formatUsage(loadUsage()))
+
+  // v1.4.13-pre4 模型下拉：优先从 /models 拉取，失败回落内置表
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>(() => FALLBACK_MODELS[hostOf('https://api.deepseek.com')] || [])
+  const [modelSource, setModelSource] = useState('')
+  /** 是否处于「自定义模型名」模式（下拉里选不到时手填） */
+  const [customModel, setCustomModel] = useState(false)
+  /** v1.4.13-pre4 WorkBuddy 接入面板 */
+  const [wbOpen, setWbOpen] = useState(false)
+  const refreshModels = async () => {
+    setModelSource('拉取中…')
+    const r = await fetchModelOptions(aiConfig)
+    setModelOptions(r.models)
+    setModelSource(r.fromApi ? '已从接口拉取' : '接口不可用，用内置列表')
+  }
 
   const openProfile = async () => {
     const cap = platform.userProfile
@@ -162,7 +178,26 @@ export default function Settings() {
     void getAiConfig().then(setAiConfig).catch(() => {})
   }, [])
 
-  const patchAiConfig = (patch: Partial<AiSettings>) => setAiConfig((c) => ({ ...c, ...patch }))
+  /**
+   * 改配置。
+   *
+   * v1.4.13-pre4 修 bug：原实现只 setState 不落盘，导致「改推荐方式 → 回发现页无效 →
+   * 再回设置又变回默认」——因为发现页读的是主进程里的已存配置，而设置页改的只是本地状态。
+   * 现在凡是走这个函数都立即持久化（防抖合并，避免连点下拉反复写盘）。
+   */
+  const aiSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const patchAiConfig = (patch: Partial<AiSettings>) => {
+    setAiConfig((c) => {
+      const next = { ...c, ...patch }
+      if (aiSaveTimer.current) clearTimeout(aiSaveTimer.current)
+      aiSaveTimer.current = setTimeout(() => {
+        void saveAiConfig(next).catch((err) => {
+          setAiMessage(err instanceof Error ? err.message : String(err))
+        })
+      }, 300)
+      return next
+    })
+  }
 
   const persistAiConfig = async (next: AiSettings) => {
     try {
@@ -683,24 +718,43 @@ export default function Settings() {
                   <option value="off">不推荐（不显示板块）</option>
                 </select>
               </SettingsRow>
+
               {/* 用户画像与「听歌画像」不同：后者由播放统计自动生成，这里由用户自己写。
                   隐私口径写进 description，不单占一行（板块有 7 行上限）。 */}
               <SettingsRow
-                label="用户画像"
-                description={profileMessage || '点「编辑」用系统编辑器打开本地文件修改。与「听歌画像」不同：后者由播放统计自动生成，这里由你写。只存本地，仅在使用 AI 功能时发送给你配置的 AI 服务商，绝不上传开发者'}
+                label="画像与人设"
+                stacked
+                description={profileMessage || '画像：点「编辑」用系统编辑器改本地文件（只存本地，仅随 AI 请求发给你配置的服务商）。人设：你希望 AI 用什么口吻说话，只影响推荐措辞'}
               >
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <ActionButton onClick={() => void openProfile()}>编辑</ActionButton>
-                  <ActionButton onClick={() => void revealProfile()}>定位文件</ActionButton>
-                  <ActionButton onClick={() => void applyLearned()}>应用学习结果</ActionButton>
-                  <ActionButton onClick={() => void clearLearned()}>清除学习记录</ActionButton>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <ActionButton onClick={() => void openProfile()}>编辑画像</ActionButton>
+                    <ActionButton onClick={() => void revealProfile()}>定位文件</ActionButton>
+                    <ActionButton onClick={() => void applyLearned()}>应用学习结果</ActionButton>
+                    <ActionButton onClick={() => void clearLearned()}>清除学习记录</ActionButton>
+                  </div>
+                  <input
+                    className="settings-input"
+                    type="text"
+                    placeholder="人设：例：像个话不多的老朋友，别用感叹号"
+                    value={aiConfig.persona}
+                    onChange={(e) => patchAiConfig({ persona: e.target.value })}
+                  />
                 </div>
               </SettingsRow>
               {/* v1.4.11-pre5 智能歌单放在组首：配置行较长，放组尾会落到首屏之外 */}
               <AiPlaylistPanel config={aiConfig} Row={SettingsRow} />
               {/* v1.4.12-pre1 听歌画像 */}
               <AiPortraitPanel config={aiConfig} Row={SettingsRow} />
-              <SettingsRow label="服务预设" description="OpenAI 兼容格式；选预设填入地址与模型，仍可手改">
+              {/* 来源与预设合并一行（板块 7 行上限）：描述里说清当前来源，按钮切换 */}
+              <SettingsRow
+                label="服务预设"
+                description={
+                  aiConfig.source === 'workbuddy'
+                    ? '当前：WorkBuddy · ' + (aiConfig.wbRegion === 'global' ? '国际版' : '国内版') + ' · ' + (aiConfig.wbModel || '未选模型')
+                    : 'OpenAI 兼容格式；选预设填入地址与模型，仍可手改'
+                }
+              >
                 <select
                   className="settings-select"
                   value={AI_PRESETS.find((p) => p.baseUrl === aiConfig.baseUrl)?.id || ''}
@@ -714,8 +768,20 @@ export default function Settings() {
                     <option key={p.id} value={p.id}>{p.label}</option>
                   ))}
                 </select>
+                <ActionButton
+                  onClick={() => {
+                    if (aiConfig.source === 'workbuddy') {
+                      patchAiConfig({ source: 'provider' })
+                      setAiMessage('已切回自定义 Provider')
+                    } else {
+                      setWbOpen(true)
+                    }
+                  }}
+                >
+                  {aiConfig.source === 'workbuddy' ? '切回 Provider' : 'WorkBuddy…'}
+                </ActionButton>
               </SettingsRow>
-              <SettingsRow label="地址与模型" stacked description="地址填到 /v1 即可，路径会自动补全">
+              <SettingsRow label="地址与模型" stacked description={modelSource || '地址填到 /v1 即可，路径会自动补全；模型从下拉选择'}>
                 <div style={{ display: 'flex', gap: 8, width: '100%' }}>
                   <input
                     className="settings-input"
@@ -724,13 +790,37 @@ export default function Settings() {
                     value={aiConfig.baseUrl}
                     onChange={(e) => patchAiConfig({ baseUrl: e.target.value })}
                   />
-                  <input
-                    className="settings-input"
-                    type="text"
-                    placeholder="deepseek-chat"
-                    value={aiConfig.model}
-                    onChange={(e) => patchAiConfig({ model: e.target.value })}
-                  />
+                  <select
+                    className="settings-select"
+                    value={customModel ? '__custom__' : aiConfig.model}
+                    onChange={(e) => {
+                      if (e.target.value === '__custom__') { setCustomModel(true); return }
+                      setCustomModel(false)
+                      patchAiConfig({ model: e.target.value })
+                    }}
+                  >
+                    {/* 当前值若不在列表里（手填或列表未刷新）也要能显示出来 */}
+                    {!customModel && !modelOptions.some((m) => m.id === aiConfig.model) && aiConfig.model && (
+                      <option value={aiConfig.model}>{aiConfig.model}</option>
+                    )}
+                    {modelOptions.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                    {/* 下拉之外仍可自定义：接口新增模型时不必等我们更新内置表 */}
+                    <option value="__custom__">自定义…</option>
+                  </select>
+                  {customModel && (
+                    <input
+                      className="settings-input"
+                      type="text"
+                      placeholder="填写模型接口名"
+                      value={aiConfig.model}
+                      onChange={(e) => patchAiConfig({ model: e.target.value })}
+                    />
+                  )}
+                  <ActionButton onClick={() => void refreshModels()}>刷新模型</ActionButton>
+                  {/* v1.4.13-pre4 账号池等插件功能走弹出面板，不占设置板块 */}
+                  <ActionButton onClick={() => setWbOpen(true)}>WorkBuddy…</ActionButton>
                 </div>
               </SettingsRow>
               <SettingsRow label="API 密钥" stacked description="经系统加密后存本地，不写注册表、不进明文配置">
@@ -765,7 +855,7 @@ export default function Settings() {
                 </div>
               </SettingsRow>
               {/* v1.4.13-pre1 用量统计并入本行（板块有 7 行上限），description 同时承载状态与用量 */}
-              <SettingsRow label="保存与测试" description={aiMessage || usageText || '先保存，再测试地址、密钥、模型与代理是否都通'}>
+              <SettingsRow label="保存与测试" stacked description={aiMessage || usageText || '先保存，再测试地址、密钥、模型与代理是否都通'}>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <ActionButton onClick={() => void persistAiConfig(aiConfig)}>保存</ActionButton>
                   <ActionButton onClick={() => void runAiTest()} disabled={aiTesting}>
@@ -928,7 +1018,20 @@ export default function Settings() {
             </div>
           </SettingsGroup>
       </div>
-    </MusicPageShell>
+          {wbOpen && (
+        <WorkBuddyPanel
+          onClose={() => setWbOpen(false)}
+          onPick={(cred, model) => {
+            // v1.4.13-pre4 选定 WorkBuddy 模型：切来源为 workbuddy，记录区域与模型 id。
+            // 之后所有 AI 功能都经主进程用 WorkBuddy 凭据发请求。
+            patchAiConfig({ source: 'workbuddy', wbRegion: cred.region, wbModel: model })
+            setWbOpen(false)
+            setAiMessage('已切换到 WorkBuddy 模型：' + model)
+          }}
+        />
+      )}
+
+</MusicPageShell>
     {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
     {showBackup && <BackupModal onClose={() => setShowBackup(false)} webdavConfigured={davConfigured} />}
     </>

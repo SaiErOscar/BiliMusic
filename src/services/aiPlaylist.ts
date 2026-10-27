@@ -10,7 +10,7 @@
 
 import { aiChat, type AiChatMessage } from '@/services/ai'
 import { loadFavoriteTracks, loadRecentTracks, loadDownloadRecords, createPlaylist, addTrackToPlaylist } from '@/utils/storage'
-import type { AiProviderConfig, Playlist, Track } from '@/types'
+import type { AiSettings, Playlist, Track } from '@/types'
 import { loadProfileContext, renderProfileContext } from '@/services/aiProfileContext'
 
 /** 单次最多喂给模型的候选曲目数（控制 token 成本与延迟） */
@@ -97,7 +97,7 @@ export function parsePlaylistJson(reply: string): { name?: string; description?:
  * @param intent 用户自然语言描述，如「适合深夜写代码的安静歌单」
  */
 export async function generateAiPlaylist(
-  config: AiProviderConfig,
+  config: AiSettings,
   intent: string,
   pool = buildCandidatePool(),
 ): Promise<AiPlaylistResult> {

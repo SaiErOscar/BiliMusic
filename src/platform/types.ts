@@ -86,6 +86,31 @@ export interface PlatformUserProfile {
   clearLearned: () => Promise<{ ok: boolean }>
   record: (kind: 'played' | 'skipped' | 'lyricReverted', key?: string) => Promise<{ ok: boolean }>
   recordPlaylist: (tracks: number) => Promise<{ ok: boolean }>
+  /** v1.4.13-pre4 备份恢复：写回画像正文 */
+  writeText?: (text: string) => Promise<{ ok: boolean; message?: string }>
+  /** v1.4.13-pre4 备份恢复：写回学习信号 */
+  setLearned?: (signals: unknown) => Promise<{ ok: boolean; message?: string }>
+}
+
+/** v1.4.13-pre4 WorkBuddy：本地凭据 / 网页登录 / 模型列表 / chat */
+export interface PlatformWorkBuddy {
+  localCredentials: () => Promise<
+    { accessToken: string; region: 'cn' | 'global'; account?: string; expiresAt?: number }[]
+  >
+  savedCredential: () => Promise<
+    { accessToken: string; region: 'cn' | 'global'; account?: string; expiresAt?: number } | null
+  >
+  startLogin: (region: 'cn' | 'global') => Promise<{ ok: boolean; key?: string; message?: string }>
+  pollLogin: (
+    key: string,
+  ) => Promise<
+    | { status: 'pending' }
+    | { status: 'ok'; credential: { accessToken: string; region: 'cn' | 'global'; account?: string; expiresAt?: number } }
+    | { status: 'expired' }
+  >
+  saveCredential: (cred: unknown) => Promise<{ ok: boolean; message?: string }>
+  models: (region: 'cn' | 'global', token: string) => Promise<{ id: string; name: string }[]>
+  chat: (cred: unknown, model: string, messages: unknown[], temperature?: number) => Promise<string>
 }
 
 export interface PlatformAiConfig {
@@ -258,4 +283,6 @@ export interface Platform {
   aiConfig?: PlatformAiConfig
   /** v1.4.13-pre1 用户画像外部文件 + 学习记录 */
   userProfile?: PlatformUserProfile
+  /** v1.4.13-pre4 WorkBuddy 国内/国际版 */
+  workbuddy?: PlatformWorkBuddy
 }

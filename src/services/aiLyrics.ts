@@ -10,7 +10,7 @@
  */
 
 import { aiChat, type AiChatMessage } from '@/services/ai'
-import type { AiProviderConfig } from '@/types'
+import type { AiSettings } from '@/types'
 import type { LyricLine } from '@/services/lyrics'
 import { loadProfileContext, renderProfileContext } from '@/services/aiProfileContext'
 
@@ -100,7 +100,7 @@ function buildMessages(
  * 分批并发上限 3，兼顾速度与限流；单批失败只丢该批，不中断整首。
  */
 export async function enhanceLyrics(
-  config: AiProviderConfig,
+  config: AiSettings,
   lines: LyricLine[],
   mode: AiLyricMode,
   meta: { title: string; artist: string },

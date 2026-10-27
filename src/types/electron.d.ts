@@ -307,6 +307,16 @@ declare global {
       deleteBackupFile?: (filePath: string) => Promise<{ ok: boolean; message?: string }>
       platform: string
       persistentStorage?: PersistentStorageApi
+      /** v1.4.13-pre4 WorkBuddy 国内/国际版 */
+      workbuddy?: {
+        localCredentials: () => Promise<{ accessToken: string; region: 'cn' | 'global'; account?: string; expiresAt?: number }[]>
+        savedCredential: () => Promise<{ accessToken: string; region: 'cn' | 'global'; account?: string; expiresAt?: number } | null>
+        startLogin: (region: 'cn' | 'global') => Promise<{ ok: boolean; key?: string; message?: string }>
+        pollLogin: (key: string) => Promise<{ status: 'pending' } | { status: 'ok'; credential: { accessToken: string; region: 'cn' | 'global'; account?: string; expiresAt?: number } } | { status: 'expired' }>
+        saveCredential: (cred: unknown) => Promise<{ ok: boolean; message?: string }>
+        models: (region: 'cn' | 'global', token: string) => Promise<{ id: string; name: string }[]>
+        chat: (cred: unknown, model: string, messages: unknown[], temperature?: number) => Promise<string>
+      }
       /** v1.4.13-pre1 用户画像：外部文件编辑 + 学习记录 */
       userProfile?: {
         read: () => Promise<{ text: string; path: string }>
@@ -317,6 +327,8 @@ declare global {
         clearLearned: () => Promise<{ ok: boolean }>
         record: (kind: 'played' | 'skipped' | 'lyricReverted', key?: string) => Promise<{ ok: boolean }>
         recordPlaylist: (tracks: number) => Promise<{ ok: boolean }>
+        writeText?: (text: string) => Promise<{ ok: boolean; message?: string }>
+        setLearned?: (signals: unknown) => Promise<{ ok: boolean; message?: string }>
       }
       /** v1.4.11-pre3 AI 底座：Provider 配置读写（密钥在主进程经 safeStorage 加密落盘） */
       aiConfig?: {

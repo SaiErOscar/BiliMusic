@@ -10,7 +10,7 @@
 
 import { aiChat } from '@/services/ai'
 import { loadPlayStats, type PlayStat } from '@/utils/storage'
-import type { AiProviderConfig } from '@/types'
+import type { AiSettings } from '@/types'
 
 /** 画像时间范围 */
 export type PortraitRange = 'month' | 'year' | 'all'
@@ -118,7 +118,7 @@ export function renderSummary(summary: PortraitSummary, range: PortraitRange): s
 
 /** 生成画像文本（叙事化，不是表格复述） */
 export async function generatePortrait(
-  config: AiProviderConfig,
+  config: AiSettings,
   range: PortraitRange,
   stats = loadPlayStats(),
 ): Promise<{ text: string; summary: PortraitSummary }> {

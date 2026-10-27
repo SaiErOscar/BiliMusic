@@ -173,10 +173,27 @@ export interface AiUserProfile {
   updatedAt: string
 }
 
-/** 完整 AI 设置 = Provider 配置 + 推荐模式 + 用户画像 */
+/** 完整 AI 设置 = Provider 配置 + 推荐模式 + 用户画像 + 人设 */
 export interface AiSettings extends AiProviderConfig {
   recommendMode: AiRecommendMode
   userProfile: AiUserProfile
+  /**
+   * v1.4.13-pre4 AI 人设：影响发现页推荐问候语的语气与表达风格。
+   *
+   * 与「用户画像」互补——画像是「关于我」，人设是「我希望你用什么口吻跟我说话」。
+   * 只影响语言表述，不改变挑选逻辑。
+   */
+  persona: string
+  /**
+   * v1.4.13-pre4 AI 来源：
+   * - provider：走下方 baseUrl + apiKey 的 OpenAI 兼容服务
+   * - workbuddy：走 WorkBuddy 账号（本地凭据或网页登录），模型名用 wbModel
+   */
+  source?: 'provider' | 'workbuddy'
+  /** WorkBuddy 区域（决定走国内还是国际网关） */
+  wbRegion?: 'cn' | 'global'
+  /** WorkBuddy 模型 id */
+  wbModel?: string
 }
 
 export type NavItem = {

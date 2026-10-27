@@ -36,7 +36,8 @@ describe('主进程按主题取图', () => {
   })
 
   it('窗口与托盘都换图', () => {
-    expect(src).toContain('setIcon(loadThemedIcon')
+    // 实现改成先取 img 再 setIcon（为二次写入刷新 Windows 缓存）
+    expect(src).toContain('setIcon(img)')
     expect(src).toContain('setImage(loadThemedIcon')
   })
 

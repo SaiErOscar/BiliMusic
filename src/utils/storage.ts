@@ -213,6 +213,15 @@ export function recordPlayProgress(trackId: string, seconds: number, completed =
   } catch { /* ignore */ }
 }
 
+/** v1.4.13-pre4 备份恢复用：整份写回播放统计 */
+export function savePlayStatsRaw(stats: Record<string, PlayStat>): void {
+  try {
+    safeSetItem(PLAY_STATS_KEY, JSON.stringify(stats || {}))
+  } catch {
+    /* ignore */
+  }
+}
+
 /** 清空播放统计（隐私入口，设置页提供） */
 export function clearPlayStats(): void {
   try {

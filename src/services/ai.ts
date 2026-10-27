@@ -38,7 +38,7 @@ export async function getAiConfig(): Promise<AiSettings> {
   if (!cap) {
     return {
       baseUrl: '', model: '', apiKey: '', proxyMode: 'system', proxyUrl: '',
-      recommendMode: 'click', userProfile: { text: '', updatedAt: '' },
+      recommendMode: 'click', userProfile: { text: '', updatedAt: '' }, persona: '',
     }
   }
   return cap.get()
@@ -95,6 +95,37 @@ function extractApiMessage(body: string): string {
   }
 }
 
+/**
+ * v1.4.13-pre4 通用 JSON 请求：给 /models 这类非 chat 端点用。
+ *
+ * 与 aiChat 共用同一套鉴权、超时与错误翻译，避免两处各写一份。
+ * @param path 以 / 开头的相对路径，会拼到 baseURL 后
+ */
+export async function aiFetchJson(config: AiProviderConfig, path: string, timeoutMs = 20000): Promise<unknown> {
+  const base = (config.baseUrl || '').trim().replace(/\/+$/, '')
+  if (!base) throw new Error('未配置 API 地址')
+  if (!config.apiKey) throw new Error('未配置 API 密钥')
+  const url = base + (path.startsWith('/') ? path : '/' + path)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const resp = await fetch(url, {
+      headers: { Authorization: `Bearer ${config.apiKey}` },
+      signal: controller.signal,
+    })
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '')
+      throw new Error(describeHttpError(resp.status, body))
+    }
+    return (await resp.json()) as unknown
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') throw new Error('请求超时')
+    throw err instanceof Error ? err : new Error(String(err))
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export interface AiChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
@@ -129,11 +160,27 @@ export function resolveChatUrl(baseUrl: string): string {
  * 错误一律抛出带可读原因的中文 Error（缺配置 / 401 / 404 / 超时 / 网络），
  * 让设置页的「测试连接」能直接展示给人看，而不是抛原始 JSON。
  */
-export async function aiChat(config: AiProviderConfig, options: AiChatOptions): Promise<string> {
+export async function aiChat(config: AiSettings, options: AiChatOptions): Promise<string> {
   const url = resolveChatUrl(config.baseUrl)
   if (!url) throw new Error('未配置 API 地址')
   if (!config.apiKey) throw new Error('未配置 API 密钥')
   if (!config.model) throw new Error('未配置模型名称')
+
+  // v1.4.13-pre4 WorkBuddy 来源：不走 OpenAI 兼容端点，改由主进程用 WorkBuddy 凭据发请求
+  if (config.source === 'workbuddy') {
+    const wb = platform.workbuddy
+    if (!wb) throw new Error('当前环境不支持 WorkBuddy')
+    const cred = await wb.savedCredential()
+    if (!cred) throw new Error('尚未登录 WorkBuddy，请到设置页点「WorkBuddy…」完成登录')
+    const model = config.wbModel || ''
+    if (!model) throw new Error('尚未选择 WorkBuddy 模型')
+    const text = await wb.chat(cred, model, options.messages, options.temperature ?? 0.7)
+    recordUsage(
+      options.messages.reduce((a, m) => a + m.content.length, 0),
+      text.length,
+    )
+    return text
+  }
 
   const controller = new AbortController()
   const timeoutMs = options.timeoutMs ?? 60000
@@ -180,7 +227,7 @@ export async function aiChat(config: AiProviderConfig, options: AiChatOptions): 
 }
 
 /** 连通性测试：发一条最小请求，验证地址/密钥/模型/代理四件事都通 */
-export async function testAiConnection(config: AiProviderConfig): Promise<{ ok: boolean; message: string }> {
+export async function testAiConnection(config: AiSettings): Promise<{ ok: boolean; message: string }> {
   try {
     const reply = await aiChat(
       config,

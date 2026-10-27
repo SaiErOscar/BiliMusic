@@ -69,28 +69,23 @@ export default function AiPlaylistPanel({ config, Row }: Props) {
 
   return (
     <>
+      {/* v1.4.13-pre4 合并：场景描述与生成按钮同处一行，减少板块行数并让「输入→触发」更紧凑 */}
       {Row({
         label: '场景描述',
-        stacked: true,
-        description: '例如：适合深夜写代码的安静歌单',
+        description: message || '例如：适合深夜写代码的安静歌单',
         children: (
-          <input
-            className="settings-input"
-            type="text"
-            placeholder="适合深夜写代码的安静歌单"
-            value={intent}
-            onChange={(e) => setIntent(e.target.value)}
-          />
-        ),
-      })}
-      {Row({
-        label: '生成歌单',
-        description: message || '从收藏 / 最近播放 / 下载里挑选',
-
-        children: (
-          <ActionButton onClick={() => void run()} disabled={busy}>
-            {busy ? '生成中…' : '生成歌单'}
-          </ActionButton>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              className="settings-input"
+              type="text"
+              placeholder="适合深夜写代码的安静歌单"
+              value={intent}
+              onChange={(e) => setIntent(e.target.value)}
+            />
+            <ActionButton onClick={() => void run()} disabled={busy}>
+              {busy ? '生成中…' : '生成歌单'}
+            </ActionButton>
+          </div>
         ),
       })}
       {preview

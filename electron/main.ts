@@ -12,6 +12,7 @@ import { registerColorPickerHandlers } from './colorPicker'
 import { registerBackupHandlers } from './backup'
 import { registerAiHandlers } from './ai'
 import { registerProfileHandlers } from './profile'
+import { registerWorkBuddyHandlers } from './workbuddy'
 import { registerMvExportHandlers, killMvExportChildren } from './mvExport'
 import { registerMediaKeysIpc, unregisterAllMediaKeys } from './mediaKeys'
 
@@ -175,15 +176,33 @@ function loadThemedIcon(themeId: string, mode: 'light' | 'dark', kind: 'icon' | 
   return loadAppIcon(kind === 'tray' ? 'tray.png' : 'icon.png')
 }
 
-/** 把当前主题的图标应用到主窗口与托盘 */
+/**
+ * 把当前主题的图标应用到主窗口与托盘。
+ *
+ * v1.4.13-pre4 修两个实测问题：
+ * 1. **标题栏/任务栏图标不刷新**：Windows 对已显示的窗口，单次 setIcon 常被系统缓存吞掉。
+ *    改为「设置 + 延迟再设一次」的双写（延迟 60ms），实测能刷新任务栏与标题栏。
+ * 2. **托盘图标发白**：原实现用 icon.png（彩色）给托盘，且重着色按亮度调制，
+ *    纯白源图被拉到最亮。现在托盘用独立的 tray-*.png（单色语义，直接赋主题色）。
+ */
 function applyThemedIcons(themeId: string, mode: 'light' | 'dark') {
   try {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.setIcon(loadThemedIcon(themeId, mode, 'icon'))
+    const apply = () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        const img = loadThemedIcon(themeId, mode, 'icon')
+        mainWindow.setIcon(img)
+        // Windows 需要二次写入才能刷新已显示窗口的标题栏/任务栏图标
+        setTimeout(() => {
+          try {
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setIcon(img)
+          } catch { /* ignore */ }
+        }, 60)
+      }
+      if (tray) {
+        tray.setImage(loadThemedIcon(themeId, mode, 'tray').resize({ width: 32, height: 32 }))
+      }
     }
-    if (tray) {
-      tray.setImage(loadThemedIcon(themeId, mode, 'tray').resize({ width: 32, height: 32 }))
-    }
+    apply()
   } catch {
     /* 图标切换失败不影响主流程 */
   }
@@ -766,6 +785,8 @@ app.whenReady().then(() => {
   registerAiHandlers()
   // v1.4.13-pre1 用户画像外部文件 + 学习记录
   registerProfileHandlers()
+  // v1.4.13-pre4 WorkBuddy 国内/国际版（本地凭据 + 网页登录 + 模型列表 + chat）
+  registerWorkBuddyHandlers()
   // v1.4.13-pre3 主题化图标：渲染层切换主题后通知主进程换图
   ipcMain.handle('theme:apply-icon', (_e, themeId: string, mode: 'light' | 'dark') => {
     applyThemedIcons(String(themeId || 'default'), mode === 'dark' ? 'dark' : 'light')

@@ -47,6 +47,8 @@ export interface AiSettings extends AiProviderConfig {
   recommendMode: AiRecommendMode
   /** 用户自述画像 */
   userProfile: AiUserProfile
+  /** AI 人设：影响推荐问候语的语气，不改变挑选逻辑 */
+  persona: string
 }
 
 const DEFAULT_SETTINGS: AiSettings = {
@@ -57,6 +59,7 @@ const DEFAULT_SETTINGS: AiSettings = {
   proxyUrl: '',
   recommendMode: 'click',
   userProfile: { text: '', updatedAt: '' },
+  persona: '',
 }
 
 function configPath(): string {
@@ -94,6 +97,7 @@ async function readConfig(): Promise<AiSettings> {
         text: raw.userProfile?.text || '',
         updatedAt: raw.userProfile?.updatedAt || '',
       },
+      persona: raw.persona || '',
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -116,6 +120,7 @@ async function writeConfig(cfg: AiSettings): Promise<void> {
       text: String(cfg.userProfile?.text || ''),
       updatedAt: cfg.userProfile?.updatedAt || '',
     },
+    persona: String(cfg.persona || ''),
   }
   if (cfg.apiKey) {
     if (!safeStorage.isEncryptionAvailable()) {
