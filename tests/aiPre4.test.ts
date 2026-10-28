@@ -149,6 +149,28 @@ describe('AI 配置持久化完整性', () => {
   })
 })
 
+// v1.4.13-pre6：地址框的显隐条件原本写成 !baseUrl（地址为空才显示），逻辑正好相反。
+describe('地址框只在「自定义」预设时出现', () => {
+  const src = readFileSync(path.resolve(__dirname, '../src/pages/Settings.tsx'), 'utf8')
+
+  it('用 isCustomPreset 判定，而不是「地址为空」', () => {
+    expect(src).toContain('isCustomPreset')
+    expect(src).toContain('{isCustomPreset && (')
+    expect(src).not.toContain('{!aiConfig.baseUrl && (')
+  })
+
+  it('判定与预设下拉同源（baseUrl 匹配不到任何预设）', () => {
+    const gate = src.slice(src.indexOf('const isCustomPreset'), src.indexOf('const patchAiConfig'))
+    expect(gate).toContain('AI_PRESETS.some')
+    expect(gate).toContain('baseUrl')
+  })
+
+  it('WorkBuddy 也出现在模型下拉里，选中即开面板', () => {
+    expect(src).toContain('__workbuddy__')
+    expect(src).toContain('setWbOpen(true)')
+  })
+})
+
 describe('备份导出完整性', () => {
   const src = readFileSync(path.resolve(__dirname, '../src/utils/backup.ts'), 'utf8')
   it('画像正文、播放统计、学习信号都进备份', () => {

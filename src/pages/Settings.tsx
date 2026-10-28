@@ -213,6 +213,15 @@ export default function Settings() {
    * 更新函数里——那是 React 要求纯函数的副作用位置，StrictMode 双调用/并发渲染下
    * 定时器会被清掉或重复注册，导致「改了没存」。
    */
+  /**
+   * 当前是否处于「自定义」预设。
+   *
+   * 与预设下拉的 value 同源：下拉在 baseUrl 匹配不到任何预设时显示「自定义」，
+   * 地址框的显隐必须跟它一致，否则两处口径会分叉。
+   */
+  const isCustomPreset =
+    aiConfig.source !== 'workbuddy' && !AI_PRESETS.some((p) => p.baseUrl === aiConfig.baseUrl)
+
   const patchAiConfig = (patch: Partial<AiSettings>) => {
     setAiConfig((c) => ({ ...c, ...patch }))
   }
@@ -794,8 +803,12 @@ export default function Settings() {
               </SettingsRow>
               <SettingsRow label="地址与模型" stacked description={modelSource || '地址填到 /v1 即可，路径会自动补全；模型从下拉选择'}>
                 <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-                  {/* v1.4.13-pre4：地址默认收起，只有预设选「自定义」时才露出 */}
-                  {!aiConfig.baseUrl && (
+                  {/*
+                    v1.4.13-pre6 修正：地址只在「服务预设 = 自定义」时露出。
+                    原判断写成 !aiConfig.baseUrl（地址为空才显示），逻辑正好相反——
+                    选了预设时地址框消失，选自定义时反而没有框可填。
+                  */}
+                  {isCustomPreset && (
                     <input
                       className="settings-input"
                       type="url"
@@ -806,11 +819,14 @@ export default function Settings() {
                   )}
                   <select
                     className="settings-select"
-                    value={customModel ? '__custom__' : aiConfig.model}
+                    value={aiConfig.source === 'workbuddy' ? '__workbuddy__' : (customModel ? '__custom__' : aiConfig.model)}
                     onChange={(e) => {
+                      // WorkBuddy 不是一个 baseUrl，选中即开面板走登录/模型选择（与「服务预设」同一口径）
+                      if (e.target.value === '__workbuddy__') { setWbOpen(true); return }
                       if (e.target.value === '__custom__') { setCustomModel(true); return }
                       setCustomModel(false)
-                      patchAiConfig({ model: e.target.value })
+                      // 从 WorkBuddy 切回普通模型时，来源也要跟着切回来，否则仍会走 wb 通道
+                      patchAiConfig({ model: e.target.value, source: 'provider' })
                     }}
                   >
                     {/* 当前值若不在列表里（手填或列表未刷新）也要能显示出来 */}
@@ -820,6 +836,12 @@ export default function Settings() {
                     {modelOptions.map((m) => (
                       <option key={m.id} value={m.id}>{m.label}</option>
                     ))}
+                    {/* v1.4.13-pre6：WorkBuddy 也在这条下拉里可选；选中即开面板 */}
+                    <option value="__workbuddy__">
+                      {aiConfig.source === 'workbuddy' && aiConfig.wbModel
+                        ? 'WorkBuddy · ' + aiConfig.wbModel
+                        : 'WorkBuddy…'}
+                    </option>
                     {/* 下拉之外仍可自定义：接口新增模型时不必等我们更新内置表 */}
                     <option value="__custom__">自定义…</option>
                   </select>
