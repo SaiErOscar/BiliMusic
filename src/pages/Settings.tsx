@@ -141,9 +141,19 @@ export default function Settings() {
   const [customModel, setCustomModel] = useState(false)
   /** v1.4.13-pre4 WorkBuddy 接入面板 */
   const [wbOpen, setWbOpen] = useState(false)
-  const refreshModels = async () => {
+  /**
+   * 刷新模型列表。
+   *
+   * v1.4.13-pre7：接受可选的 baseUrl/model 覆盖。
+   * 切换预设时 state 还没更新完，直接用旧 aiConfig 去拉会拿到上一个服务商的列表，
+   * 所以由调用方把目标预设传进来。
+   */
+  const refreshModels = async (overrideBaseUrl?: string, overrideModel?: string) => {
     setModelSource('拉取中…')
-    const r = await fetchModelOptions(aiConfig)
+    const cfg: AiSettings = overrideBaseUrl === undefined
+      ? aiConfig
+      : { ...aiConfig, baseUrl: overrideBaseUrl, model: overrideModel ?? aiConfig.model }
+    const r = await fetchModelOptions(cfg)
     setModelOptions(r.models)
     setModelSource(r.fromApi ? '已从接口拉取' : '接口不可用，用内置列表')
   }
@@ -185,11 +195,15 @@ export default function Settings() {
    */
   const aiLoadedRef = useRef(false)
   const aiSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** 最近一次尚未落盘的配置；卸载时用它补写 */
+  const aiPendingRef = useRef<AiSettings | null>(null)
   useEffect(() => {
     if (!isAiSupported()) return
     if (!aiLoadedRef.current) return
     if (aiSaveTimer.current) clearTimeout(aiSaveTimer.current)
+    aiPendingRef.current = aiConfig
     aiSaveTimer.current = setTimeout(() => {
+      aiPendingRef.current = null
       void saveAiConfig(aiConfig).catch((err) => {
         setAiMessage(err instanceof Error ? err.message : String(err))
       })
@@ -198,6 +212,22 @@ export default function Settings() {
       if (aiSaveTimer.current) clearTimeout(aiSaveTimer.current)
     }
   }, [aiConfig])
+
+  /*
+   * v1.4.13-pre7：卸载时把未落盘的改动补写掉。
+   *
+   * 这是「推荐方式改了不生效」的最后一块拼图：防抖 300ms，而用户改完下拉
+   * 往往立刻切到别的页面——组件卸载时 cleanup 只 clearTimeout，那一次改动
+   * 就永远没写进主进程。发现页读的是主进程里的已存配置，于是看起来「没生效」。
+   */
+  useEffect(() => {
+    return () => {
+      const pending = aiPendingRef.current
+      if (!pending) return
+      aiPendingRef.current = null
+      void saveAiConfig(pending).catch(() => {})
+    }
+  }, [])
 
   /**
    * 改配置。
@@ -221,6 +251,18 @@ export default function Settings() {
    */
   const isCustomPreset =
     aiConfig.source !== 'workbuddy' && !AI_PRESETS.some((p) => p.baseUrl === aiConfig.baseUrl)
+
+  /**
+   * 预设下拉当前应显示的 id。
+   *
+   * v1.4.13-pre7：不能只按 baseUrl 反查——WorkBuddy 的 baseUrl 是空串，
+   * 空串既等于「自定义」也匹配不到任何预设，于是选了 WorkBuddy 之后
+   * 下拉回显成「自定义」，看起来像登录丢了。来源为 workbuddy 时直接返回它。
+   */
+  const currentPresetId =
+    aiConfig.source === 'workbuddy'
+      ? 'workbuddy'
+      : (AI_PRESETS.find((p) => p.baseUrl === aiConfig.baseUrl)?.id || '')
 
   const patchAiConfig = (patch: Partial<AiSettings>) => {
     setAiConfig((c) => ({ ...c, ...patch }))
@@ -784,15 +826,30 @@ export default function Settings() {
               >
                 <select
                   className="settings-select"
-                  value={AI_PRESETS.find((p) => p.baseUrl === aiConfig.baseUrl)?.id || ''}
+                  value={currentPresetId}
                   onChange={(e) => {
-                    if (e.target.value === 'workbuddy') {
-                      // WorkBuddy 不是一个 baseUrl，选中即开面板走登录/模型选择
+                    const id = e.target.value
+                    if (id === 'workbuddy') {
+                      /*
+                       * WorkBuddy 不是一个 baseUrl，选中即开面板走登录/模型选择。
+                       * 来源当场切过去：否则「选完 WorkBuddy 再切走」会因为
+                       * source 仍是 provider 而回显成别的预设（用户看到的「登录丢失」）。
+                       */
+                      // 清空已填的 API 密钥：WorkBuddy 用账号凭据，留着只会误导
+                      patchAiConfig({ source: 'workbuddy', apiKey: '' })
                       setWbOpen(true)
                       return
                     }
-                    const preset = AI_PRESETS.find((p) => p.id === e.target.value)
-                    if (preset) patchAiConfig({ source: 'provider', baseUrl: preset.baseUrl, model: preset.model })
+                    if (id === '') {
+                      // 自定义：清空地址与模型，让地址框露出来等待手填
+                      patchAiConfig({ source: 'provider', baseUrl: '', model: '' })
+                      return
+                    }
+                    const preset = AI_PRESETS.find((p) => p.id === id)
+                    if (!preset) return
+                    patchAiConfig({ source: 'provider', baseUrl: preset.baseUrl, model: preset.model })
+                    // v1.4.13-pre7：切换预设即自动刷新模型列表，不必再点按钮
+                    void refreshModels(preset.baseUrl, preset.model)
                   }}
                 >
                   <option value="">自定义</option>
@@ -819,14 +876,12 @@ export default function Settings() {
                   )}
                   <select
                     className="settings-select"
-                    value={aiConfig.source === 'workbuddy' ? '__workbuddy__' : (customModel ? '__custom__' : aiConfig.model)}
+                    value={customModel ? '__custom__' : aiConfig.model}
+                    disabled={aiConfig.source === 'workbuddy'}
                     onChange={(e) => {
-                      // WorkBuddy 不是一个 baseUrl，选中即开面板走登录/模型选择（与「服务预设」同一口径）
-                      if (e.target.value === '__workbuddy__') { setWbOpen(true); return }
                       if (e.target.value === '__custom__') { setCustomModel(true); return }
                       setCustomModel(false)
-                      // 从 WorkBuddy 切回普通模型时，来源也要跟着切回来，否则仍会走 wb 通道
-                      patchAiConfig({ model: e.target.value, source: 'provider' })
+                      patchAiConfig({ model: e.target.value })
                     }}
                   >
                     {/* 当前值若不在列表里（手填或列表未刷新）也要能显示出来 */}
@@ -836,12 +891,6 @@ export default function Settings() {
                     {modelOptions.map((m) => (
                       <option key={m.id} value={m.id}>{m.label}</option>
                     ))}
-                    {/* v1.4.13-pre6：WorkBuddy 也在这条下拉里可选；选中即开面板 */}
-                    <option value="__workbuddy__">
-                      {aiConfig.source === 'workbuddy' && aiConfig.wbModel
-                        ? 'WorkBuddy · ' + aiConfig.wbModel
-                        : 'WorkBuddy…'}
-                    </option>
                     {/* 下拉之外仍可自定义：接口新增模型时不必等我们更新内置表 */}
                     <option value="__custom__">自定义…</option>
                   </select>
@@ -855,16 +904,23 @@ export default function Settings() {
                     />
                   )}
                   <ActionButton onClick={() => void refreshModels()}>刷新模型</ActionButton>
-                  {/* v1.4.13-pre4 账号池等插件功能走弹出面板，不占设置板块 */}
-                  <ActionButton onClick={() => setWbOpen(true)}>WorkBuddy…</ActionButton>
                 </div>
               </SettingsRow>
-              <SettingsRow label="API 密钥" stacked description="经系统加密后存本地，不写注册表、不进明文配置">
+              <SettingsRow
+                label="API 密钥"
+                stacked
+                description={
+                  aiConfig.source === 'workbuddy'
+                    ? 'WorkBuddy 用账号凭据，不需要 API 密钥'
+                    : '经系统加密后存本地，不写注册表、不进明文配置'
+                }
+              >
                 <input
                   className="settings-input"
                   type="password"
-                  placeholder="sk-..."
+                  placeholder={aiConfig.source === 'workbuddy' ? '使用 WorkBuddy 账号，无需填写' : 'sk-...'}
                   value={aiConfig.apiKey}
+                  disabled={aiConfig.source === 'workbuddy'}
                   onChange={(e) => patchAiConfig({ apiKey: e.target.value })}
                 />
               </SettingsRow>
@@ -1060,7 +1116,8 @@ export default function Settings() {
           onPick={(cred, model) => {
             // v1.4.13-pre4 选定 WorkBuddy 模型：切来源为 workbuddy，记录区域与模型 id。
             // 之后所有 AI 功能都经主进程用 WorkBuddy 凭据发请求。
-            patchAiConfig({ source: 'workbuddy', wbRegion: cred.region, wbModel: model })
+            // v1.4.13-pre7：切到 WorkBuddy 时清空 API 密钥，避免「以为还在用 API」
+      patchAiConfig({ source: 'workbuddy', wbRegion: cred.region, wbModel: model, apiKey: '' })
             setWbOpen(false)
             setAiMessage('已切换到 WorkBuddy 模型：' + model)
           }}

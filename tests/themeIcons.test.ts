@@ -37,9 +37,9 @@ describe('主进程按主题取图', () => {
 
   it('窗口与托盘都换图', () => {
     expect(src).toContain('mainWindow.setIcon(img)')
-    // 托盘用桌面图标缩放（白主体 + 主题色衬底），不再是单色 tray 图
-    expect(src).toContain('tray.setImage(trayImg)')
-    expect(src).toContain("loadThemedIcon(themeId, mode, 'icon').resize({ width: 32, height: 32 })")
+    // v1.4.13-pre7：托盘直接用 tray-*.png（与 icon.ico 同一套设计的成品），
+    // 不再把 256px 桌面图缩到 32px——那样会把立体图缩糊。
+    expect(src).toContain("loadThemedIcon(themeId, mode, 'tray')")
   })
 
   it('有独立 IPC 供渲染层触发', () => {
@@ -85,17 +85,19 @@ describe('标题栏 logo 跟随主题（v1.4.13-pre6）', () => {
 })
 
 describe('托盘图标是「白色字形 + 主题色衬底」', () => {
-  it('生成脚本按 alpha 分两层，而不是整体染成主题色', () => {
+  // v1.4.13-pre7：托盘改成「保留桌面图标的光影，只换色相」。
+  // pre6 的纯色平涂被用户判为「白色太暗、主题色太深、没有光影」。
+  it('托盘保留桌面图标的明暗层次，只替换色相', () => {
     const src = readFileSync(path.resolve(__dirname, '../scripts/make-theme-icons.cjs'), 'utf8')
-    // 字形处取 255（白），其余取主题色 —— 这是 pre6 的结构性改动
-    expect(src).toContain('255*glyph')
+    expect(src).toContain('mixToward')
+    expect(src).toContain('smoothstep')
     expect(src).toContain('inside')
   })
 
   it('托盘图是合法 PNG 且尺寸已压到 256', () => {
     const buf = readFileSync(path.join(ICON_DIR, 'tray-ocean-dark.png'))
     expect(buf.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-    // 体积守门：单文件不超过 40KB（压缩前是 30KB+ 的高分辨率原图）
-    expect(buf.length).toBeLessThan(40 * 1024)
+    // 体积守门：单文件不超过 60KB。保留光影后信息量比纯色平涂大，但仍远小于原图。
+    expect(buf.length).toBeLessThan(60 * 1024)
   })
 })

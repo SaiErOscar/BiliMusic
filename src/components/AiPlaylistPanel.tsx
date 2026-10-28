@@ -74,7 +74,11 @@ export default function AiPlaylistPanel({ config, Row }: Props) {
         label: '场景描述',
         description: message || '例如：适合深夜写代码的安静歌单',
         children: (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          /*
+           * v1.4.13-pre7：按钮另起一行。
+           * 原来输入框与按钮挤在一行，窄窗口下按钮被压到显示不全。
+           */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
             <input
               className="settings-input"
               type="text"
@@ -82,9 +86,11 @@ export default function AiPlaylistPanel({ config, Row }: Props) {
               value={intent}
               onChange={(e) => setIntent(e.target.value)}
             />
-            <ActionButton onClick={() => void run()} disabled={busy}>
-              {busy ? '生成中…' : '生成歌单'}
-            </ActionButton>
+            <div>
+              <ActionButton onClick={() => void run()} disabled={busy}>
+                {busy ? '生成中…' : '生成歌单'}
+              </ActionButton>
+            </div>
           </div>
         ),
       })}

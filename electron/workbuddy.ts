@@ -18,7 +18,7 @@
 import { app, ipcMain, shell } from 'electron'
 import { promises as fs } from 'fs'
 import { createDecipheriv, createHash } from 'crypto'
-import { execFile } from 'child_process'
+import { execFile, execFileSync } from 'child_process'
 import path from 'path'
 import os from 'os'
 
@@ -161,17 +161,62 @@ function appExecutableCandidates(): string[] {
     const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local')
     const pf = process.env.ProgramFiles || 'C:\\Program Files'
     const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
-    for (const base of [local + '\\Programs', pf, pf86]) {
-      for (const name of ['WorkBuddyAI', 'WorkBuddy', 'CodeBuddy']) {
+    const dirs = [local + '\\Programs', pf, pf86]
+    const names = ['WorkBuddyAI', 'WorkBuddy', 'CodeBuddy']
+    for (const base of dirs) {
+      for (const name of names) {
         out.push(path.join(base, name, name + '.exe'))
         out.push(path.join(base, name, 'WorkBuddy.exe'))
       }
     }
+    /*
+     * v1.4.13-pre7：安装位置不一定在系统盘。
+     * 本机实测 WorkBuddy 装在 D:\\Users\\...\\Programs\\WorkBuddyAI\\，
+     * 而 LOCALAPPDATA 指向 C 盘——只按环境变量拼路径永远找不到，
+     * 表现就是「网页登录正常，但读不到本地桌面端凭据」。
+     * 所以再从注册表的卸载项里读 DisplayIcon（安装器一定会写它）。
+     */
+    for (const exe of registryInstalledExecutables()) out.push(exe)
   } else if (process.platform === 'darwin') {
     out.push('/Applications/WorkBuddy.app/Contents/MacOS/WorkBuddy')
     out.push('/Applications/WorkBuddyAI.app/Contents/MacOS/WorkBuddyAI')
   }
   return out
+}
+
+/**
+ * 从注册表卸载项里取 WorkBuddy 的可执行文件路径。
+ *
+ * 同步读（execFileSync）是刻意的：候选列表是纯函数、被 readAtRestKey 同步消费，
+ * 而这条路径只在真的需要取密钥时走一次，且结果有进程级缓存。
+ * 读不到就返回空数组——不猜路径。
+ */
+function registryInstalledExecutables(): string[] {
+  const found: string[] = []
+  const hives = [
+    'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+    'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+  ]
+  for (const hive of hives) {
+    try {
+      const out = execFileSync('reg', ['query', hive, '/s', '/f', 'WorkBuddy', '/t', 'REG_SZ'], {
+        encoding: 'utf8',
+        timeout: 8000,
+        windowsHide: true,
+        maxBuffer: 4 * 1024 * 1024,
+      })
+      for (const line of out.split(/\r?\n/)) {
+        // DisplayIcon 形如 "D:\...\WorkBuddyAI.exe,0"
+        const m = /DisplayIcon\s+REG_SZ\s+(.+)$/i.exec(line.trim())
+        if (!m) continue
+        const raw = m[1].trim().replace(/^"|"$/g, '').replace(/,-?\d+$/, '')
+        if (/\.exe$/i.test(raw)) found.push(raw)
+      }
+    } catch {
+      /* 该 hive 读不到就跳过 */
+    }
+  }
+  return found
 }
 
 let cachedAtRestKey: Buffer | undefined

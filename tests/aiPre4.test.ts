@@ -8,15 +8,24 @@ import { loadRecentlyRecommended, rememberRecommended } from '../src/services/ai
 // v1.4.13-pre4：模型下拉、推荐去重、WorkBuddy 接入、备份完整性。
 
 describe('模型下拉', () => {
-  it('DeepSeek 内置表含 flash / pro 两条线', () => {
+  // v1.4.13-pre7：内置表只保留官方真实模型名（臆造名照着调只会 400/404）
+  it('DeepSeek 内置表用官方真实模型名', () => {
     const ids = (FALLBACK_MODELS['api.deepseek.com'] || []).map((m) => m.id)
-    expect(ids).toContain('deepseek-flash')
-    expect(ids).toContain('deepseek-pro')
+    expect(ids).toContain('deepseek-chat')
+    expect(ids).toContain('deepseek-reasoner')
+  })
+
+  // 回归锚点：臆造名（deepseek-v4-pro / deepseek-v4.1-flash）不该再出现在回落表里，
+  // 用户反馈「访问不到接口时不要把这两个当默认预设」。
+  it('不再内置臆造的 v4 系列模型名', () => {
+    const ids = (FALLBACK_MODELS['api.deepseek.com'] || []).map((m) => m.id)
+    expect(ids.some((id) => id.includes('v4'))).toBe(false)
   })
 
   it('展示产品名而非接口名', () => {
-    expect(toProductName('deepseek-flash')).toBe('DeepSeek Flash')
-    expect(toProductName('deepseek-pro')).toBe('DeepSeek Pro')
+    // 这两个是 DeepSeek 的旧接口名，映射里刻意标了「（旧名）」
+    expect(toProductName('deepseek-chat')).toBe('DeepSeek Chat（旧名）')
+    expect(toProductName('deepseek-reasoner')).toBe('DeepSeek Reasoner（旧名）')
   })
 
   it('主机名解析用于匹配回落表', () => {
@@ -165,9 +174,77 @@ describe('地址框只在「自定义」预设时出现', () => {
     expect(gate).toContain('baseUrl')
   })
 
-  it('WorkBuddy 也出现在模型下拉里，选中即开面板', () => {
-    expect(src).toContain('__workbuddy__')
-    expect(src).toContain('setWbOpen(true)')
+  // v1.4.13-pre7：模型下拉里不再出现 WorkBuddy（用户要求），入口只在「服务预设」
+  it('模型下拉里不再有 WorkBuddy 选项', () => {
+    expect(src).not.toContain('__workbuddy__')
+  })
+})
+
+// v1.4.13-pre7：用户反馈的 12 项。这里把其中可静态验证的钉住。
+describe('WorkBuddy 作为预设的完整性（pre7）', () => {
+  const wb = readFileSync(path.resolve(__dirname, '../electron/workbuddy.ts'), 'utf8')
+  const aiSvc = readFileSync(path.resolve(__dirname, '../src/services/ai.ts'), 'utf8')
+  const settings = readFileSync(path.resolve(__dirname, '../src/pages/Settings.tsx'), 'utf8')
+
+  // 用户第 1 项：网页登录正常但读不到本地桌面端。
+  // 根因是安装位置不在系统盘，只按 LOCALAPPDATA 拼路径永远找不到。
+  it('桌面端可执行文件从注册表兜底发现', () => {
+    expect(wb).toContain('registryInstalledExecutables')
+    expect(wb).toContain('DisplayIcon')
+    expect(wb).toContain('execFileSync')
+  })
+
+  // 用户第 3 项：所有调用仍走 API、没有 API 就无法测试。
+  // 根因是 WorkBuddy 分支排在 baseUrl/apiKey/model 三项检查之后。
+  it('WorkBuddy 分支排在 API 三项检查之前', () => {
+    const start = aiSvc.indexOf('export async function aiChat')
+    const body = aiSvc.slice(start, aiSvc.indexOf('export async function testAiConnection'))
+    const wbAt = body.indexOf("config.source === 'workbuddy'")
+    const urlAt = body.indexOf('未配置 API 地址')
+    expect(wbAt).toBeGreaterThan(-1)
+    expect(urlAt).toBeGreaterThan(-1)
+    expect(wbAt).toBeLessThan(urlAt)
+  })
+
+  // 用户第 5、6 项：无法选「自定义」、选完 WorkBuddy 回显成别的。
+  // 根因是下拉只按 baseUrl 反查，而 WorkBuddy 的 baseUrl 是空串。
+  it('预设下拉按 source 回显 WorkBuddy，且「自定义」可选中', () => {
+    expect(settings).toContain('currentPresetId')
+    expect(settings).toContain("? 'workbuddy'")
+    expect(settings).toContain('<option value="">自定义</option>')
+  })
+
+  // 用户第 9 项：切换预设自动刷新模型
+  it('切换预设即自动刷新模型列表', () => {
+    expect(settings).toContain('void refreshModels(preset.baseUrl, preset.model)')
+  })
+
+  // 用户第 12 项：WorkBuddy 时 API 输入框禁用并清空
+  it('WorkBuddy 时 API 密钥框禁用且清空', () => {
+    expect(settings).toContain("disabled={aiConfig.source === 'workbuddy'}")
+    expect(settings).toContain("patchAiConfig({ source: 'workbuddy', apiKey: '' })")
+  })
+
+  // 用户第 7 项：模型行里那个 WorkBuddy 按钮要删掉
+  it('地址与模型行不再有 WorkBuddy 按钮', () => {
+    expect(settings).not.toContain('>WorkBuddy…</ActionButton>')
+  })
+})
+
+describe('推荐方式与歌单按钮（pre7）', () => {
+  const settings = readFileSync(path.resolve(__dirname, '../src/pages/Settings.tsx'), 'utf8')
+  const panel = readFileSync(path.resolve(__dirname, '../src/components/AiPlaylistPanel.tsx'), 'utf8')
+
+  // 用户第 8 项：推荐方式改了不持久。根因之一是防抖 300ms 内切页，
+  // 卸载时 cleanup 只 clearTimeout，那一次改动永远没落盘。
+  it('卸载时把未落盘的配置补写掉', () => {
+    expect(settings).toContain('aiPendingRef')
+    expect(settings).toContain('saveAiConfig(pending)')
+  })
+
+  // 用户第 8 项：生成歌单按钮显示不全 → 放到第二行
+  it('生成歌单按钮独占第二行', () => {
+    expect(panel).toContain('flexDirection: \'column\'')
   })
 })
 

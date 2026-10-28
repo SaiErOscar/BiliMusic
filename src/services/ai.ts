@@ -161,19 +161,20 @@ export function resolveChatUrl(baseUrl: string): string {
  * 让设置页的「测试连接」能直接展示给人看，而不是抛原始 JSON。
  */
 export async function aiChat(config: AiSettings, options: AiChatOptions): Promise<string> {
-  const url = resolveChatUrl(config.baseUrl)
-  if (!url) throw new Error('未配置 API 地址')
-  if (!config.apiKey) throw new Error('未配置 API 密钥')
-  if (!config.model) throw new Error('未配置模型名称')
-
-  // v1.4.13-pre4 WorkBuddy 来源：不走 OpenAI 兼容端点，改由主进程用 WorkBuddy 凭据发请求
+  /*
+   * v1.4.13-pre7 修正：WorkBuddy 分支必须排在 baseUrl/apiKey/model 三项检查之前。
+   *
+   * 原来的顺序是先检查 OpenAI 兼容配置，于是选了 WorkBuddy 之后仍然要求填
+   * API 地址与密钥——「所有调用仍走 API」「没有 API 就无法测试」都是这一处造成的。
+   * WorkBuddy 用的是账号凭据，与那三项完全无关，不该被它们拦住。
+   */
   if (config.source === 'workbuddy') {
     const wb = platform.workbuddy
     if (!wb) throw new Error('当前环境不支持 WorkBuddy')
     const cred = await wb.savedCredential()
-    if (!cred) throw new Error('尚未登录 WorkBuddy，请到设置页点「WorkBuddy…」完成登录')
+    if (!cred) throw new Error('尚未登录 WorkBuddy，请在「服务预设」里选 WorkBuddy 完成登录')
     const model = config.wbModel || ''
-    if (!model) throw new Error('尚未选择 WorkBuddy 模型')
+    if (!model) throw new Error('尚未选择 WorkBuddy 模型，请重新打开 WorkBuddy 面板选一个')
     const text = await wb.chat(cred, model, options.messages, options.temperature ?? 0.7)
     recordUsage(
       options.messages.reduce((a, m) => a + m.content.length, 0),
@@ -181,6 +182,11 @@ export async function aiChat(config: AiSettings, options: AiChatOptions): Promis
     )
     return text
   }
+
+  const url = resolveChatUrl(config.baseUrl)
+  if (!url) throw new Error('未配置 API 地址')
+  if (!config.apiKey) throw new Error('未配置 API 密钥')
+  if (!config.model) throw new Error('未配置模型名称')
 
   const controller = new AbortController()
   const timeoutMs = options.timeoutMs ?? 60000

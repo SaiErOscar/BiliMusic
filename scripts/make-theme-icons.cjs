@@ -10,6 +10,8 @@ const THEMES={
   graphite:{light:'#5A5F6A',dark:'#8A909C'},
 };
 function hexToRgb(h){h=h.replace('#','');return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]}
+/** 把颜色朝白(255)或黑(0)混合；t=0 保持原色 */
+function mixToward(r,g,b,target,t){return [Math.round(r+(target-r)*t),Math.round(g+(target-g)*t),Math.round(b+(target-b)*t)]}
 
 function decodePng(buf){
   let pos=8,w=0,h=0,ct=0,bd=0;const idat=[];
@@ -67,38 +69,53 @@ for(const [id,modes] of Object.entries(THEMES)){
     }
     fs.writeFileSync(path.join(outDir,'icon-'+id+'-'+mode+'.png'),encodePng(app.w,app.h,a));
     /*
-     * 托盘图标：按桌面图标的结构做——主题色圆角衬底 + 纯白字形。
+     * 托盘图标：直接取桌面图标那套光影，只把色相换成本主题。
      *
-     * v1.4.13-pre6 修正：原来只把白色字形整体染成主题色、底子透明，
-     * 于是托盘里是一枚纯色剪影，和桌面图标的「圆角底 + 字形」不是一回事。
-     * 现在按 tray.png 的 alpha 分两层：有字形处画白，其余画主题色的圆角方块。
-     * 圆角半径取边长的 22.5%（与 256px 桌面图标观感一致）。
+     * v1.4.13-pre7 修正（用户反馈「白色太暗、主题色太深、没有光影」）：
+     * pre6 是把白色字形压成纯白、其余压成单一主题色的「双色平涂」，
+     * 于是既没有 icon.ico 那种由浅到深的渐变底，也没有字形的立体感。
+     * 现在改为对桌面图标逐像素做「保留亮度、替换色相」：
+     * - 底色沿用原图的渐变（浅粉→深粉），按主题色的亮暗两档线性映射；
+     * - 字形保留原图接近白的亮度，因此仍是明亮的白字带阴影。
+     * 这样托盘图标与 icon.ico 是同一套设计，只换主色。
      */
-    const t=Buffer.from(tray.data);
-    const S=tray.w;
+    const t=Buffer.from(app.data);
+    const S=app.w;
     const radius=S*0.225;
-    for(let y=0;y<tray.h;y++){
+    // 主题色的亮档与暗档：亮档用于背景上部，暗档用于背景下部，形成渐变
+    const [lr,lg,lb]=mixToward(tr,tg,tb,255,0.42);
+    const [dr,dg,db]=mixToward(tr,tg,tb,0,0.16);
+    for(let y=0;y<S;y++){
+      const gy=y/(S-1); // 0 = 顶，1 = 底
+      const br=lr+(dr-lr)*gy, bg2=lg+(dg-lg)*gy, bb=lb+(db-lb)*gy;
       for(let x=0;x<S;x++){
         const i=(y*S+x)*4;
-        // 圆角矩形的覆盖判定：四角按圆裁掉
+        // 圆角矩形：四角按圆裁掉
         let inside=1;
         const cx=x<radius?radius:(x>S-radius?S-radius:x);
         const cy=y<radius?radius:(y>S-radius?S-radius:y);
         if(cx!==x||cy!==y){
           const dx=x-cx,dy=y-cy;
-          const d=Math.sqrt(dx*dx+dy*dy);
-          inside=d<=radius?1:0;
+          inside=Math.sqrt(dx*dx+dy*dy)<=radius?1:0;
         }
         if(!inside){ t[i]=0;t[i+1]=0;t[i+2]=0;t[i+3]=0; continue }
-        const glyph=t[i+3]/255;
-        // 字形处纯白，其余为主题色衬底
-        t[i]=Math.round(255*glyph+tr*(1-glyph));
-        t[i+1]=Math.round(255*glyph+tg*(1-glyph));
-        t[i+2]=Math.round(255*glyph+tb*(1-glyph));
+        /*
+         * 用原图亮度当权重：原图字形接近白（lum≈0.90），背景是粉（lum≈0.60）。
+         * 把 [0.55, 1.0] 映射到 [0, 1]，得到「字形=1、背景=0」的掩膜，
+         * 再按掩膜在「主题色渐变底」与「近白字形」之间插值——
+         * 字形因此保留原图的柔和边缘与阴影过渡，而不是硬切的纯白。
+         */
+        const lum=(0.299*t[i]+0.587*t[i+1]+0.114*t[i+2])/255;
+        const m=Math.max(0,Math.min(1,(lum-0.55)/0.45));
+        const eased=m*m*(3-2*m); // smoothstep：让字形边缘过渡自然
+        const gr=252, gg=236, gb=242; // 参考图标的近白字形
+        t[i]=Math.round(br*(1-eased)+gr*eased);
+        t[i+1]=Math.round(bg2*(1-eased)+gg*eased);
+        t[i+2]=Math.round(bb*(1-eased)+gb*eased);
         t[i+3]=255;
       }
     }
-    fs.writeFileSync(path.join(outDir,'tray-'+id+'-'+mode+'.png'),encodePng(tray.w,tray.h,t));
+    fs.writeFileSync(path.join(outDir,'tray-'+id+'-'+mode+'.png'),encodePng(S,S,t));
     n+=2;
   }
 }

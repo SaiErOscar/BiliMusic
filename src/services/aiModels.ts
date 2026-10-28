@@ -26,11 +26,16 @@ export interface ModelOption {
  * 不暴露接口名。
  */
 export const FALLBACK_MODELS: Record<string, ModelOption[]> = {
+  /*
+   * v1.4.13-pre7：只保留官方文档里真实存在的模型名。
+   *
+   * 原来的 deepseek-v4-pro / deepseek-v4.1-flash 是臆造的名字（用户反馈
+   * 「访问不到接口时不要拿这两个当默认预设」），照着调只会 400/404。
+   * 接口可达时一律以 /models 的实际返回为准，这张表只在拉不到时兜底。
+   */
   'api.deepseek.com': [
-    { id: 'deepseek-v4-pro', label: 'Deepseek-V4-Pro' },
-    { id: 'deepseek-v4.1-flash', label: 'Deepseek-V4.1-Flash 1017' },
-    { id: 'deepseek-flash', label: 'Deepseek-Flash' },
-    { id: 'deepseek-pro', label: 'Deepseek-Pro' },
+    { id: 'deepseek-chat', label: 'DeepSeek Chat' },
+    { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner' },
   ],
   'api.openai.com': [
     { id: 'gpt-4o-mini', label: 'GPT-4o mini' },
@@ -86,11 +91,19 @@ export function toProductName(id: string): string {
     .join(' ')
 }
 
-/** 拉取模型列表：成功用接口结果，失败回落到内置表 */
+/**
+ * 拉取模型列表：成功用接口结果，失败才回落内置表。
+ *
+ * v1.4.13-pre7：没配地址时**不**回落。
+ * 那种情况下内置表只是一份猜测，摆出来会被当成「这些模型可用」——
+ * 用户反馈的「访问不到接口时不要拿内置名字当默认预设」就是这件事。
+ */
 export async function fetchModelOptions(settings: AiSettings): Promise<{ models: ModelOption[]; fromApi: boolean }> {
   const host = hostOf(settings.baseUrl)
   const fallback = FALLBACK_MODELS[host] || []
-  if (!settings.baseUrl || !settings.apiKey) return { models: fallback, fromApi: false }
+  if (!settings.baseUrl) return { models: [], fromApi: false }
+  // 有地址但没有密钥：/models 多半 401，仍回落该主机的内置表（已知主机，名字可靠）
+  if (!settings.apiKey) return { models: fallback, fromApi: false }
   try {
     const data = await aiFetchJson(settings, '/models')
     const list = (data as { data?: { id?: string }[] })?.data || []

@@ -207,10 +207,13 @@ function applyThemedIcons(themeId: string, mode: 'light' | 'dark') {
         setTimeout(push, 300)
       }
       if (tray) {
-        // v1.4.13-pre4：托盘要的是「桌面图标那种」——内部保持纯白，外围衬主题色。
-        // 直接用 icon-*.png 缩放，既保留白色主体又有主题色底。
-        const trayImg = loadThemedIcon(themeId, mode, 'icon').resize({ width: 32, height: 32 })
-        tray.setImage(trayImg)
+        /*
+         * v1.4.13-pre7：托盘直接用 tray-*.png。
+         * 这张图本身就是「与 icon.ico 同一套设计、只换主色」的成品
+         * （浅色渐变底 + 明亮白字 + 光影），不需要再缩放桌面图标——
+         * 那样做会把 256px 的立体图缩成一团，反而更糊。
+         */
+        tray.setImage(loadThemedIcon(themeId, mode, 'tray'))
       }
     }
     apply()
