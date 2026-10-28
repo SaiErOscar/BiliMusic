@@ -1,12 +1,15 @@
 /**
- * v1.4.13-pre4 WorkBuddy 接入（国内版 / 国际版）。
+ * v1.4.13-pre5 WorkBuddy 接入（国内版 / 国际版）。
  *
  * 实现参考 github.com/dingminhua/dsh-connect-workbuddy（MIT，作者 dingminhua）：
- * - 区域基址：国内 https://www.codebuddy.cn，国际 https://www.workbuddy.ai
- * - 插件 API 前缀 /v2/plugin，chat 端点 {base}/v2/chat/completions
- * - 网页登录：auth/state 申请 state → 浏览器授权 → auth/token 轮询换凭据
+ * - 区域基址：国内 https://www.codebuddy.cn（聊天走 copilot.tencent.com），
+ *   国际 https://www.workbuddy.ai
+ * - 登录：auth/state（POST + ?platform=workbuddy）→ auth/token 轮询换凭据，
+ *   这两个挂在 /v2/plugin 下；模型目录与对话**不在**这个前缀里
+ * - 模型目录：裸 /v3/config，必须以 App 的 UA 读
  * - 本地凭据：桌面端把登录态写在 CodeBuddyExtension/Data/Public/auth 下的
- *   workbuddy-desktop*.info（同目录可能有多份带时间戳的备份，各持不同账号）
+ *   workbuddy-desktop*.info；Windows 版把 accessToken 存成
+ *   {$wbEncrypted:1, envelope} 的加密字段，必须借桌面端自己的原生模块取密钥解密
  *
  * 本文件只实现「取凭据 + 列模型 + 发一次 chat」三件事，不搬插件的账号池、
  * 计费、图片/视频等能力——BiliMusic 只需要把 WorkBuddy 当成一个模型来源。
@@ -14,6 +17,8 @@
 
 import { app, ipcMain, shell } from 'electron'
 import { promises as fs } from 'fs'
+import { createDecipheriv, createHash } from 'crypto'
+import { execFile } from 'child_process'
 import path from 'path'
 import os from 'os'
 
@@ -25,7 +30,24 @@ const REGION_BASE: Record<WorkBuddyRegion, string> = {
   global: 'https://www.workbuddy.ai',
 }
 
+/**
+ * 网页登录（auth/state、auth/token）挂在 /v2/plugin 下；模型目录与对话**不在**这个前缀里。
+ * 实测：/v2/plugin/v3/config → 404 Route Not Found，裸 /v3/config → 200。
+ */
 const API_PREFIX = '/v2/plugin'
+
+/** 对话网关。国内版聊天走 copilot.tencent.com，不是 codebuddy.cn（实测 401 vs 200） */
+const CHAT_BASE: Record<WorkBuddyRegion, string> = {
+  cn: 'https://copilot.tencent.com',
+  global: 'https://www.workbuddy.ai',
+}
+
+/**
+ * 读模型目录必须用 App 自己的客户端身份。
+ * /v3/config 按 UA 里的客户端通道裁剪答案：CLI 通道不发布 modelPromotions / modelTiers，
+ * 且模型名册是 App 通道的子集。
+ */
+const PRODUCT_UA = 'WorkBuddy/5.8.3 WorkBuddy/5.8.3 CLI/2.161.0'
 
 /** 模型静态回落表（取自插件 catalog.ts 的实测快照；线上会刷新覆盖） */
 const FALLBACK_MODELS: Record<WorkBuddyRegion, { id: string; name: string }[]> = {
@@ -82,6 +104,149 @@ function desktopAuthDirs(): string[] {
   return [path.join(config, 'CodeBuddyExtension', 'Data', 'Public', 'auth')]
 }
 
+// ===== 桌面端加密字段（Windows 版把 token 存成 {$wbEncrypted:1, envelope}）=====
+
+/**
+ * 加密字段的 AAD 转录。
+ *
+ * 逐字节照抄插件 at-rest.ts 的 fieldAad()：这不是可选项，AAD 差一个字节
+ * GCM 校验就会失败。字段框架是 2，格式标识 WBEV1，方案名 sym-v1。
+ */
+function fieldAad(keyId: string, suite: number): Buffer {
+  const u32 = (v: number) => {
+    const b = Buffer.allocUnsafe(4)
+    b.writeUInt32BE(v)
+    return b
+  }
+  const lp = (s: string) => {
+    const b = Buffer.from(s, 'utf8')
+    return Buffer.concat([u32(b.length), b])
+  }
+  return Buffer.concat([
+    Buffer.from('WB-AAD\0', 'ascii'),
+    Buffer.from([1]),
+    lp('WBEV1'),
+    lp('sym-v1'),
+    u32(suite),
+    lp(keyId),
+    Buffer.from([2]),
+    Buffer.from([0]),
+    Buffer.from([0]),
+  ])
+}
+
+interface EncryptedField {
+  $wbEncrypted: 1
+  envelope: string
+}
+
+function isEncryptedField(v: unknown): v is EncryptedField {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  const o = v as Record<string, unknown>
+  return o['$wbEncrypted'] === 1 && typeof o['envelope'] === 'string'
+}
+
+/**
+ * 桌面端可执行文件候选。
+ *
+ * 注意真实安装名是 WorkBuddyAI.exe（实测 D:\...\Programs\WorkBuddyAI\），
+ * 插件文档里写的 WorkBuddy.exe 在这台机器上不存在——两个都要试。
+ */
+function appExecutableCandidates(): string[] {
+  const home = os.homedir()
+  const env = process.env.WORKBUDDY_APP_EXECUTABLE
+  const out: string[] = []
+  if (env) out.push(env)
+  if (process.platform === 'win32') {
+    const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local')
+    const pf = process.env.ProgramFiles || 'C:\\Program Files'
+    const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
+    for (const base of [local + '\\Programs', pf, pf86]) {
+      for (const name of ['WorkBuddyAI', 'WorkBuddy', 'CodeBuddy']) {
+        out.push(path.join(base, name, name + '.exe'))
+        out.push(path.join(base, name, 'WorkBuddy.exe'))
+      }
+    }
+  } else if (process.platform === 'darwin') {
+    out.push('/Applications/WorkBuddy.app/Contents/MacOS/WorkBuddy')
+    out.push('/Applications/WorkBuddyAI.app/Contents/MacOS/WorkBuddyAI')
+  }
+  return out
+}
+
+let cachedAtRestKey: Buffer | undefined
+let atRestKeyTried = false
+
+/**
+ * 取桌面端的 at-rest 密钥。
+ *
+ * 做法与插件一致：把桌面端当成纯 Node 跑一行代码，调它自己的原生模块
+ * electron_browser_workbuddy_storage.loggerGet() 拿 key payload——这样本仓库
+ * 不必携带任何与具体构建绑定的常量。失败返回 undefined（不抛），
+ * 让上层退化成「读不到凭据」而不是崩溃。
+ */
+async function readAtRestKey(): Promise<Buffer | undefined> {
+  if (atRestKeyTried) return cachedAtRestKey
+  atRestKeyTried = true
+  const source =
+    "try{process.stdout.write(process._linkedBinding('electron_browser_workbuddy_storage').loggerGet())}" +
+    'catch(e){process.exitCode=3;process.stderr.write(String(e&&e.message||e))}'
+  for (const exe of appExecutableCandidates()) {
+    try {
+      await fs.access(exe)
+    } catch {
+      continue
+    }
+    const payload = await new Promise<string | undefined>((resolve) => {
+      execFile(
+        exe,
+        ['-e', source],
+        { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 20000, windowsHide: true, maxBuffer: 1024 * 1024 },
+        (err, stdout) => resolve(err ? undefined : String(stdout).trim() || undefined),
+      )
+    })
+    if (!payload) continue
+    try {
+      const secret = (JSON.parse(payload) as Record<string, unknown>)['atRestSecretKey']
+      if (typeof secret !== 'string' || !secret) continue
+      cachedAtRestKey = createHash('sha256').update(secret, 'utf8').digest()
+      return cachedAtRestKey
+    } catch {
+      /* 换下一个候选 */
+    }
+  }
+  return undefined
+}
+
+/** 打开一个加密字段；打不开返回空串（GCM 校验失败绝不当成截断的 token） */
+function openEncryptedField(field: EncryptedField, key: Buffer): string {
+  try {
+    const env = JSON.parse(Buffer.from(field.envelope, 'base64').toString('utf8')) as Record<string, unknown>
+    const suite = env['suite']
+    const keyId = env['keyId']
+    const nonce = env['nonce']
+    const authTag = env['authTag']
+    const ciphertext = env['ciphertext']
+    if (typeof suite !== 'number' || typeof keyId !== 'string') return ''
+    if (typeof nonce !== 'string' || typeof authTag !== 'string' || typeof ciphertext !== 'string') return ''
+    if (keyId !== createHash('sha256').update(key).digest('hex').slice(0, 16)) return ''
+    const d = createDecipheriv('aes-256-gcm', key, Buffer.from(nonce, 'base64'), { authTagLength: 16 })
+    d.setAAD(fieldAad(keyId, suite))
+    d.setAuthTag(Buffer.from(authTag, 'base64'))
+    return Buffer.concat([d.update(Buffer.from(ciphertext, 'base64')), d.final()]).toString('utf8')
+  } catch {
+    return ''
+  }
+}
+
+/** 取字符串字段，遇到加密包装就解密 */
+async function credentialField(v: unknown, key: Buffer | undefined): Promise<string> {
+  if (typeof v === 'string') return v
+  if (!isEncryptedField(v)) return ''
+  if (!key) return ''
+  return openEncryptedField(v, key)
+}
+
 /** 凭据文件里可能出现的字段拼写（camelCase / snake_case 都要容错） */
 function pickToken(obj: Record<string, unknown>): string {
   const keys = ['access_token', 'accessToken', 'token', 'accessTokenValue']
@@ -120,6 +285,8 @@ function regionOfDomain(domain: string): WorkBuddyRegion {
  */
 export async function readLocalCredentials(): Promise<WorkBuddyCredential[]> {
   const found: WorkBuddyCredential[] = []
+  // 密钥只在真的遇到加密字段时才去取（要 spawn 桌面端，有成本）
+  let atRestKey: Buffer | undefined | null = null
   for (const dir of desktopAuthDirs()) {
     let names: string[] = []
     try {
@@ -132,14 +299,28 @@ export async function readLocalCredentials(): Promise<WorkBuddyCredential[]> {
       try {
         const raw = await fs.readFile(path.join(dir, name), 'utf8')
         const obj = JSON.parse(raw) as Record<string, unknown>
-        const token = pickToken(obj)
+        // 桌面端把登录态嵌在 auth 下（实测键：auth.accessToken / auth.domain /
+        // auth.expiresAt / account.uid），不在顶层；两层都要看，否则扫描永远落空。
+        const auth = (obj['auth'] && typeof obj['auth'] === 'object' ? obj['auth'] : {}) as Record<string, unknown>
+        const account = (obj['account'] && typeof obj['account'] === 'object' ? obj['account'] : {}) as Record<string, unknown>
+        const rawToken = auth['accessToken'] ?? obj['accessToken']
+        if (!rawToken) continue
+        if (isEncryptedField(rawToken) && atRestKey === null) {
+          atRestKey = await readAtRestKey()
+        }
+        const token = isEncryptedField(rawToken)
+          ? await credentialField(rawToken, atRestKey ?? undefined)
+          : pickToken(auth) || pickToken(obj)
+        // 解不开就跳过这一份：宁可不显示账号，也不能拿半个 token 去请求
         if (!token) continue
-        const domain = String(obj['domain'] || obj['site'] || '')
+        const domain = await credentialField(auth['domain'] ?? obj['domain'] ?? obj['site'], atRestKey ?? undefined)
         found.push({
           accessToken: token,
           region: regionOfDomain(domain),
-          account: String(obj['uin'] || obj['nickname'] || obj['name'] || '') || undefined,
-          expiresAt: pickExpiry(obj),
+          account:
+            (await credentialField(account['nickname'] ?? account['uin'] ?? obj['nickname'] ?? obj['uin'], atRestKey ?? undefined))
+            || undefined,
+          expiresAt: pickExpiry(auth) || pickExpiry(obj),
         })
       } catch {
         /* 单份坏文件不影响其它 */
@@ -303,26 +484,51 @@ export async function saveCredential(cred: WorkBuddyCredential): Promise<void> {
 
 // ===== 模型与对话 =====
 
-/** 拉取区域模型列表；失败回落静态表 */
+/**
+ * 拉取区域模型列表；失败回落静态表。
+ *
+ * 三点与插件对齐（v1.4.13-pre5 实测校正）：
+ * 1. 裸 /v3/config，**不带** /v2/plugin 前缀（带前缀是 404 Route Not Found）；
+ * 2. 必须用 App 的 UA —— 否则 CLI 通道只给子集名册；
+ * 3. 名册优先取 `data.agents` 里 name === 'cli' 的 models 数组，
+ *    它是「当前账号可用」的口径；data.models 是全量目录。
+ */
 export async function listModels(region: WorkBuddyRegion, token: string): Promise<{ id: string; name: string }[]> {
   try {
     const resp = await fetch(`${REGION_BASE[region]}/v3/config`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'User-Agent': PRODUCT_UA,
+        'X-Product': 'SaaS',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
     })
     if (resp.ok) {
-      const data = (await resp.json()) as Record<string, unknown>
-      const list = (data['models'] || data['modelList']) as unknown
-      if (Array.isArray(list) && list.length) {
-        const models = list
-          .map((m) => {
-            const o = m as Record<string, unknown>
-            const id = String(o['id'] || o['model'] || '')
-            const name = String(o['name'] || o['displayName'] || id)
-            return id ? { id, name } : null
-          })
-          .filter((m): m is { id: string; name: string } => !!m)
-        if (models.length) return models
+      const doc = (await resp.json()) as Record<string, unknown>
+      const data = envelopeData(doc)
+      const catalog = new Map<string, string>()
+      for (const m of Array.isArray(data['models']) ? (data['models'] as unknown[]) : []) {
+        if (!m || typeof m !== 'object') continue
+        const o = m as Record<string, unknown>
+        const id = String(o['id'] || o['model'] || '')
+        if (!id) continue
+        catalog.set(id, String(o['name'] || o['displayName'] || id))
       }
+      let ids: string[] = []
+      for (const a of Array.isArray(data['agents']) ? (data['agents'] as unknown[]) : []) {
+        if (!a || typeof a !== 'object') continue
+        const o = a as Record<string, unknown>
+        if (o['name'] === 'cli' && Array.isArray(o['models'])) {
+          ids = (o['models'] as unknown[]).filter((x): x is string => typeof x === 'string')
+          break
+        }
+      }
+      if (!ids.length) ids = [...catalog.keys()]
+      const models = ids
+        .filter((id) => !/^(auto|default-model)$/.test(id))
+        .map((id) => ({ id, name: catalog.get(id) || id }))
+      if (models.length) return models
     }
   } catch {
     /* 回落 */
@@ -330,23 +536,74 @@ export async function listModels(region: WorkBuddyRegion, token: string): Promis
   return FALLBACK_MODELS[region]
 }
 
-/** 发一次 chat；返回首个 choice 的文本 */
+/** 随机 id（对话身份三元组用；网关只校验形状，不校验来源） */
+function randomId(): string {
+  const h = () => Math.floor(Math.random() * 0x10000).toString(16).padStart(4, '0')
+  return `${h()}${h()}${h()}${h()}-${h()}-${h()}-${h()}-${h()}${h()}${h()}`
+}
+
+/**
+ * 发一次 chat；返回首个 choice 的文本。
+ *
+ * 网关有两道门，缺一即 400 / code 11128：
+ * 1. messages[0] 必须是 system（ensureSystemHead）；
+ * 2. 必须带官方客户端的对话身份三元组 X-Conversation-ID / -Request-ID / -Message-ID。
+ *    只带第一个仍然失败，三个都要，且每个请求都重新生成。
+ * 国内版还要带 X-Product: SaaS 和 copilot.tencent.com 这个网关（codebuddy.cn 是 401）。
+ */
 export async function chat(cred: WorkBuddyCredential, model: string, messages: unknown[], temperature = 0.7): Promise<string> {
-  const resp = await fetch(`${REGION_BASE[cred.region]}/v2/chat/completions`, {
+  const wire = Array.isArray(messages) ? [...messages] : []
+  const head = wire[0] as Record<string, unknown> | undefined
+  if (!head || head['role'] !== 'system') {
+    wire.unshift({ role: 'system', content: 'You are a helpful assistant.' })
+  }
+  const messageId = randomId()
+  // 这个网关**只支持流式**：非流式（stream:false / 不带 stream）会被拒。
+  // 所以固定 stream:true，按 SSE 逐块拼内容。
+  const resp = await fetch(`${CHAT_BASE[cred.region]}/v2/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
       Authorization: `Bearer ${cred.accessToken}`,
+      'User-Agent': 'CLI/2.63.2 CodeBuddy/2.63.2',
+      'X-Product': 'SaaS',
+      'X-Requested-With': 'XMLHttpRequest',
+      Origin: REGION_BASE[cred.region],
+      Referer: `${REGION_BASE[cred.region]}/`,
+      'X-Conversation-ID': randomId(),
+      'X-Conversation-Request-ID': randomId(),
+      'X-Conversation-Message-ID': messageId,
     },
-    body: JSON.stringify({ model, messages, temperature }),
+    body: JSON.stringify({ model, messages: wire, temperature, stream: true }),
   })
   if (!resp.ok) {
     const body = await resp.text().catch(() => '')
     throw new Error(`WorkBuddy 请求失败（${resp.status}）${body ? '：' + body.slice(0, 160) : ''}`)
   }
-  const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] }
-  const text = data.choices?.[0]?.message?.content
-  if (!text) throw new Error('WorkBuddy 返回内容为空')
+  const raw = await resp.text()
+  let text = ''
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue
+    const payload = line.slice(5).trim()
+    if (!payload || payload === '[DONE]') continue
+    try {
+      const chunk = JSON.parse(payload) as {
+        choices?: { delta?: { content?: string } }[]
+        code?: number
+        msg?: string
+      }
+      // 业务错误也可能以 SSE 块的形式回来
+      if (typeof chunk.code === 'number' && chunk.code !== 0) {
+        throw new Error(`WorkBuddy 返回错误 ${chunk.code}${chunk.msg ? '：' + chunk.msg : ''}`)
+      }
+      text += chunk.choices?.[0]?.delta?.content || ''
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith('WorkBuddy 返回错误')) throw e
+      /* 单块解析失败不致命 */
+    }
+  }
+  if (!text.trim()) throw new Error('WorkBuddy 返回内容为空')
   return text
 }
 

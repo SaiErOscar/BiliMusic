@@ -5,6 +5,23 @@
 
 ---
 
+## v1.4.13-pre6 — WorkBuddy 真正打通（加密凭据 + 流式）
+
+**发布日期：2026-10-27**
+
+### 修复
+
+- **WorkBuddy 聊天 401 的真正根因：本地凭据里的 token 是加密的。** Windows 版桌面端把 `accessToken` 存成 `{$wbEncrypted:1, envelope}`（AES-256-GCM），不是字符串。只认字符串的读取器会静默拿到 `undefined`，于是请求头里发出的是 `Bearer [object Object]`——网关回一页 openresty 的 `401 Authorization Required`。现在借桌面端自己的原生模块取 at-rest 密钥（`electron_browser_workbuddy_storage.loggerGet()`），按插件的 AAD 转录逐字节解密；GCM 校验失败一律当作「读不到」，绝不拿半个 token 去请求。
+- **WorkBuddy 只支持流式对话。** 这个网关拒绝非流式请求，所以 `chat()` 改为固定 `stream: true` + `Accept: text/event-stream`，按 SSE 逐块累加 `choices[0].delta.content`；业务错误码也可能以 SSE 块形式回来，一并识别。
+- **`/v3/config` 与 chat 都不在 `/v2/plugin` 前缀下。** 带前缀是 `404 Route Not Found`，裸路径才通。前缀只用于 `auth/state` 与 `auth/token`。
+- **`auth/state` 少了 `platform` 参数**，上游回 `10001 platform is empty`。已补 `?platform=workbuddy`。
+- **桌面端可执行文件真名是 `WorkBuddyAI.exe`**（本机实测 `D:\...\Programs\WorkBuddyAI\`），插件文档写的 `WorkBuddy.exe` 并不存在。两个名字都作为候选。
+
+### 测试
+
+- vitest **393 项全绿**（新增 7 项 WorkBuddy 回归锚点：前缀、platform 参数、国内版聊天网关、对话身份三元组、SSE 流式、加密字段解密、可执行文件名）。
+- 真机端到端实测：解密得到 1414 字符 JWT → `/v3/config` 200 / 28 个模型 → `/v2/chat/completions` 200 / `text/event-stream`，模型如实回了「收到」。
+
 ## v1.4.13-pre5 — 修正 8 项反馈（含 WorkBuddy 404）
 
 **发布日期：2026-10-25**

@@ -64,6 +64,60 @@ describe('WorkBuddy 接入（参考 dsh-connect-workbuddy，MIT）', () => {
     expect(src).toContain('auth/token')
   })
 
+  // 回归锚点：pre5 实测 /v2/plugin/v3/config → 404 Route Not Found，裸 /v3/config → 200。
+  // 前缀只能挂在 auth 两处，模型目录与对话都不在它下面。
+  it('/v3/config 与 chat 不带 /v2/plugin 前缀', () => {
+    expect(src).not.toContain('${API_PREFIX}/v3/config')
+    expect(src).not.toContain('${API_PREFIX}/v2/chat')
+    expect(src).toContain('/v3/config')
+    expect(src).toContain('/v2/chat/completions')
+  })
+
+  // 回归锚点：auth/state 少了 platform 参数，上游回 10001 platform is empty。
+  it('auth/state 带 platform=workbuddy', () => {
+    expect(src).toContain('auth/state?platform=workbuddy')
+  })
+
+  // 回归锚点：国内版聊天网关是 copilot.tencent.com，codebuddy.cn 上打 chat 是 401。
+  it('国内版聊天走 copilot.tencent.com', () => {
+    expect(src).toContain('https://copilot.tencent.com')
+    expect(src).toContain('CHAT_BASE')
+  })
+
+  // 回归锚点：网关 11128 两道门，system 头 + 对话身份三元组缺一不可。
+  it('chat 带 system 头与对话身份三元组', () => {
+    expect(src).toContain('X-Conversation-ID')
+    expect(src).toContain('X-Conversation-Request-ID')
+    expect(src).toContain('X-Conversation-Message-ID')
+    expect(src).toContain("role: 'system'")
+  })
+
+  // 回归锚点：这个网关只吃流式。非流式请求会被拒，所以必须 stream:true + 解析 SSE。
+  it('chat 走 SSE 流式，不走非流式', () => {
+    // 只断言 chat 函数体：listModels 用 resp.json() 读目录是正当的，
+    // 不该被这条回归连坐。
+    const chatBody = src.slice(src.indexOf('export async function chat'), src.indexOf('export function registerWorkBuddyHandlers'))
+    expect(chatBody).toContain('stream: true')
+    expect(chatBody).toContain("Accept: 'text/event-stream'")
+    expect(chatBody).toContain("startsWith('data:')")
+    expect(chatBody).not.toContain('resp.json()')
+  })
+
+  // 回归锚点：Windows 版把 accessToken 存成 {$wbEncrypted:1, envelope}。
+  // 只认字符串的读取器会静默失败（曾经发出 Bearer [object Object] 被网关 401）。
+  it('能解开桌面端的加密 token 字段', () => {
+    expect(src).toContain('$wbEncrypted')
+    expect(src).toContain('electron_browser_workbuddy_storage')
+    expect(src).toContain('aes-256-gcm')
+    expect(src).toContain('WB-AAD')
+    expect(src).toContain('WBEV1')
+  })
+
+  // 回归锚点：本机真实安装名是 WorkBuddyAI.exe，不是插件文档里的 WorkBuddy.exe。
+  it('桌面端可执行文件候选含 WorkBuddyAI', () => {
+    expect(src).toContain('WorkBuddyAI')
+  })
+
   it('凭据经 safeStorage 加密落盘，不写明文', () => {
     expect(src).toContain('safeStorage.encryptString')
     expect(src).toContain('拒绝以明文保存')
