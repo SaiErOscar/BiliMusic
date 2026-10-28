@@ -66,11 +66,37 @@ for(const [id,modes] of Object.entries(THEMES)){
       a[i]=Math.min(255,Math.round(tr*k));a[i+1]=Math.min(255,Math.round(tg*k));a[i+2]=Math.min(255,Math.round(tb*k));
     }
     fs.writeFileSync(path.join(outDir,'icon-'+id+'-'+mode+'.png'),encodePng(app.w,app.h,a));
-    // 托盘图标：直接赋主题色，保留原 alpha（白色形状 -> 主题色形状）
+    /*
+     * 托盘图标：按桌面图标的结构做——主题色圆角衬底 + 纯白字形。
+     *
+     * v1.4.13-pre6 修正：原来只把白色字形整体染成主题色、底子透明，
+     * 于是托盘里是一枚纯色剪影，和桌面图标的「圆角底 + 字形」不是一回事。
+     * 现在按 tray.png 的 alpha 分两层：有字形处画白，其余画主题色的圆角方块。
+     * 圆角半径取边长的 22.5%（与 256px 桌面图标观感一致）。
+     */
     const t=Buffer.from(tray.data);
-    for(let i=0;i<t.length;i+=4){
-      const al=t[i+3];if(!al)continue;
-      t[i]=tr;t[i+1]=tg;t[i+2]=tb;
+    const S=tray.w;
+    const radius=S*0.225;
+    for(let y=0;y<tray.h;y++){
+      for(let x=0;x<S;x++){
+        const i=(y*S+x)*4;
+        // 圆角矩形的覆盖判定：四角按圆裁掉
+        let inside=1;
+        const cx=x<radius?radius:(x>S-radius?S-radius:x);
+        const cy=y<radius?radius:(y>S-radius?S-radius:y);
+        if(cx!==x||cy!==y){
+          const dx=x-cx,dy=y-cy;
+          const d=Math.sqrt(dx*dx+dy*dy);
+          inside=d<=radius?1:0;
+        }
+        if(!inside){ t[i]=0;t[i+1]=0;t[i+2]=0;t[i+3]=0; continue }
+        const glyph=t[i+3]/255;
+        // 字形处纯白，其余为主题色衬底
+        t[i]=Math.round(255*glyph+tr*(1-glyph));
+        t[i+1]=Math.round(255*glyph+tg*(1-glyph));
+        t[i+2]=Math.round(255*glyph+tb*(1-glyph));
+        t[i+3]=255;
+      }
     }
     fs.writeFileSync(path.join(outDir,'tray-'+id+'-'+mode+'.png'),encodePng(tray.w,tray.h,t));
     n+=2;

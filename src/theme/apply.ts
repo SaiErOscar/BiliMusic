@@ -46,6 +46,19 @@ function syncThemedIcon(themeId: string, mode: ResolvedMode): void {
   } catch {
     /* 图标同步失败不影响主题本身 */
   }
+  /*
+   * v1.4.13-pre6：标题栏那枚 logo 是自绘的（窗口 frame:false），主进程 setIcon
+   * 管不到它——它只认 TitleBar.tsx 里那个 <img>。所以把主题与明暗挂到 <html>
+   * 的 data 属性上，由 CSS 选到对应的图标资源；自定义基色没有预生成图标，
+   * 属性取不到匹配值时 CSS 回落到默认图，与主进程的降级口径一致。
+   */
+  try {
+    const root = document.documentElement
+    root.setAttribute('data-app-theme', themeId || 'default')
+    root.setAttribute('data-app-mode', mode)
+  } catch {
+    /* 同上 */
+  }
 }
 
 /** 按当前设置重算品牌色 token（设置变更、备份导入后调用） */

@@ -19,8 +19,18 @@
 
 ### 测试
 
-- vitest **393 项全绿**（新增 7 项 WorkBuddy 回归锚点：前缀、platform 参数、国内版聊天网关、对话身份三元组、SSE 流式、加密字段解密、可执行文件名）。
 - 真机端到端实测：解密得到 1414 字符 JWT → `/v3/config` 200 / 28 个模型 → `/v2/chat/completions` 200 / `text/event-stream`，模型如实回了「收到」。
+
+### 追加修复（同日）
+
+- **配置持久化漏字段**：`AiSettings` 里的 `source` / `wbRegion` / `wbModel` 此前只在渲染层存在，主进程 `readConfig`/`writeConfig` 两端都没处理——于是「WorkBuddy 选完即丢」「预设选择活不过一次重启」。三个字段现在都落盘并读回。
+- **标题栏 logo 不随主题变（真正的根因）**：主窗口是 `frame: false` 的自绘标题栏，那枚 logo 是 `TitleBar.tsx` 里硬编码的静态图，主进程 `setIcon` 改的是任务栏/Alt-Tab 那一枚，**根本管不到它**。改为把 `data-app-theme` / `data-app-mode` 写到 `<html>`，标题栏用 `MutationObserver` 监听并按主题取 `/icons/icon-<theme>-<mode>.png`；自定义基色没有预生成图标，回落默认图。
+- **托盘图标结构对齐桌面图标**：原实现把白色字形整体染成主题色、底子透明，是一枚纯色剪影。改为按 `tray.png` 的 alpha 分两层——字形处纯白，其余为主题色圆角衬底（圆角半径取边长 22.5%）。
+- **图标资源同步进构建**：`public/icons` 由新增的 `sync-icons` 脚本在 `build` 前自动从 `electron/icons` 复制，避免「改了图标但运行时 404」。
+
+### 测试（追加后）
+
+- vitest **402 项全绿**（本轮共新增 16 项：7 项 WorkBuddy 端点/解密/SSE、3 项配置持久化、5 项标题栏与托盘图标、1 项构建资源同步）。
 
 ## v1.4.13-pre5 — 修正 8 项反馈（含 WorkBuddy 404）
 

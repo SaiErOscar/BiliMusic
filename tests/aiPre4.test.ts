@@ -124,6 +124,31 @@ describe('WorkBuddy 接入（参考 dsh-connect-workbuddy，MIT）', () => {
   })
 })
 
+// v1.4.13-pre6：AiSettings 里的 source / wbRegion / wbModel 此前只在渲染层存在，
+// 主进程读写两端都没有落盘，于是「选完 WorkBuddy 就丢」「预设活不过一次重启」。
+describe('AI 配置持久化完整性', () => {
+  const src = readFileSync(path.resolve(__dirname, '../electron/ai.ts'), 'utf8')
+
+  it('WorkBuddy 来源与模型写进配置文件', () => {
+    const write = src.slice(src.indexOf('async function writeConfig'), src.indexOf('export', src.indexOf('async function writeConfig')))
+    expect(write).toContain('source:')
+    expect(write).toContain('wbRegion:')
+    expect(write).toContain('wbModel:')
+  })
+
+  it('读配置时也把这三项读回来', () => {
+    const read = src.slice(src.indexOf('async function readConfig'), src.indexOf('async function writeConfig'))
+    expect(read).toContain('source:')
+    expect(read).toContain('wbRegion:')
+    expect(read).toContain('wbModel:')
+  })
+
+  it('推荐方式与 WorkBuddy 都在同一条持久化路径上', () => {
+    expect(src).toContain('recommendMode:')
+    expect(src).toContain("cfg.source === 'workbuddy'")
+  })
+})
+
 describe('备份导出完整性', () => {
   const src = readFileSync(path.resolve(__dirname, '../src/utils/backup.ts'), 'utf8')
   it('画像正文、播放统计、学习信号都进备份', () => {

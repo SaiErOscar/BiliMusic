@@ -98,6 +98,9 @@ async function readConfig(): Promise<AiSettings> {
         updatedAt: raw.userProfile?.updatedAt || '',
       },
       persona: raw.persona || '',
+      source: raw.source === 'workbuddy' ? 'workbuddy' : 'provider',
+      wbRegion: raw.wbRegion === 'global' ? 'global' : 'cn',
+      wbModel: raw.wbModel || '',
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -121,6 +124,11 @@ async function writeConfig(cfg: AiSettings): Promise<void> {
       updatedAt: cfg.userProfile?.updatedAt || '',
     },
     persona: String(cfg.persona || ''),
+    // v1.4.13-pre6：这三个字段此前只在渲染层存在，读写两端都没落盘——
+    // 于是 WorkBuddy 选完即丢、预设选择也活不过一次重启。
+    source: cfg.source === 'workbuddy' ? 'workbuddy' : 'provider',
+    wbRegion: cfg.wbRegion === 'global' ? 'global' : 'cn',
+    wbModel: String(cfg.wbModel || ''),
   }
   if (cfg.apiKey) {
     if (!safeStorage.isEncryptionAvailable()) {
