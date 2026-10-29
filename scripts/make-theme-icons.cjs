@@ -59,13 +59,44 @@ let n=0;
 for(const [id,modes] of Object.entries(THEMES)){
   for(const [mode,hex] of Object.entries(modes)){
     const [tr,tg,tb]=hexToRgb(hex);
-    // 应用图标
+    /*
+     * 应用图标（窗口内标题栏用的就是这张）。
+     *
+     * v1.4.13-pre9 修正（用户第 1 项「窗口内标题栏和托盘的图标发暗」）：
+     * 原实现是 a = 主题色 × (0.55 + 0.45×亮度)，也就是把整张图压到 55%~100% 亮度。
+     * 浅粉底（亮度 0.6）只剩 82%，近白字形也只剩 96%——两档一起被压暗，
+     * 于是标题栏里就是一枚灰蒙蒙的图。
+     *
+     * 现在与托盘同一套算法：保留原图的亮度关系，只替换色相。
+     * 底色走主题色的浅→深渐变（浅档向白提亮，而不是压暗），
+     * 字形保留近白，因此标题栏里的观感与桌面图标一致。
+     */
     const a=Buffer.from(app.data);
-    for(let i=0;i<a.length;i+=4){
-      const al=a[i+3];if(!al)continue;
-      const lum=(0.299*a[i]+0.587*a[i+1]+0.114*a[i+2])/255;
-      const k=0.55+0.45*lum;
-      a[i]=Math.min(255,Math.round(tr*k));a[i+1]=Math.min(255,Math.round(tg*k));a[i+2]=Math.min(255,Math.round(tb*k));
+    const S2=app.w;
+    const radius2=S2*0.225;
+    const [ilr,ilg,ilb]=mixToward(tr,tg,tb,255,0.42);
+    const [idr,idg,idb]=mixToward(tr,tg,tb,0,0.16);
+    for(let y=0;y<S2;y++){
+      const gy=y/(S2-1);
+      const br=ilr+(idr-ilr)*gy, bg2=ilg+(idg-ilg)*gy, bb=ilb+(idb-ilb)*gy;
+      for(let x=0;x<S2;x++){
+        const i=(y*S2+x)*4;
+        let inside=1;
+        const cx=x<radius2?radius2:(x>S2-radius2?S2-radius2:x);
+        const cy=y<radius2?radius2:(y>S2-radius2?S2-radius2:y);
+        if(cx!==x||cy!==y){
+          const dx=x-cx,dy=y-cy;
+          inside=Math.sqrt(dx*dx+dy*dy)<=radius2?1:0;
+        }
+        if(!inside){ a[i]=0;a[i+1]=0;a[i+2]=0;a[i+3]=0; continue }
+        const lum=(0.299*a[i]+0.587*a[i+1]+0.114*a[i+2])/255;
+        const m=Math.max(0,Math.min(1,(lum-0.55)/0.45));
+        const eased=m*m*(3-2*m);
+        a[i]=Math.round(br*(1-eased)+252*eased);
+        a[i+1]=Math.round(bg2*(1-eased)+236*eased);
+        a[i+2]=Math.round(bb*(1-eased)+242*eased);
+        a[i+3]=255;
+      }
     }
     fs.writeFileSync(path.join(outDir,'icon-'+id+'-'+mode+'.png'),encodePng(app.w,app.h,a));
     /*

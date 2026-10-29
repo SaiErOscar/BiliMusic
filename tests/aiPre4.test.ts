@@ -331,6 +331,47 @@ describe('图标与桌面一致（pre8）', () => {
   })
 })
 
+// v1.4.13-pre9：标题栏/托盘图标发暗、首页推荐误判「未配置 AI」。
+describe('图标亮度与桌面一致（pre9）', () => {
+  const gen = readFileSync(path.resolve(__dirname, '../scripts/make-theme-icons.cjs'), 'utf8')
+
+  /*
+   * 回归锚点：pre7/pre8 的 icon-*.png 用 a = 主题色 × (0.55 + 0.45×亮度)，
+   * 整张图被压到 55%~100% 亮度，标题栏里就是一枚灰蒙蒙的图。
+   * 现在改成「保留亮度关系、只替换色相」，浅档向白提亮。
+   */
+  it('不再用乘法压暗整张图', () => {
+    expect(gen).not.toContain('0.55+0.45*lum')
+  })
+
+  it('浅档向白提亮，而不是压暗', () => {
+    expect(gen).toContain('mixToward(tr,tg,tb,255,0.42)')
+  })
+
+  it('标题栏与托盘用同一套算法', () => {
+    const smooth = (gen.match(/m\*m\*\(3-2\*m\)/g) || []).length
+    expect(smooth).toBeGreaterThanOrEqual(2)
+  })
+})
+
+describe('首页推荐识别 WorkBuddy（pre9）', () => {
+  const src = readFileSync(path.resolve(__dirname, '../src/components/DiscoverAiRecommend.tsx'), 'utf8')
+
+  /*
+   * 回归锚点：configured 原先只认 baseUrl+apiKey+model 三件套。
+   * WorkBuddy 走账号凭据，这三项本来就是空的，于是其它 AI 功能都能用，
+   * 唯独首页推荐一直显示「还没有配置 AI」。
+   */
+  it('WorkBuddy 按 wbModel 判定已配置', () => {
+    expect(src).toContain("settings?.source === 'workbuddy'")
+    expect(src).toContain('settings.wbModel')
+  })
+
+  it('未配置提示区分 WorkBuddy 与普通服务商', () => {
+    expect(src).toContain('已选择 WorkBuddy，但还没有选模型')
+  })
+})
+
 describe('备份导出完整性', () => {
   const src = readFileSync(path.resolve(__dirname, '../src/utils/backup.ts'), 'utf8')
   it('画像正文、播放统计、学习信号都进备份', () => {

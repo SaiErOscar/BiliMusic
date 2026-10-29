@@ -40,7 +40,17 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
   }, [])
 
   const mode = settings?.recommendMode || 'click'
-  const configured = !!(settings?.baseUrl && settings?.apiKey && settings?.model)
+  /*
+   * v1.4.13-pre9 修正（用户第 2 项）：首页仍显示「未配置 AI」。
+   *
+   * 原来只认 OpenAI 兼容三件套（baseUrl + apiKey + model），而 WorkBuddy 走的是
+   * 账号凭据，这三项本来就是空的——于是其它 AI 功能都能用，唯独这一块判成未配置。
+   * WorkBuddy 只要选了模型就算已配置，实际可用性由调用时的报错兜底。
+   */
+  const configured =
+    settings?.source === 'workbuddy'
+      ? !!settings.wbModel
+      : !!(settings?.baseUrl && settings?.apiKey && settings?.model)
 
   const load = useCallback(async () => {
     if (!settings) return
@@ -104,7 +114,11 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
       </div>
 
       {!configured && (
-        <p className="discover-ai__hint">还没有配置 AI：到「设置 → AI 助手」填入地址、模型与密钥后即可使用。</p>
+        <p className="discover-ai__hint">
+          {settings?.source === 'workbuddy'
+            ? '已选择 WorkBuddy，但还没有选模型：到「设置 → AI 助手 → 服务预设」重新选一次 WorkBuddy 并挑一个模型。'
+            : '还没有配置 AI：到「设置 → AI 助手」填入地址、模型与密钥后即可使用。'}
+        </p>
       )}
 
       {greeting && <p className="discover-ai__greeting">{greeting}</p>}
