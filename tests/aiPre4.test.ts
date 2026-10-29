@@ -248,6 +248,89 @@ describe('推荐方式与歌单按钮（pre7）', () => {
   })
 })
 
+// v1.4.13-pre8：用户 7 项反馈。核心是「配置在主进程被削成半份」这个真根因。
+describe('配置持久化不再丢字段（pre8 真根因）', () => {
+  const src = readFileSync(path.resolve(__dirname, '../electron/ai.ts'), 'utf8')
+
+  /*
+   * 这条是 pre6/pre7 两版都没修好的原因：渲染层发的是完整 AiSettings，
+   * 但 ai:set-config 把它当 AiProviderConfig，只挑 5 个字段重建对象落盘。
+   * source / recommendMode / wbModel 因此在主进程这一层就被丢掉。
+   */
+  it('ai:set-config 保留全部 AiSettings 字段', () => {
+    const handler = src.slice(src.indexOf("ipcMain.handle('ai:set-config'"), src.indexOf('// 启动时按已存配置恢复代理'))
+    expect(handler).toContain('recommendMode:')
+    expect(handler).toContain('source:')
+    expect(handler).toContain('wbRegion:')
+    expect(handler).toContain('wbModel:')
+    expect(handler).toContain('userProfile:')
+    expect(handler).toContain('persona:')
+  })
+
+  it('入参类型是 AiSettings 而不是 AiProviderConfig', () => {
+    expect(src).toContain("ipcMain.handle('ai:set-config', async (_e, cfg: AiSettings)")
+  })
+})
+
+describe('WorkBuddy 预设的显示与可用性（pre8）', () => {
+  const settings = readFileSync(path.resolve(__dirname, '../src/pages/Settings.tsx'), 'utf8')
+  const panel = readFileSync(path.resolve(__dirname, '../src/components/WorkBuddyPanel.tsx'), 'utf8')
+
+  // 用户第 5 项：WorkBuddy 时「地址与模型」要显示它自己的模型
+  it('WorkBuddy 时显示 wbModel 而不是别的预设模型', () => {
+    expect(settings).toContain('aiConfig.wbModel ||')
+    expect(settings).toContain('更换模型')
+  })
+
+  // 用户第 6 项：选「自定义」要出现网址输入框与模型接口输入框
+  it('自定义预设提供地址输入框与模型接口输入框', () => {
+    expect(settings).toContain('自定义 API 地址')
+    expect(settings).toContain('填写模型接口名')
+    expect(settings).toContain('{isCustomPreset && (')
+    expect(settings).toContain('{customModel && (')
+  })
+
+  // 用户第 6 项根因：WorkBuddy 预设 baseUrl 是空串，会与「自定义」撞车
+  it('预设反查排除 WorkBuddy，避免自定义被认成 WorkBuddy', () => {
+    expect(settings).toContain("p.id !== 'workbuddy' && p.baseUrl")
+  })
+
+  // 用户第 3 项：绑定账号后要能持久显示 —— 打开面板就拉模型并回显
+  it('打开面板时恢复已存凭据并回显上次模型', () => {
+    expect(panel).toContain('initialModel')
+    expect(panel).toContain('cap.models(s.region, s.accessToken)')
+  })
+
+  // 用户第 4 项：推荐方式要持久 —— 去掉防抖，改完立即落盘
+  it('配置改动立即落盘，不留防抖窗口', () => {
+    expect(settings).not.toContain('}, 300)')
+  })
+})
+
+describe('图标与桌面一致（pre8）', () => {
+  const main = readFileSync(path.resolve(__dirname, '../electron/main.ts'), 'utf8')
+  const pkg = JSON.parse(readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')) as {
+    build: { extraResources: { from: string; to: string }[] }
+  }
+
+  // 用户第 1 项：任务栏很暗 —— 单张 1024 PNG 被系统糊缩
+  it('窗口图标用多尺寸 ico，不用单张 PNG', () => {
+    expect(main).toContain('loadAppIco')
+    expect(main).toContain('icon: loadAppIco()')
+  })
+
+  it('ico 随安装包一起分发（asar 内读不到）', () => {
+    expect(pkg.build.extraResources.some((r) => r.to === 'app.ico')).toBe(true)
+  })
+
+  // 用户第 2 项：标题栏必须用新版图标
+  it('标题栏按主题取图标且能回落到默认图', () => {
+    const tb = readFileSync(path.resolve(__dirname, '../src/components/layout/TitleBar.tsx'), 'utf8')
+    expect(tb).toContain('THEME_ICONS')
+    expect(tb).toContain('data-app-theme')
+  })
+})
+
 describe('备份导出完整性', () => {
   const src = readFileSync(path.resolve(__dirname, '../src/utils/backup.ts'), 'utf8')
   it('画像正文、播放统计、学习信号都进备份', () => {

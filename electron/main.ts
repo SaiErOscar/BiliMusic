@@ -117,6 +117,15 @@ function setupBiliHeaders() {
 }
 
 let mainWindow: BrowserWindow | null = null
+
+/**
+ * 当前主题，供启动阶段选图标用。
+ *
+ * v1.4.13-pre8：托盘与窗口在窗口创建时就需要图标，而主题要等渲染层起来才知道。
+ * 先给默认值，applyThemedIcons 被调用时再更新——这样启动瞬间也不会拿错配色。
+ */
+let currentThemeId = 'default'
+let currentThemeMode: 'light' | 'dark' = 'dark'
 let tray: Tray | null = null
 let trayWindow: BrowserWindow | null = null
 let trayWindowReady = false
@@ -159,6 +168,39 @@ function loadAppIcon(fileName = 'icon.png') {
 }
 
 /**
+ * 任务栏/标题栏用的多尺寸图标。
+ *
+ * v1.4.13-pre8（用户第 1 项「任务栏显得很暗」的根因）：
+ * 之前给 BrowserWindow 的是单张 1024px PNG。Windows 任务栏要的是 16/24/32px，
+ * 它只能自己按面积平均去缩——浅粉底与近白字形缩完糊在一起，看着就发暗。
+ * ico 里嵌了 16/24/32/48/64/128/256 七档，系统直接挑最合适的那一档，
+ * 不做重采样，因此和桌面图标/资源管理器里看到的是同一张。
+ */
+function loadAppIco(): Electron.NativeImage {
+  const icoPath = process.env.VITE_DEV_SERVER_URL
+    ? path.join(__dirname, '../electron/app.ico')
+    : path.join(process.resourcesPath || __dirname, 'app.ico')
+  const ico = nativeImage.createFromPath(icoPath)
+  return ico.isEmpty() ? loadAppIcon() : ico
+}
+
+/**
+ * 启动时该用的图标。
+ *
+ * v1.4.13-pre8（用户第 1 项：任务栏显得很暗）：
+ * 原来窗口与托盘在启动时都用 loadAppIcon()，也就是**未经主题化的 1024px 原图**。
+ * 它本身是浅粉底，但 Windows 把 1024 缩到 16/24px 时按面积平均，
+ * 字形与底色糊成一团，看起来就是「发暗」。这里改为：
+ * - 默认主题直接用打包进 resources 的成品图标（1024 原图，与桌面图标完全一致）；
+ * - 其它主题等 applyThemedIcons 换成对应配色的 256px 版本。
+ * 关键是**不要**在启动阶段就拿未改色的原图去顶替主题图标。
+ */
+function startupIcon(): Electron.NativeImage {
+  const img = loadAppIcon()
+  return img.isEmpty() ? loadAppIcon() : img
+}
+
+/**
  * v1.4.13-pre3 主题化图标：按当前主题取对应配色的图标。
  *
  * 图标集由 scripts/make-theme-icons.cjs 预生成（同设计、不同主色），放在 electron/icons/。
@@ -186,6 +228,8 @@ function loadThemedIcon(themeId: string, mode: 'light' | 'dark', kind: 'icon' | 
  *    纯白源图被拉到最亮。现在托盘用独立的 tray-*.png（单色语义，直接赋主题色）。
  */
 function applyThemedIcons(themeId: string, mode: 'light' | 'dark') {
+  currentThemeId = themeId || 'default'
+  currentThemeMode = mode === 'dark' ? 'dark' : 'light'
   try {
     const apply = () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -223,9 +267,17 @@ function applyThemedIcons(themeId: string, mode: 'light' | 'dark') {
 }
 
 function createTrayIcon() {
-  const trayIcon = isHarmonyOS ? loadAppIcon('tray.png') : loadAppIcon()
-  // 托盘图标尺寸较小，缩放到 32px 以兼顾标准与高 DPI 显示
-  return trayIcon.resize({ width: 32, height: 32 })
+  /*
+   * v1.4.13-pre8：托盘启动图标也走主题化成品。
+   * 之前用 loadAppIcon()（未改色的 1024 原图）缩到 32px，
+   * 浅粉底 + 近白字形一缩就糊成一团，用户看到的就是「很暗」。
+   * 现在先按当前主题取 tray-*.png（本身就是 256px 成品），
+   * 主题未知时退回 ico 的 32px 档。
+   */
+  const themed = loadThemedIcon(currentThemeId, currentThemeMode, 'tray')
+  if (!themed.isEmpty()) return themed.resize({ width: 32, height: 32 })
+  const ico = loadAppIco()
+  return ico.isEmpty() ? loadAppIcon().resize({ width: 32, height: 32 }) : ico.resize({ width: 32, height: 32 })
 }
 
 function persistentStoreFile() {
@@ -630,7 +682,8 @@ function createWindow() {
     ...(isHarmonyOS ? {} : { show: false }),
     ...(!isHarmonyOS ? { titleBarStyle: 'hidden' as const } : {}),
     backgroundColor: '#F6F7F9',
-    icon: loadAppIcon(),
+    // v1.4.13-pre8：用多尺寸 ico，让 Windows 挑合适档位而不是自己糊缩 1024 图
+    icon: loadAppIco(),
     webPreferences: {
       preload: process.env.VITE_DEV_SERVER_URL
         ? path.join(__dirname, '../electron/preload.cjs')

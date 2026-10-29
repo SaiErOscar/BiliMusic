@@ -23,9 +23,11 @@ interface Props {
   onClose: () => void
   /** 选定模型后回填给设置页（作为当前 AI 来源） */
   onPick: (cred: Credential, model: string) => void
+  /** 已保存的模型 id，用于打开面板时回显上次的选择 */
+  initialModel?: string
 }
 
-export default function WorkBuddyPanel({ onClose, onPick }: Props) {
+export default function WorkBuddyPanel({ onClose, onPick, initialModel }: Props) {
   const [region, setRegion] = useState<Region>('cn')
   const [local, setLocal] = useState<Credential[]>([])
   const [saved, setSaved] = useState<Credential | null>(null)
@@ -36,19 +38,42 @@ export default function WorkBuddyPanel({ onClose, onPick }: Props) {
 
   const cap = platform.workbuddy
 
+  /*
+   * 打开面板时恢复上次的登录态。
+   *
+   * v1.4.13-pre8（用户第 3 项「可列出账号、绑定账号，但仍无法持久显示」）：
+   * 原来只把 saved 塞进 state，**没有去拉模型列表**，也没回填上次选的模型。
+   * 于是模型下拉是空的、「使用此模型」不可点，界面上看起来就像没登录。
+   * 现在读到凭据就自动拉一次模型，并把已存模型回显出来。
+   */
   useEffect(() => {
     if (!cap) return
+    let cancelled = false
     void (async () => {
       try {
         const [l, s] = await Promise.all([cap.localCredentials(), cap.savedCredential()])
+        if (cancelled) return
         setLocal(l)
         setSaved(s)
-        if (s) setRegion(s.region)
-      } catch {
-        /* ignore */
+        if (!s) return
+        setRegion(s.region)
+        setBusy(true)
+        setMsg('读取模型列表…')
+        const list = await cap.models(s.region, s.accessToken)
+        if (cancelled) return
+        setModels(list)
+        // 优先回显上次选的模型；它不在列表里（如账号换了）才退回第一个
+        const prefer = initialModel && list.some((m) => m.id === initialModel) ? initialModel : (list[0]?.id || '')
+        setModel(prefer)
+        setMsg(list.length ? '共 ' + list.length + ' 个可用模型' : '该账号没有可用模型')
+      } catch (e) {
+        if (!cancelled) setMsg(e instanceof Error ? e.message : String(e))
+      } finally {
+        if (!cancelled) setBusy(false)
       }
     })()
-  }, [cap])
+    return () => { cancelled = true }
+  }, [cap, initialModel])
 
   const current = saved || local[0] || null
 

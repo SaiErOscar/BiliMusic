@@ -159,14 +159,33 @@ export function registerAiHandlers(): void {
   // 读配置：密钥以明文回给渲染层用于输入框回显（本机内存内，不出网）
   ipcMain.handle('ai:get-config', async () => readConfig())
 
-  // 写配置 + 立即下发代理
-  ipcMain.handle('ai:set-config', async (_e, cfg: AiProviderConfig) => {
-    const next: AiProviderConfig = {
+  /*
+   * 写配置 + 立即下发代理。
+   *
+   * v1.4.13-pre8 修根因：这里原先把入参当成 AiProviderConfig，只挑出 5 个字段
+   * 重建对象，于是 source / wbRegion / wbModel / recommendMode / userProfile /
+   * persona 在**主进程这一层**就被丢掉了。
+   *
+   * 这解释了为什么「推荐方式改了不持久」「WorkBuddy 选完切走就丢」修了两版都没好：
+   * 渲染层确实把完整配置发过来了，但落盘前被这个白名单削成了半份。
+   * 现在原样接收，只在写盘时做类型收敛（writeConfig 内部已经逐字段校验）。
+   */
+  ipcMain.handle('ai:set-config', async (_e, cfg: AiSettings) => {
+    const next: AiSettings = {
       baseUrl: String(cfg?.baseUrl || '').trim(),
       model: String(cfg?.model || '').trim(),
       apiKey: String(cfg?.apiKey || ''),
       proxyMode: cfg?.proxyMode === 'manual' ? 'manual' : 'system',
       proxyUrl: String(cfg?.proxyUrl || '').trim(),
+      recommendMode: cfg?.recommendMode === 'auto' || cfg?.recommendMode === 'off' ? cfg.recommendMode : 'click',
+      userProfile: {
+        text: String(cfg?.userProfile?.text || ''),
+        updatedAt: String(cfg?.userProfile?.updatedAt || ''),
+      },
+      persona: String(cfg?.persona || ''),
+      source: cfg?.source === 'workbuddy' ? 'workbuddy' : 'provider',
+      wbRegion: cfg?.wbRegion === 'global' ? 'global' : 'cn',
+      wbModel: String(cfg?.wbModel || ''),
     }
     await writeConfig(next)
     await applyProxy(next)

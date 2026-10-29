@@ -200,17 +200,19 @@ export default function Settings() {
   useEffect(() => {
     if (!isAiSupported()) return
     if (!aiLoadedRef.current) return
+    /*
+     * v1.4.13-pre8：去掉 300ms 防抖，改为立即落盘。
+     *
+     * 防抖在这里换不来任何好处（写的是一个几百字节的 json），却制造了一个
+     * 真实的时间窗口：用户改完下拉立刻切页，那一次改动就可能没写进去。
+     * 之前两版都在这个窗口上打补丁（补写、卸载兜底），都不如直接不引入窗口。
+     * 连点下拉最多多写几次盘，代价可以忽略。
+     */
     if (aiSaveTimer.current) clearTimeout(aiSaveTimer.current)
-    aiPendingRef.current = aiConfig
-    aiSaveTimer.current = setTimeout(() => {
-      aiPendingRef.current = null
-      void saveAiConfig(aiConfig).catch((err) => {
-        setAiMessage(err instanceof Error ? err.message : String(err))
-      })
-    }, 300)
-    return () => {
-      if (aiSaveTimer.current) clearTimeout(aiSaveTimer.current)
-    }
+    aiPendingRef.current = null
+    void saveAiConfig(aiConfig).catch((err) => {
+      setAiMessage(err instanceof Error ? err.message : String(err))
+    })
   }, [aiConfig])
 
   /*
@@ -250,7 +252,8 @@ export default function Settings() {
    * 地址框的显隐必须跟它一致，否则两处口径会分叉。
    */
   const isCustomPreset =
-    aiConfig.source !== 'workbuddy' && !AI_PRESETS.some((p) => p.baseUrl === aiConfig.baseUrl)
+    aiConfig.source !== 'workbuddy' &&
+    !AI_PRESETS.some((p) => p.id !== 'workbuddy' && p.baseUrl && p.baseUrl === aiConfig.baseUrl)
 
   /**
    * 预设下拉当前应显示的 id。
@@ -262,7 +265,12 @@ export default function Settings() {
   const currentPresetId =
     aiConfig.source === 'workbuddy'
       ? 'workbuddy'
-      : (AI_PRESETS.find((p) => p.baseUrl === aiConfig.baseUrl)?.id || '')
+      : /*
+         * v1.4.13-pre8：必须排除 WorkBuddy 预设。
+         * 它的 baseUrl 是空串，而「自定义」也表现为空地址——不排除的话，
+         * 选「自定义」会被反查成 WorkBuddy（用户看到的「选自定义就变成 Workbuddy」）。
+         */
+        (AI_PRESETS.find((p) => p.id !== 'workbuddy' && p.baseUrl && p.baseUrl === aiConfig.baseUrl)?.id || '')
 
   const patchAiConfig = (patch: Partial<AiSettings>) => {
     setAiConfig((c) => ({ ...c, ...patch }))
@@ -858,53 +866,81 @@ export default function Settings() {
                   ))}
                 </select>
               </SettingsRow>
-              <SettingsRow label="地址与模型" stacked description={modelSource || '地址填到 /v1 即可，路径会自动补全；模型从下拉选择'}>
-                <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-                  {/*
-                    v1.4.13-pre6 修正：地址只在「服务预设 = 自定义」时露出。
-                    原判断写成 !aiConfig.baseUrl（地址为空才显示），逻辑正好相反——
-                    选了预设时地址框消失，选自定义时反而没有框可填。
-                  */}
-                  {isCustomPreset && (
-                    <input
-                      className="settings-input"
-                      type="url"
-                      placeholder="自定义 API 地址"
-                      value={aiConfig.baseUrl}
-                      onChange={(e) => patchAiConfig({ baseUrl: e.target.value })}
-                    />
-                  )}
-                  <select
-                    className="settings-select"
-                    value={customModel ? '__custom__' : aiConfig.model}
-                    disabled={aiConfig.source === 'workbuddy'}
-                    onChange={(e) => {
-                      if (e.target.value === '__custom__') { setCustomModel(true); return }
-                      setCustomModel(false)
-                      patchAiConfig({ model: e.target.value })
-                    }}
-                  >
-                    {/* 当前值若不在列表里（手填或列表未刷新）也要能显示出来 */}
-                    {!customModel && !modelOptions.some((m) => m.id === aiConfig.model) && aiConfig.model && (
-                      <option value={aiConfig.model}>{aiConfig.model}</option>
-                    )}
-                    {modelOptions.map((m) => (
-                      <option key={m.id} value={m.id}>{m.label}</option>
-                    ))}
-                    {/* 下拉之外仍可自定义：接口新增模型时不必等我们更新内置表 */}
-                    <option value="__custom__">自定义…</option>
-                  </select>
-                  {customModel && (
+              <SettingsRow
+                label="地址与模型"
+                stacked
+                description={
+                  aiConfig.source === 'workbuddy'
+                    ? '当前使用 WorkBuddy 账号的模型；换模型请在上方「服务预设」里重选 WorkBuddy'
+                    : (modelSource || '地址填到 /v1 即可，路径会自动补全；模型从下拉选择')
+                }
+              >
+                {aiConfig.source === 'workbuddy' ? (
+                  /*
+                   * v1.4.13-pre8（用户第 5 项）：WorkBuddy 时要显示它自己的模型名
+                   * （如 deepseek-v4.1-flash），而不是别的预设的接口名。
+                   * 这一行在这里只做只读回显——可改的地方是 WorkBuddy 面板，
+                   * 所以不放下拉，免得又出现「在这里选了却不生效」。
+                   */
+                  <div style={{ display: 'flex', gap: 8, width: '100%', alignItems: 'center' }}>
                     <input
                       className="settings-input"
                       type="text"
-                      placeholder="填写模型接口名"
-                      value={aiConfig.model}
-                      onChange={(e) => patchAiConfig({ model: e.target.value })}
+                      readOnly
+                      value={aiConfig.wbModel || '（尚未选择模型）'}
                     />
-                  )}
-                  <ActionButton onClick={() => void refreshModels()}>刷新模型</ActionButton>
-                </div>
+                    <ActionButton onClick={() => setWbOpen(true)}>更换模型</ActionButton>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+                    {/*
+                      用户第 6 项：选「自定义」时要能填网址。
+                      v1.4.13-pre6 的判断写反过（!baseUrl），pre7 改对了条件，
+                      但「自定义」当时反查不出正确预设，所以框始终不出现。
+                    */}
+                    {isCustomPreset && (
+                      <input
+                        className="settings-input"
+                        type="url"
+                        placeholder="自定义 API 地址，例如 https://api.example.com/v1"
+                        value={aiConfig.baseUrl}
+                        onChange={(e) => patchAiConfig({ baseUrl: e.target.value })}
+                      />
+                    )}
+                    <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+                      <select
+                        className="settings-select"
+                        value={customModel ? '__custom__' : aiConfig.model}
+                        onChange={(e) => {
+                          if (e.target.value === '__custom__') { setCustomModel(true); return }
+                          setCustomModel(false)
+                          patchAiConfig({ model: e.target.value })
+                        }}
+                      >
+                        {/* 当前值若不在列表里（手填或列表未刷新）也要能显示出来 */}
+                        {!customModel && !modelOptions.some((m) => m.id === aiConfig.model) && aiConfig.model && (
+                          <option value={aiConfig.model}>{aiConfig.model}</option>
+                        )}
+                        {modelOptions.map((m) => (
+                          <option key={m.id} value={m.id}>{m.label}</option>
+                        ))}
+                        {/* 下拉之外仍可自定义：接口新增模型时不必等我们更新内置表 */}
+                        <option value="__custom__">自定义…</option>
+                      </select>
+                      <ActionButton onClick={() => void refreshModels()}>刷新模型</ActionButton>
+                    </div>
+                    {/* 用户第 6 项：选「自定义」模型时提供接口名输入框 */}
+                    {customModel && (
+                      <input
+                        className="settings-input"
+                        type="text"
+                        placeholder="填写模型接口名，例如 gpt-4o-mini"
+                        value={aiConfig.model}
+                        onChange={(e) => patchAiConfig({ model: e.target.value })}
+                      />
+                    )}
+                  </div>
+                )}
               </SettingsRow>
               <SettingsRow
                 label="API 密钥"
@@ -1113,6 +1149,7 @@ export default function Settings() {
           {wbOpen && (
         <WorkBuddyPanel
           onClose={() => setWbOpen(false)}
+          initialModel={aiConfig.wbModel}
           onPick={(cred, model) => {
             // v1.4.13-pre4 选定 WorkBuddy 模型：切来源为 workbuddy，记录区域与模型 id。
             // 之后所有 AI 功能都经主进程用 WorkBuddy 凭据发请求。
