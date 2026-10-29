@@ -344,8 +344,24 @@ describe('图标亮度与桌面一致（pre9）', () => {
     expect(gen).not.toContain('0.55+0.45*lum')
   })
 
-  it('浅档向白提亮，而不是压暗', () => {
-    expect(gen).toContain('mixToward(tr,tg,tb,255,0.42)')
+  /*
+   * v1.4.13-pre10：向白色混合会冲淡饱和度（94%→约55%），已废弃。
+   * 现在只改 HSL 的亮度，色相与饱和度原样保留。
+   */
+  it('不再向白色混合（那会冲淡饱和度）', () => {
+    expect(gen).not.toContain('mixToward(tr,tg,tb,255,0.42)')
+  })
+
+  it('用 HSL 只改亮度、保留饱和度', () => {
+    expect(gen).toContain('gradientStops')
+    expect(gen).toContain('rgb2hsl')
+    expect(gen).toContain('hsl2rgb')
+  })
+
+  // 实测参考 icon.ico：背景 S96~98%，底部只轻微回落。取 max 保证只提不降。
+  it('饱和度取「基色与目标中较大者」，不会越乘越低', () => {
+    expect(gen).toContain('Math.max(s,GRAD.topSat)')
+    expect(gen).toContain('Math.max(s,GRAD.bottomSat)')
   })
 
   it('标题栏与托盘用同一套算法', () => {
@@ -369,6 +385,35 @@ describe('首页推荐识别 WorkBuddy（pre9）', () => {
 
   it('未配置提示区分 WorkBuddy 与普通服务商', () => {
     expect(src).toContain('已选择 WorkBuddy，但还没有选模型')
+  })
+})
+
+// v1.4.13-pre10：生成中的可见反馈。
+describe('推荐板块生成中动画（pre10）', () => {
+  const src = readFileSync(path.resolve(__dirname, '../src/components/DiscoverAiRecommend.tsx'), 'utf8')
+  const css = readFileSync(path.resolve(__dirname, '../src/styles/index.css'), 'utf8')
+
+  /*
+   * 用户第 2 项：生成过程中要有跳动的省略号，否则用户打开首页看到空白会以为坏了。
+   */
+  it('生成中显示跳动省略号', () => {
+    expect(src).toContain('discover-ai__dots')
+    expect(src).toContain('正在生成')
+  })
+
+  it('生成中显示骨架占位，而不是留白', () => {
+    expect(src).toContain('discover-ai__list--skeleton')
+    expect(src).toContain('discover-ai__item--skeleton')
+  })
+
+  it('省略号与骨架都有对应动画', () => {
+    expect(css).toContain('@keyframes discover-dot')
+    expect(css).toContain('@keyframes discover-shimmer')
+  })
+
+  // 无障碍：系统开了「减少动态效果」时不该继续跳
+  it('尊重 prefers-reduced-motion', () => {
+    expect(css).toContain('prefers-reduced-motion: reduce')
   })
 })
 

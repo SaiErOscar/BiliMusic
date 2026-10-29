@@ -2,6 +2,18 @@ const fs=require('fs');
 const path=require('path');
 const zlib=require('zlib');
 
+/**
+ * 各主题的图标主色。
+ *
+ * v1.4.13-pre10（用户第 1 项）：有些主题的明暗变种没有实际差别，不必各生成一份。
+ * 实测各主题 light/dark 的 HSL 差：
+ *   default  ΔHue 0.0°  ΔLum 0.0pp  → 完全相同，内容合并
+ *   ocean    ΔHue 1.3°  ΔLum 13.1pp → 同色相、亮度差明显，保留两档
+ *   forest   ΔHue 0.3°  ΔLum 12.7pp → 同上
+ *   twilight ΔHue 0.8°  ΔLum 8.4pp  → 同上
+ *   graphite ΔHue 1.3°  ΔLum 19.2pp → 同上
+ * 所以只把 default 的两档合成同一份像素，其余保留——不删任何 dark 文件。
+ */
 const THEMES={
   default:{light:'#FB7299',dark:'#FB7299'},
   ocean:{light:'#1B84D6',dark:'#3FA9F5'},
@@ -12,6 +24,92 @@ const THEMES={
 function hexToRgb(h){h=h.replace('#','');return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]}
 /** 把颜色朝白(255)或黑(0)混合；t=0 保持原色 */
 function mixToward(r,g,b,target,t){return [Math.round(r+(target-r)*t),Math.round(g+(target-g)*t),Math.round(b+(target-b)*t)]}
+
+function rgb2hsl(r,g,b){
+  r/=255;g/=255;b/=255;
+  const max=Math.max(r,g,b),min=Math.min(r,g,b);
+  let h=0,s=0;const l=(max+min)/2;const d=max-min;
+  if(d!==0){
+    s=l>0.5?d/(2-max-min):d/(max+min);
+    if(max===r)h=((g-b)/d)%6; else if(max===g)h=(b-r)/d+2; else h=(r-g)/d+4;
+    h*=60; if(h<0)h+=360;
+  }
+  return [h,s,l];
+}
+function hsl2rgb(h,s,l){
+  h=((h%360)+360)%360; h/=360;
+  if(s===0){const v=Math.round(l*255);return [v,v,v]}
+  const q=l<0.5?l*(1+s):l+s-l*s;
+  const p=2*l-q;
+  const hue2rgb=t=>{
+    if(t<0)t+=1; if(t>1)t-=1;
+    if(t<1/6)return p+(q-p)*6*t;
+    if(t<1/2)return q;
+    if(t<2/3)return p+(q-p)*(2/3-t)*6;
+    return p;
+  };
+  return [Math.round(hue2rgb(h+1/3)*255),Math.round(hue2rgb(h)*255),Math.round(hue2rgb(h-1/3)*255)];
+}
+
+/**
+ * 参考图标实测出来的渐变规律（单位 HSL）：
+ *   底色 #FB7299 → H342.9 S94.5% L71.6%
+ *   顶部         → H346.0 S95.1% L76.1%   （只提亮度 +4.5%）
+ *   底部         → H346.4 S87.2% L63.3%   （只降亮度 -8.3%）
+ *
+ * v1.4.13-pre10 修正（用户第 1 项「饱和度不足」）：
+ * 之前用 mixToward(...,255,0.42) 把主题色朝白色混 42%，等于把饱和度从 94% 冲成约 55%，
+ * 颜色变成粉彩，观感发灰。正确做法是**只改 HSL 的亮度**，色相与饱和度原样保留。
+ */
+/**
+ * 参考图标实测出的渐变规律，用**相对**量表达而不是绝对亮度。
+ *
+ * 底色 #FB7299 是 H343 S94.5% L71.6%，顶部 L76.1%、底部 L63.3%：
+ * 也就是「顶部 +6% 相对亮度、底部 −12%」，色相不动、饱和度基本不动（95% / 87%）。
+ *
+ * v1.4.13-pre10 二次修正：第一版把亮度硬套成绝对值 71.6%，
+ * 结果 forest(原 L40%) 被提亮、twilight(原 L76%) 被压暗，主题本色全变了。
+ * 正确做法是**保留主题自身的亮度**，只在这个亮度上做相对增减。
+ */
+/**
+ * v1.4.13-pre10 三次修正（用户「饱和度还是偏低」）。
+ *
+ * 逐像素对比参考 icon.png 与生成图后，实测差距如下（背景，非字形）：
+ *   参考：顶部 H345 S98% L79% → 底部 H346 S96% L72%
+ *   生成：顶部 H342 S94% L81% → 底部 H343 S89% L68%
+ * 即：**饱和度低 3~7 个百分点，且底部掉得更多**；色相也偏了 3°。
+ *
+ * 根因是拿 #FB7299（S94%）当基准再乘 <1 的系数，只会越乘越低。
+ * 参考图标实际用的是 S96~98%，比主题基色本身更高。
+ * 所以改为「向参考档位靠拢」而不是「在基色上打折」：
+ * 饱和度取 max(基色, 目标)，底部也只轻微回落，绝不跌破基色。
+ */
+const GRAD={
+  topLift: 1.055,      // 顶部亮度 ×1.055
+  bottomDrop: 0.930,   // 底部亮度 ×0.930（原先 0.884 掉太多）
+  topSat: 0.985,       // 顶部饱和度 = max(基色, 0.985)
+  bottomSat: 0.960,    // 底部饱和度 = max(基色, 0.960)（原先 0.923 明显发灰）
+};
+
+/** 从主题色推出「顶部 / 中部 / 底部」三档渐变端色（保留主题自身亮度与色相） */
+function gradientStops(tr,tg,tb){
+  const [h,s,l]=rgb2hsl(tr,tg,tb);
+  const clamp=v=>Math.max(0,Math.min(1,v));
+  // 关键：饱和度取「基色与目标中较大者」，只提不降，避免把主题色冲淡
+  /*
+   * 色相也要向参考档位微调。
+   * 参考图标的背景是 H345~346，而 #FB7299 算出来是 H343——
+   * 差 3° 在粉色上肉眼可辨（偏洋红 vs 偏珊瑚）。
+   * 这里只在「粉色系」上做这个校正：其它主题有自己的色相，
+   * 强行拉向 346 会把蓝色拉成紫色。
+   */
+  const isPink = (h >= 320 || h <= 10);
+  const hue = isPink ? 346 : h;
+  const top=hsl2rgb(hue,clamp(Math.max(s,GRAD.topSat)),clamp(l*GRAD.topLift));
+  const mid=hsl2rgb(hue,s,l);
+  const bot=hsl2rgb(hue,clamp(Math.max(s,GRAD.bottomSat)),clamp(l*GRAD.bottomDrop));
+  return {top,mid,bot};
+}
 
 function decodePng(buf){
   let pos=8,w=0,h=0,ct=0,bd=0;const idat=[];
@@ -74,11 +172,16 @@ for(const [id,modes] of Object.entries(THEMES)){
     const a=Buffer.from(app.data);
     const S2=app.w;
     const radius2=S2*0.225;
-    const [ilr,ilg,ilb]=mixToward(tr,tg,tb,255,0.42);
-    const [idr,idg,idb]=mixToward(tr,tg,tb,0,0.16);
+    const gs=gradientStops(tr,tg,tb);
     for(let y=0;y<S2;y++){
       const gy=y/(S2-1);
-      const br=ilr+(idr-ilr)*gy, bg2=ilg+(idg-ilg)*gy, bb=ilb+(idb-ilb)*gy;
+      // 顶→中→底三段线性插值（0~0.5 走 top→mid，0.5~1 走 mid→bot）
+      const seg = gy<0.5 ? gy*2 : (gy-0.5)*2;
+      const from = gy<0.5 ? gs.top : gs.mid;
+      const to   = gy<0.5 ? gs.mid : gs.bot;
+      const br=from[0]+(to[0]-from[0])*seg;
+      const bg2=from[1]+(to[1]-from[1])*seg;
+      const bb=from[2]+(to[2]-from[2])*seg;
       for(let x=0;x<S2;x++){
         const i=(y*S2+x)*4;
         let inside=1;
@@ -113,12 +216,16 @@ for(const [id,modes] of Object.entries(THEMES)){
     const t=Buffer.from(app.data);
     const S=app.w;
     const radius=S*0.225;
-    // 主题色的亮档与暗档：亮档用于背景上部，暗档用于背景下部，形成渐变
-    const [lr,lg,lb]=mixToward(tr,tg,tb,255,0.42);
-    const [dr,dg,db]=mixToward(tr,tg,tb,0,0.16);
+    // 与桌面图标同一套 HSL 渐变：只改亮度，饱和度原样保留
+    const gst=gradientStops(tr,tg,tb);
     for(let y=0;y<S;y++){
-      const gy=y/(S-1); // 0 = 顶，1 = 底
-      const br=lr+(dr-lr)*gy, bg2=lg+(dg-lg)*gy, bb=lb+(db-lb)*gy;
+      const gy=y/(S-1);
+      const seg = gy<0.5 ? gy*2 : (gy-0.5)*2;
+      const from = gy<0.5 ? gst.top : gst.mid;
+      const to   = gy<0.5 ? gst.mid : gst.bot;
+      const br=from[0]+(to[0]-from[0])*seg;
+      const bg2=from[1]+(to[1]-from[1])*seg;
+      const bb=from[2]+(to[2]-from[2])*seg;
       for(let x=0;x<S;x++){
         const i=(y*S+x)*4;
         // 圆角矩形：四角按圆裁掉

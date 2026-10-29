@@ -5337,3 +5337,79 @@ body {
   opacity: .75;
   line-height: 1.6;
 }
+
+
+/* ===== v1.4.13-pre10 推荐板块生成中动画 ===== */
+
+/* 标题旁的跳动省略号：三个点依次呼吸，明确「正在生成」 */
+.discover-ai__dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 2px;
+}
+
+.discover-ai__dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: discover-dot 1.2s ease-in-out infinite;
+}
+
+.discover-ai__dots i:nth-child(2) { animation-delay: 0.18s; }
+.discover-ai__dots i:nth-child(3) { animation-delay: 0.36s; }
+
+@keyframes discover-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40%           { opacity: 1;    transform: translateY(-2px); }
+}
+
+/* 骨架占位：行数与真实结果一致，生成完切换时不跳动 */
+.discover-ai__item--skeleton {
+  pointer-events: none;
+  cursor: default;
+}
+
+.discover-ai__sk-cover {
+  display: block;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: var(--glass-border);
+  animation: discover-shimmer 1.4s ease-in-out infinite;
+}
+
+.discover-ai__sk-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.discover-ai__sk-line {
+  height: 10px;
+  border-radius: 4px;
+  background: var(--glass-border);
+  animation: discover-shimmer 1.4s ease-in-out infinite;
+}
+
+.discover-ai__sk-line--short { width: 45%; }
+
+@keyframes discover-shimmer {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 0.85; }
+}
+
+/* 尊重系统的「减少动态效果」设置 */
+@media (prefers-reduced-motion: reduce) {
+  .discover-ai__dots i,
+  .discover-ai__sk-cover,
+  .discover-ai__sk-line {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+

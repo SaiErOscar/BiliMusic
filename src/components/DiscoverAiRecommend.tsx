@@ -92,6 +92,15 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
         <div className="discover-ai__title">
           <Sparkles size={20} />
           <strong>为你推荐</strong>
+          {/*
+            v1.4.13-pre10（用户第 2 项）：生成过程中要有明确的「在动」信号。
+            没有它时，用户打开首页看到空白会以为坏了。
+          */}
+          {busy && (
+            <span className="discover-ai__dots" aria-label="正在生成" role="status">
+              <i /><i /><i />
+            </span>
+          )}
           {data?.contextLabel && <span className="discover-ai__ctx">{data.contextLabel}</span>}
         </div>
         {mode === 'click' && (
@@ -119,6 +128,24 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
             ? '已选择 WorkBuddy，但还没有选模型：到「设置 → AI 助手 → 服务预设」重新选一次 WorkBuddy 并挑一个模型。'
             : '还没有配置 AI：到「设置 → AI 助手」填入地址、模型与密钥后即可使用。'}
         </p>
+      )}
+
+      {/*
+        v1.4.13-pre10：生成中给骨架占位，而不是留一片空白。
+        骨架的行数与最终结果一致，切换时不跳动。
+      */}
+      {busy && !data && (
+        <div className="discover-ai__list discover-ai__list--skeleton" aria-hidden="true">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} className="discover-ai__item discover-ai__item--skeleton">
+              <span className="discover-ai__sk-cover" />
+              <span className="discover-ai__sk-meta">
+                <span className="discover-ai__sk-line" />
+                <span className="discover-ai__sk-line discover-ai__sk-line--short" />
+              </span>
+            </div>
+          ))}
+        </div>
       )}
 
       {greeting && <p className="discover-ai__greeting">{greeting}</p>}
