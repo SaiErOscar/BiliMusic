@@ -581,6 +581,116 @@ export async function listModels(region: WorkBuddyRegion, token: string): Promis
   return FALLBACK_MODELS[region]
 }
 
+// ===== v1.4.13-pre11 账号池与积分 =====
+
+/**
+ * 账号池：本机桌面端可能同时登录多个 WorkBuddy 账号，
+ * 网页登录也会不断累积。这里把它们统一维护成一份列表。
+ *
+ * 与插件的差别：插件做完整的池化轮换/冷却/换号重试，BiliMusic 只需要
+ * 「能看见有几个号、能选一个用、能看各自的积分」，所以不搬那套调度。
+ */
+export interface WorkBuddyAccount {
+  /** 稳定 id：region + 账号标识的哈希，用于选中与删除 */
+  id: string
+  region: WorkBuddyRegion
+  account: string
+  expiresAt: number
+  /** 来源：本机桌面端扫描 / 网页登录保存 */
+  origin: 'local' | 'saved'
+  /** 是否当前使用中 */
+  active: boolean
+}
+
+function accountId(region: WorkBuddyRegion, account: string): string {
+  let hash = 0
+  const seed = region + '|' + account
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0
+  }
+  return 'wb_' + Math.abs(hash).toString(36)
+}
+
+/**
+ * 列出全部可用账号（本机桌面端 + 已保存的网页登录）。
+ *
+ * 同一账号在多处出现时以「本机桌面端」为准——它的 token 是活的，
+ * 网页登录保存的那份可能已经过期。
+ */
+export async function listAccounts(): Promise<WorkBuddyAccount[]> {
+  const [local, saved] = await Promise.all([readLocalCredentials(), loadSavedCredential()])
+  const out: WorkBuddyAccount[] = []
+  const seen = new Set<string>()
+  for (const cred of local) {
+    const key = cred.region + '|' + (cred.account || '')
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      id: accountId(cred.region, cred.account || ''),
+      region: cred.region,
+      account: cred.account || '(未命名)',
+      expiresAt: cred.expiresAt || 0,
+      origin: 'local',
+      active: false,
+    })
+  }
+  if (saved) {
+    const key = saved.region + '|' + (saved.account || '')
+    if (!seen.has(key)) {
+      out.push({
+        id: accountId(saved.region, saved.account || ''),
+        region: saved.region,
+        account: saved.account || '(未命名)',
+        expiresAt: saved.expiresAt || 0,
+        origin: 'saved',
+        active: false,
+      })
+    }
+  }
+  return out
+}
+
+/**
+ * 查账号积分。
+ *
+ * 走上游的 credits 接口；路径与插件一致（国内版 codebuddy.cn，国际版对应品牌域名）。
+ * 上游不提供时返回 null——不猜、不用本地统计冒充。
+ */
+export async function fetchCredits(cred: WorkBuddyCredential): Promise<{ remaining: number; used: number } | null> {
+  try {
+    const base = REGION_BASE[cred.region]
+    const resp = await fetch(base + '/v2/billing/meter/get-user-resource', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + cred.accessToken,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': PRODUCT_UA,
+        'X-Product': 'SaaS',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body: '{}',
+    })
+    if (!resp.ok) return null
+    const doc = (await resp.json()) as Record<string, unknown>
+    const data = envelopeData(doc)
+    // 上游字段名不稳定，按已知的几个候选取；取不到就当没有
+    const num = (keys: string[]): number | null => {
+      for (const k of keys) {
+        const v = data[k]
+        if (typeof v === 'number' && Number.isFinite(v)) return v
+      }
+      return null
+    }
+    const remaining = num(['remainCredit', 'remainingCredit', 'credit', 'balance', 'remain'])
+    const used = num(['usedCredit', 'used', 'consume', 'usedCredits'])
+    if (remaining === null && used === null) return null
+    return { remaining: remaining ?? 0, used: used ?? 0 }
+  } catch {
+    return null
+  }
+}
+
 /** 随机 id（对话身份三元组用；网关只校验形状，不校验来源） */
 function randomId(): string {
   const h = () => Math.floor(Math.random() * 0x10000).toString(16).padStart(4, '0')
@@ -628,6 +738,8 @@ export async function chat(cred: WorkBuddyCredential, model: string, messages: u
   }
   const raw = await resp.text()
   let text = ''
+  /** v1.4.13-pre11：本次对话消耗的积分（上游 SSE 里按块给） */
+  let creditsUsed = 0
   for (const line of raw.split(/\r?\n/)) {
     if (!line.startsWith('data:')) continue
     const payload = line.slice(5).trim()
@@ -637,10 +749,16 @@ export async function chat(cred: WorkBuddyCredential, model: string, messages: u
         choices?: { delta?: { content?: string } }[]
         code?: number
         msg?: string
+        /** v1.4.13-pre11：上游按块回传积分消耗 */
+        usage?: { credit?: number; credits?: number }
       }
       // 业务错误也可能以 SSE 块的形式回来
       if (typeof chunk.code === 'number' && chunk.code !== 0) {
         throw new Error(`WorkBuddy 返回错误 ${chunk.code}${chunk.msg ? '：' + chunk.msg : ''}`)
+      }
+      if (chunk.usage) {
+        const c = chunk.usage.credit ?? chunk.usage.credits
+        if (typeof c === 'number' && c > 0) creditsUsed += c
       }
       text += chunk.choices?.[0]?.delta?.content || ''
     } catch (e) {
@@ -649,8 +767,13 @@ export async function chat(cred: WorkBuddyCredential, model: string, messages: u
     }
   }
   if (!text.trim()) throw new Error('WorkBuddy 返回内容为空')
+  // 积分随最后一次调用累积到进程内，由 wb:last-credits 取走（不污染返回值）
+  lastCredits = creditsUsed
   return text
 }
+
+/** v1.4.13-pre11：最近一次对话消耗的积分，供渲染层记录用量 */
+let lastCredits = 0
 
 export function registerWorkBuddyHandlers(): void {
   ipcMain.handle('wb:local-credentials', async () => readLocalCredentials())
@@ -674,6 +797,10 @@ export function registerWorkBuddyHandlers(): void {
     }
   })
   ipcMain.handle('wb:models', async (_e, region: WorkBuddyRegion, token: string) => listModels(region, token))
+  // v1.4.13-pre11：账号池 + 积分
+  ipcMain.handle('wb:accounts', async () => listAccounts())
+  ipcMain.handle('wb:credits', async (_e, cred: WorkBuddyCredential) => fetchCredits(cred))
+  ipcMain.handle('wb:last-credits', async () => lastCredits)
   ipcMain.handle('wb:chat', async (_e, cred: WorkBuddyCredential, model: string, messages: unknown[], temperature?: number) =>
     chat(cred, model, messages, temperature),
   )

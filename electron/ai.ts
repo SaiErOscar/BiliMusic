@@ -49,6 +49,15 @@ export interface AiSettings extends AiProviderConfig {
   userProfile: AiUserProfile
   /** AI 人设：影响推荐问候语的语气，不改变挑选逻辑 */
   persona: string
+  /** v1.4.13-pre11 API 记忆（见渲染层 SavedApi） */
+  savedApis?: {
+    id: string
+    label: string
+    baseUrl: string
+    model: string
+    apiKey?: string
+    usedAt?: number
+  }[]
 }
 
 const DEFAULT_SETTINGS: AiSettings = {
@@ -101,6 +110,33 @@ async function readConfig(): Promise<AiSettings> {
       source: raw.source === 'workbuddy' ? 'workbuddy' : 'provider',
       wbRegion: raw.wbRegion === 'global' ? 'global' : 'cn',
       wbModel: raw.wbModel || '',
+      /*
+       * v1.4.13-pre11 API 记忆：每条记录的密钥与主密钥同等级（enc: 前缀 + DPAPI）。
+       * 解不开的那条只丢密钥、保留地址与模型，用户仍能在下拉里看到并重新填。
+       */
+      savedApis: (Array.isArray(raw.savedApis) ? raw.savedApis : []).map((item) => {
+        const rec = item as { id?: string; label?: string; baseUrl?: string; model?: string; apiKey?: string; usedAt?: number }
+        let key = ''
+        if (typeof rec.apiKey === 'string' && rec.apiKey.startsWith('enc:')) {
+          if (safeStorage.isEncryptionAvailable()) {
+            try {
+              key = safeStorage.decryptString(Buffer.from(rec.apiKey.slice(4), 'base64'))
+            } catch {
+              key = ''
+            }
+          }
+        } else if (typeof rec.apiKey === 'string') {
+          key = rec.apiKey
+        }
+        return {
+          id: String(rec.id || ''),
+          label: String(rec.label || ''),
+          baseUrl: String(rec.baseUrl || ''),
+          model: String(rec.model || ''),
+          apiKey: key,
+          usedAt: typeof rec.usedAt === 'number' ? rec.usedAt : 0,
+        }
+      }).filter((item) => item.baseUrl),
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -129,6 +165,22 @@ async function writeConfig(cfg: AiSettings): Promise<void> {
     source: cfg.source === 'workbuddy' ? 'workbuddy' : 'provider',
     wbRegion: cfg.wbRegion === 'global' ? 'global' : 'cn',
     wbModel: String(cfg.wbModel || ''),
+    /*
+     * v1.4.13-pre11 API 记忆：逐条加密后再写盘。
+     * 加密不可用时**不**降级成明文——宁可丢掉记忆里的密钥，
+     * 也不能让它以明文躺在磁盘上。
+     */
+    savedApis: (Array.isArray(cfg.savedApis) ? cfg.savedApis : []).map((item) => ({
+      id: String(item.id || ''),
+      label: String(item.label || ''),
+      baseUrl: String(item.baseUrl || ''),
+      model: String(item.model || ''),
+      apiKey:
+        item.apiKey && safeStorage.isEncryptionAvailable()
+          ? `enc:${safeStorage.encryptString(item.apiKey).toString('base64')}`
+          : '',
+      usedAt: typeof item.usedAt === 'number' ? item.usedAt : 0,
+    })),
   }
   if (cfg.apiKey) {
     if (!safeStorage.isEncryptionAvailable()) {
@@ -186,6 +238,8 @@ export function registerAiHandlers(): void {
       source: cfg?.source === 'workbuddy' ? 'workbuddy' : 'provider',
       wbRegion: cfg?.wbRegion === 'global' ? 'global' : 'cn',
       wbModel: String(cfg?.wbModel || ''),
+      // 原样透传；逐条加密在 writeConfig 里做
+      savedApis: Array.isArray(cfg?.savedApis) ? cfg.savedApis : [],
     }
     await writeConfig(next)
     await applyProxy(next)

@@ -17,6 +17,7 @@ import LyricsView from '@/components/LyricsView'
 import AudioVisualizer from '@/components/AudioVisualizer'
 import { enhanceLyrics } from '@/services/aiLyrics'
 import { getAiConfig, isAiSupported, saveAiConfig } from '@/services/ai'
+import { detectLyricLanguage } from '@/services/desktopLyricLines'
 import {
   searchMultiSourceRound,
   initialMultiSourceState,
@@ -613,6 +614,17 @@ function LyricsPanel({
       return
     }
     if (!lyrics.rawResult?.lines?.length) return
+    /*
+     * v1.4.13-pre11（用户第 7 项）：中文歌先提示「这是中文歌曲」，
+     * 用户确认后再增强。
+     *
+     * 理由：中文歌做翻译没有意义（译出来的还是中文），而这一步会真实消耗 API。
+     * 所以不直接拒绝，也不默默执行——问一句，让用户自己决定。
+     */
+    if (detectLyricLanguage(lyrics.rawResult.lines) === 'zh') {
+      const ok = window.confirm('这是中文歌曲。\n\n翻译对中文歌通常没有意义，且会消耗 API 额度。\n仍要做 AI 增强吗？')
+      if (!ok) return
+    }
     setAiLyricBusy(true)
     try {
       const config = await getAiConfig()

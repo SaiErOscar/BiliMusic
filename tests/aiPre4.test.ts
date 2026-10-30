@@ -4,6 +4,9 @@ import { readFileSync } from 'fs'
 import path from 'path'
 import { FALLBACK_MODELS, hostOf, toProductName } from '../src/services/aiModels'
 import { loadRecentlyRecommended, rememberRecommended } from '../src/services/aiRecommend'
+import { forgetApi, rememberApi, MAX_SAVED_APIS } from '../src/services/aiApiMemory'
+import { estimateCostYuan, formatUsage } from '../src/services/aiUsage'
+import { attachSubLines, detectLyricLanguage, isLineTooLong } from '../src/services/desktopLyricLines'
 
 // v1.4.13-pre4：模型下拉、推荐去重、WorkBuddy 接入、备份完整性。
 
@@ -158,25 +161,30 @@ describe('AI 配置持久化完整性', () => {
   })
 })
 
-// v1.4.13-pre6：地址框的显隐条件原本写成 !baseUrl（地址为空才显示），逻辑正好相反。
-describe('地址框只在「自定义」预设时出现', () => {
+// v1.4.13-pre11：AI 连接配置整体收进二级菜单，地址框改为常驻显示，
+// 不再需要 isCustomPreset 这类显隐判定。
+describe('AI 连接配置收进二级菜单', () => {
   const src = readFileSync(path.resolve(__dirname, '../src/pages/Settings.tsx'), 'utf8')
 
-  it('用 isCustomPreset 判定，而不是「地址为空」', () => {
-    expect(src).toContain('isCustomPreset')
-    expect(src).toContain('{isCustomPreset && (')
+  it('地址框在二级菜单里常驻，不再按预设显隐', () => {
+    expect(src).toContain('AiConfigSheet')
+    expect(src).toContain('ai-sheet__field')
     expect(src).not.toContain('{!aiConfig.baseUrl && (')
   })
 
-  it('判定与预设下拉同源（baseUrl 匹配不到任何预设）', () => {
-    const gate = src.slice(src.indexOf('const isCustomPreset'), src.indexOf('const patchAiConfig'))
-    expect(gate).toContain('AI_PRESETS.some')
-    expect(gate).toContain('baseUrl')
-  })
-
-  // v1.4.13-pre7：模型下拉里不再出现 WorkBuddy（用户要求），入口只在「服务预设」
   it('模型下拉里不再有 WorkBuddy 选项', () => {
     expect(src).not.toContain('__workbuddy__')
+  })
+
+  // 用户第 2 项：切换来源时不清除原 API，而是记进记忆
+  it('切换来源前把当前直连配置记进记忆', () => {
+    expect(src).toContain('rememberApi')
+    expect(src).toContain('savedApis')
+  })
+
+  it('只有点「清除」才删除记忆', () => {
+    expect(src).toContain('forgetApi')
+    expect(src).toContain('清除')
   })
 })
 
@@ -219,10 +227,14 @@ describe('WorkBuddy 作为预设的完整性（pre7）', () => {
     expect(settings).toContain('void refreshModels(preset.baseUrl, preset.model)')
   })
 
-  // 用户第 12 项：WorkBuddy 时 API 输入框禁用并清空
-  it('WorkBuddy 时 API 密钥框禁用且清空', () => {
-    expect(settings).toContain("disabled={aiConfig.source === 'workbuddy'}")
-    expect(settings).toContain("patchAiConfig({ source: 'workbuddy', apiKey: '' })")
+  /*
+   * v1.4.13-pre11：pre7 的「WorkBuddy 时禁用并清空 API 密钥框」已被取代。
+   * 现在密钥不再被清空（那会丢掉用户填过的值），而是进 API 记忆；
+   * WorkBuddy 与直连的配置分属二级菜单的两个分页，本来就看不到对方的输入框。
+   */
+  it('切到 WorkBuddy 不再清空密钥，而是留进记忆', () => {
+    expect(settings).not.toContain("patchAiConfig({ source: 'workbuddy', apiKey: '' })")
+    expect(settings).toContain('savedApis: rememberApi')
   })
 
   // 用户第 7 项：模型行里那个 WorkBuddy 按钮要删掉
@@ -276,17 +288,16 @@ describe('WorkBuddy 预设的显示与可用性（pre8）', () => {
   const settings = readFileSync(path.resolve(__dirname, '../src/pages/Settings.tsx'), 'utf8')
   const panel = readFileSync(path.resolve(__dirname, '../src/components/WorkBuddyPanel.tsx'), 'utf8')
 
-  // 用户第 5 项：WorkBuddy 时「地址与模型」要显示它自己的模型
-  it('WorkBuddy 时显示 wbModel 而不是别的预设模型', () => {
+  // v1.4.13-pre11：WorkBuddy 的模型名在「AI 连接」行的描述里回显
+  it('WorkBuddy 时显示自己的 wbModel', () => {
     expect(settings).toContain('aiConfig.wbModel ||')
-    expect(settings).toContain('更换模型')
   })
 
-  // 用户第 6 项：选「自定义」要出现网址输入框与模型接口输入框
-  it('自定义预设提供地址输入框与模型接口输入框', () => {
-    expect(settings).toContain('自定义 API 地址')
+  // 用户第 6 项：二级菜单里地址与模型接口输入框都在
+  it('提供地址输入框与模型接口输入框', () => {
+    expect(settings).toContain('https://api.example.com/v1')
     expect(settings).toContain('填写模型接口名')
-    expect(settings).toContain('{isCustomPreset && (')
+    // v1.4.13-pre11：地址框在二级菜单里常驻，自定义模型仍走 customModel 分支
     expect(settings).toContain('{customModel && (')
   })
 
@@ -414,6 +425,111 @@ describe('推荐板块生成中动画（pre10）', () => {
   // 无障碍：系统开了「减少动态效果」时不该继续跳
   it('尊重 prefers-reduced-motion', () => {
     expect(css).toContain('prefers-reduced-motion: reduce')
+  })
+})
+
+// v1.4.13-pre11：用户 8 项。
+describe('API 记忆（pre11 第 2 项）', () => {
+  it('记住一套配置后能取回', () => {
+    let list = rememberApi([], { label: 'a', baseUrl: 'https://a.com/v1', model: 'm1', apiKey: 'k1' })
+    expect(list).toHaveLength(1)
+    expect(list[0].baseUrl).toBe('https://a.com/v1')
+    expect(list[0].apiKey).toBe('k1')
+  })
+
+  it('同地址同模型不堆副本，只更新密钥与时间', () => {
+    let list = rememberApi([], { label: 'a', baseUrl: 'https://a.com/v1', model: 'm1', apiKey: 'old' })
+    list = rememberApi(list, { label: 'a', baseUrl: 'https://a.com/v1', model: 'm1', apiKey: 'new' })
+    expect(list).toHaveLength(1)
+    expect(list[0].apiKey).toBe('new')
+  })
+
+  it('不同模型视为不同条目', () => {
+    let list = rememberApi([], { label: 'a', baseUrl: 'https://a.com/v1', model: 'm1' })
+    list = rememberApi(list, { label: 'a', baseUrl: 'https://a.com/v1', model: 'm2' })
+    expect(list).toHaveLength(2)
+  })
+
+  it('只有显式清除才删除', () => {
+    const list = rememberApi([], { label: 'a', baseUrl: 'https://a.com/v1', model: 'm1' })
+    expect(forgetApi(list, list[0].id)).toHaveLength(0)
+  })
+
+  it('超出上限时丢弃最久未使用的', () => {
+    let list: ReturnType<typeof rememberApi> = []
+    for (let i = 0; i < MAX_SAVED_APIS + 5; i++) {
+      list = rememberApi(list, { label: 'x' + i, baseUrl: 'https://h' + i + '.com/v1', model: 'm' })
+    }
+    expect(list).toHaveLength(MAX_SAVED_APIS)
+    // 最新的在最前
+    expect(list[0].label).toBe('x' + (MAX_SAVED_APIS + 4))
+  })
+})
+
+describe('用量金额与缓存明细（pre11 第 4 项）', () => {
+  it('区分命中缓存与未命中', () => {
+    const u = { month: '2026-10', calls: 1, inputTokens: 100, outputTokens: 50, cacheHitTokens: 80, cacheMissTokens: 20, wbCredits: 0 }
+    expect(estimateCostYuan(u)).not.toBeNull()
+  })
+
+  it('缓存命中更便宜：同样 token 下命中越多越省钱', () => {
+    const base = { month: '2026-10', calls: 1, inputTokens: 100, outputTokens: 0, wbCredits: 0 }
+    const cheap = estimateCostYuan({ ...base, cacheHitTokens: 100, cacheMissTokens: 0 })!
+    const pricey = estimateCostYuan({ ...base, cacheHitTokens: 0, cacheMissTokens: 100 })!
+    expect(cheap).toBeLessThan(pricey)
+  })
+
+  it('WorkBuddy 积分进入用量展示', () => {
+    const u = { month: '2026-10', calls: 1, inputTokens: 0, outputTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0, wbCredits: 3.5 }
+    expect(formatUsage(u)).toContain('积分')
+  })
+})
+
+describe('桌面歌词副行与语言判定（pre11 第 5、6、7 项）', () => {
+  it('中文歌判为 zh，外文判为 foreign', () => {
+    expect(detectLyricLanguage([{ time: 0, text: '月亮代表我的心' }])).toBe('zh')
+    expect(detectLyricLanguage([{ time: 0, text: 'hello darkness my old friend' }])).toBe('foreign')
+  })
+
+  it('中文歌夹一句英文仍判为中文', () => {
+    expect(detectLyricLanguage([
+      { time: 0, text: '月亮代表我的心' },
+      { time: 1, text: 'oh yeah' },
+    ])).toBe('zh')
+  })
+
+  it('副行按行号贴上去，没有副行的行不产生空串', () => {
+    const lines = [{ time: 0, text: 'a' }, { time: 1, text: 'b' }]
+    const out = attachSubLines(lines, new Map([[0, '甲']]))
+    expect(out[0].sub).toBe('甲')
+    expect(out[1].sub).toBeUndefined()
+  })
+
+  it('超长单句能被判定出来', () => {
+    expect(isLineTooLong('这是一句非常非常非常长的歌词'.repeat(3), 30, 400)).toBe(true)
+    expect(isLineTooLong('短', 30, 400)).toBe(false)
+  })
+
+  it('中文歌 AI 增强前会先确认', () => {
+    const np = readFileSync(path.resolve(__dirname, '../src/components/NowPlaying.tsx'), 'utf8')
+    expect(np).toContain('这是中文歌曲')
+    expect(np).toContain('detectLyricLanguage')
+  })
+
+  it('外文自动增强默认关闭', () => {
+    const st = readFileSync(path.resolve(__dirname, '../src/utils/storage.ts'), 'utf8')
+    expect(st).toContain('autoAiLyricForeign: false')
+  })
+})
+
+describe('WorkBuddy 账号池与积分（pre11 第 3、4 项）', () => {
+  const wb = readFileSync(path.resolve(__dirname, '../electron/workbuddy.ts'), 'utf8')
+  it('提供账号列表与积分查询', () => {
+    expect(wb).toContain('listAccounts')
+    expect(wb).toContain('fetchCredits')
+  })
+  it('积分查不到时返回 null，不用本地统计冒充', () => {
+    expect(wb).toContain('return null')
   })
 })
 

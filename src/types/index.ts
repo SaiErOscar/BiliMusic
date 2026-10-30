@@ -96,6 +96,13 @@ export interface AppSettings {
   // 手动色永不被自动色覆盖，关闭开关即回到开启前的手动色；歌词窗按「开关开且自动色就绪」时显示自动色。
   autoLyricTextColor: string
   autoLyricControlColor: string
+  /**
+   * v1.4.13-pre11 桌面歌词：外文歌词在缺少译文时自动做 AI 增强。
+   * 默认关闭——它会消耗 API 额度，不该在用户不知情时发生。
+   */
+  autoAiLyricForeign: boolean
+  /** v1.4.13-pre11 桌面歌词：主行下方显示副行（译文 / AI 增强） */
+  desktopLyricSubline: boolean
   // v1.4.6 MV 导出：画面角落 BiliMusic 水印开关（默认开）
   mvWatermark: boolean
   // v1.4.7-pre1 MV 导出：流畅度档位（快速 0.15s/标准 0.1s/流畅 0.05s/极致 0.03s 关键帧步长）
@@ -194,6 +201,28 @@ export interface AiSettings extends AiProviderConfig {
   wbRegion?: 'cn' | 'global'
   /** WorkBuddy 模型 id */
   wbModel?: string
+  /**
+   * v1.4.13-pre11 API 记忆：用户保存过的每一套直连配置。
+   *
+   * 切换预设、输入新地址或切到 WorkBuddy 时**不再清除**原有 API，
+   * 而是留在这里，之后可在下拉里一键切回；只有显式点「清除」才移除。
+   * 密钥与当前配置同级加密，不额外落明文。
+   */
+  savedApis?: SavedApi[]
+}
+
+/** 一套被记住的直连配置（不含 WorkBuddy，它由账号凭据维护） */
+export interface SavedApi {
+  /** 稳定 id，用于下拉选中与删除 */
+  id: string
+  /** 展示名，缺省用地址主机名 */
+  label: string
+  baseUrl: string
+  model: string
+  /** 上次保存时的密钥；仅本地加密存储 */
+  apiKey?: string
+  /** 最近一次使用时间（epoch ms），用于排序 */
+  usedAt?: number
 }
 
 export type NavItem = {

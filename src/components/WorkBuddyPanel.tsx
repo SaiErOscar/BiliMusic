@@ -35,6 +35,11 @@ export default function WorkBuddyPanel({ onClose, onPick, initialModel }: Props)
   const [model, setModel] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  /** v1.4.13-pre11 账号池：本机桌面端 + 已保存的网页登录 */
+  const [accounts, setAccounts] = useState<{ id: string; region: Region; account: string; expiresAt: number; origin: string }[]>([])
+  /** v1.4.13-pre11 当前账号积分；上游不提供时为 null */
+  const [credits, setCredits] = useState<{ remaining: number; used: number } | null>(null)
+  const [creditsMsg, setCreditsMsg] = useState('')
 
   const cap = platform.workbuddy
 
@@ -51,10 +56,15 @@ export default function WorkBuddyPanel({ onClose, onPick, initialModel }: Props)
     let cancelled = false
     void (async () => {
       try {
-        const [l, s] = await Promise.all([cap.localCredentials(), cap.savedCredential()])
+        const [l, s, acc] = await Promise.all([
+          cap.localCredentials(),
+          cap.savedCredential(),
+          cap.accounts ? cap.accounts() : Promise.resolve([]),
+        ])
         if (cancelled) return
         setLocal(l)
         setSaved(s)
+        setAccounts(acc || [])
         if (!s) return
         setRegion(s.region)
         setBusy(true)
@@ -90,6 +100,25 @@ export default function WorkBuddyPanel({ onClose, onPick, initialModel }: Props)
       setMsg(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
+    }
+  }
+
+  /**
+   * v1.4.13-pre11 查积分。
+   *
+   * 上游不提供时明确说「查不到」，不用本地统计冒充——积分是账，猜不得。
+   */
+  const loadCredits = async (cred: Credential) => {
+    if (!cap?.credits) { setCreditsMsg('当前版本不支持积分查询'); return }
+    setCreditsMsg('查询中…')
+    try {
+      const r = await cap.credits(cred)
+      if (!r) { setCredits(null); setCreditsMsg('上游未提供积分信息'); return }
+      setCredits(r)
+      setCreditsMsg('')
+    } catch (e) {
+      setCredits(null)
+      setCreditsMsg(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -179,6 +208,59 @@ export default function WorkBuddyPanel({ onClose, onPick, initialModel }: Props)
           <em style={{ opacity: 0.75 }}>
             {current ? (current.region === 'cn' ? '国内版' : '国际版') + (current.account ? ' · ' + current.account : '') : '未登录'}
           </em>
+        </div>
+
+        {/*
+          v1.4.13-pre11（用户第 3 项）：账号池。
+          同时登录多个 WorkBuddy 账号时在这里统一维护——能看见有几个号、
+          各自是哪个区域、token 何时过期，并能一键切换。
+        */}
+        <div className="wb-row">
+          <span>账号池</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 0 }}>
+            {accounts.length === 0 ? (
+              <em style={{ opacity: 0.6 }}>暂无可用账号</em>
+            ) : (
+              accounts.map((a) => (
+                <div key={a.id} className="wb-account">
+                  <strong>{a.account}</strong>
+                  <em>{a.region === 'cn' ? '中国版' : '国际版'}</em>
+                  <em>{a.origin === 'local' ? '本机' : '网页登录'}</em>
+                  <em>
+                    {a.expiresAt > 0
+                      ? '至 ' + new Date(a.expiresAt).toLocaleDateString()
+                      : '有效期未知'}
+                  </em>
+                  <span style={{ flex: 1 }} />
+                  <ActionButton
+                    onClick={() => {
+                      const found = local.find((c) => (c.account || '') === a.account && c.region === a.region)
+                      if (found) void applyLocalCredential(found)
+                      else if (saved && (saved.account || '') === a.account) void applyLocalCredential(saved)
+                      else setMsg('该账号不在当前可用凭据里，请重新登录')
+                    }}
+                  >
+                    使用
+                  </ActionButton>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* v1.4.13-pre11（用户第 3、4 项）：查账号积分 */}
+        <div className="wb-row">
+          <span>积分</span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <ActionButton onClick={() => current && void loadCredits(current)} disabled={!current}>
+              查看积分
+            </ActionButton>
+            <em style={{ opacity: 0.75 }}>
+              {credits
+                ? '剩余 ' + credits.remaining + ' · 已用 ' + credits.used
+                : (creditsMsg || '未查询')}
+            </em>
+          </div>
         </div>
 
         <div className="wb-row">

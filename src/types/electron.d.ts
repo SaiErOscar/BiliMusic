@@ -184,6 +184,8 @@ export type TrayPlayerCommand = 'toggle-play' | 'next' | 'prev'
 export interface MiniLyricLine {
   time: number
   text: string
+  /** v1.4.13-pre11 次级文本（译文 / AI 增强），显示在主行下方 */
+  sub?: string
 }
 
 export interface MiniPlayerState {
@@ -316,6 +318,11 @@ declare global {
         saveCredential: (cred: unknown) => Promise<{ ok: boolean; message?: string }>
         models: (region: 'cn' | 'global', token: string) => Promise<{ id: string; name: string }[]>
         chat: (cred: unknown, model: string, messages: unknown[], temperature?: number) => Promise<string>
+        /** v1.4.13-pre11 账号池 */
+        accounts: () => Promise<{ id: string; region: 'cn' | 'global'; account: string; expiresAt: number; origin: 'local' | 'saved'; active: boolean }[]>
+        /** v1.4.13-pre11 积分；上游不提供时为 null */
+        credits: (cred: unknown) => Promise<{ remaining: number; used: number } | null>
+        lastCredits: () => Promise<number>
       }
       /** v1.4.13-pre1 用户画像：外部文件编辑 + 学习记录 */
       userProfile?: {

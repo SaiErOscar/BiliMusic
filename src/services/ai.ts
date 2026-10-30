@@ -213,14 +213,31 @@ export async function aiChat(config: AiSettings, options: AiChatOptions): Promis
 
     const data = (await resp.json()) as {
       choices?: { message?: { content?: string } }[]
+      usage?: {
+        prompt_tokens?: number
+        completion_tokens?: number
+        /** DeepSeek：命中缓存的输入 token */
+        prompt_cache_hit_tokens?: number
+        prompt_cache_miss_tokens?: number
+      }
     }
     const text = data.choices?.[0]?.message?.content
     if (!text) throw new Error('模型返回内容为空')
-    // v1.4.13-pre1 成本可见：记一次调用与估算 token
-    recordUsage(
-      options.messages.reduce((a, m) => a + m.content.length, 0),
-      text.length,
-    )
+    /*
+     * v1.4.13-pre11：把「命中缓存 / 未命中缓存」分开记。
+     * 上游给了 usage 就用它的真实值换算回字符数；没给就退回字符数全算未命中。
+     * 这样金额才不会被高估十倍（缓存命中价约为未命中的 1/10）。
+     */
+    const inputChars = options.messages.reduce((a, m) => a + m.content.length, 0)
+    const usage = data.usage
+    const hitTokens = usage?.prompt_cache_hit_tokens || 0
+    const totalPrompt = usage?.prompt_tokens || 0
+    let hitChars = 0
+    if (hitTokens > 0 && totalPrompt > 0) {
+      // token 比例近似等于字符比例
+      hitChars = Math.round(inputChars * (hitTokens / totalPrompt))
+    }
+    recordUsage(inputChars, text.length, { cacheHitChars: hitChars })
     return text
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {

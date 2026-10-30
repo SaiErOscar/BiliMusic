@@ -37,6 +37,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   // 空串 = 尚未算出自动色，歌词窗兜底用手动色；避免初次开开关时闪一下默认色
   autoLyricTextColor: '',
   autoLyricControlColor: '',
+  // v1.4.13-pre11 桌面歌词：外文自动 AI 增强默认关闭（会消耗 API 额度）
+  autoAiLyricForeign: false,
+  // 副行默认开启：有译文就显示，没有就自然不显示
+  desktopLyricSubline: true,
   // v1.4.6 MV 导出：是否在画面角落加 BiliMusic 水印
   mvWatermark: true,
   // v1.4.7-pre1 MV 导出：流畅度档位（默认标准 0.1s 关键帧步长）

@@ -40,6 +40,8 @@ import { AI_PRESETS, aiUnsupportedReason, getAiConfig, isAiSupported, saveAiConf
 import { clearUsage, formatUsage, loadUsage } from '@/services/aiUsage'
 import { FALLBACK_MODELS, fetchModelOptions, hostOf, type ModelOption } from '@/services/aiModels'
 import WorkBuddyPanel from '@/components/WorkBuddyPanel'
+import AiConfigSheet, { type AiSourceTab } from '@/components/AiConfigSheet'
+import { forgetApi, labelFromUrl, rememberApi } from '@/services/aiApiMemory'
 import type { AiSettings } from '@/types'
 import { platform, isNativeApp } from '@/platform'
 import { usePlayer, useSleepRemainingText, formatMediaKeyName } from '@/contexts/PlayerContext'
@@ -141,6 +143,10 @@ export default function Settings() {
   const [customModel, setCustomModel] = useState(false)
   /** v1.4.13-pre4 WorkBuddy 接入面板 */
   const [wbOpen, setWbOpen] = useState(false)
+  /** v1.4.13-pre11 AI 配置二级菜单 */
+  const [aiSheetOpen, setAiSheetOpen] = useState(false)
+  /** 二级菜单当前分页：直连 / WorkBuddy 中国版 / WorkBuddy 国际版 */
+  const [aiTab, setAiTab] = useState<AiSourceTab>('direct')
   /**
    * 刷新模型列表。
    *
@@ -245,16 +251,6 @@ export default function Settings() {
    * 更新函数里——那是 React 要求纯函数的副作用位置，StrictMode 双调用/并发渲染下
    * 定时器会被清掉或重复注册，导致「改了没存」。
    */
-  /**
-   * 当前是否处于「自定义」预设。
-   *
-   * 与预设下拉的 value 同源：下拉在 baseUrl 匹配不到任何预设时显示「自定义」，
-   * 地址框的显隐必须跟它一致，否则两处口径会分叉。
-   */
-  const isCustomPreset =
-    aiConfig.source !== 'workbuddy' &&
-    !AI_PRESETS.some((p) => p.id !== 'workbuddy' && p.baseUrl && p.baseUrl === aiConfig.baseUrl)
-
   /**
    * 预设下拉当前应显示的 id。
    *
@@ -625,63 +621,7 @@ export default function Settings() {
             </SettingsRow>
           </SettingsGroup>
 
-          <SettingsGroup title="下载" icon={<Download size={20} />}>
-            <SettingsRow label="下载目录">
-              <div className="settings-path">
-                <span>{settings.downloadDir}</span>
-                <button type="button" onClick={changeDownloadDir}>
-                  <FolderOpen size={14} />
-                  更改
-                </button>
-              </div>
-            </SettingsRow>
-            <SettingsRow label="下载音质">
-              <StyledSelect
-                value={settings.downloadQuality}
-                onChange={(downloadQuality) => setAppSettings({ downloadQuality: downloadQuality as AppSettings['downloadQuality'] })}
-                options={['标准', '高品质', '无损']}
-              />
-            </SettingsRow>
-            <SettingsRow label="默认下载格式" description="音频仅含声音，视频含画面+声音">
-              <SegmentedControl
-                options={[
-                  { value: 'audio' as DownloadFormat, label: '音频' },
-                  { value: 'video' as DownloadFormat, label: '视频' },
-                ]}
-                value={settings.downloadFormat}
-                onChange={(downloadFormat) => setAppSettings({ downloadFormat })}
-              />
-            </SettingsRow>
-            <SettingsRow label="打开目录" description="在文件管理器中打开下载目录">
-              <button type="button" onClick={() => platform.download?.openDownloadDir?.(settings.downloadDir)}>
-                <FolderOpen size={14} />
-                打开
-              </button>
-            </SettingsRow>
-            {isMvExportSupported() && (
-              <>
-                <SettingsRow label="MV 导出水印" description="导出播放界面 MV 时在画面角落加 BiliMusic 角标">
-                  <ToggleSwitch checked={settings.mvWatermark} onChange={() => setAppSettings({ mvWatermark: !settings.mvWatermark })} />
-                </SettingsRow>
-                {/* v1.4.9-pre3 无控件导出：只留封面、标题歌手、歌词与水印，隐藏进度条/时间/播放按钮/音量/循环；v1.4.10-pre1 起连频谱柱状图一并隐藏 */}
-                <SettingsRow label="MV 无控件导出" description="导出时隐藏播放控件与频谱柱状图，只保留封面、歌曲信息与歌词（纯净成片）">
-                  <ToggleSwitch checked={settings.mvCleanExport} onChange={() => setAppSettings({ mvCleanExport: !settings.mvCleanExport })} />
-                </SettingsRow>
-                <SettingsRow label="MV 导出流畅度" description="关键帧密度：档位越高画面越流畅，导出越慢、临时占用越大">
-                  <select
-                    className="settings-select"
-                    value={settings.mvSmoothness}
-                    onChange={(e) => setAppSettings({ mvSmoothness: e.target.value as typeof settings.mvSmoothness })}
-                  >
-                    <option value="快速">快速（0.15 秒/帧）</option>
-                    <option value="标准">标准（0.1 秒/帧）</option>
-                    <option value="流畅">流畅（0.05 秒/帧）</option>
-                    <option value="极致">极致（0.03 秒/帧）</option>
-                  </select>
-                </SettingsRow>
-              </>
-            )}
-          </SettingsGroup>
+
 
           <SettingsGroup title="歌单云同步" icon={<Cloud size={20} />}>
             <SettingsRow label="WebDAV 地址">
@@ -743,6 +683,70 @@ export default function Settings() {
             </div>
           </SettingsGroup>
 
+          {/*
+            v1.4.13-pre11：「下载」从左侧移到右侧。
+            AI 连接配置收进二级菜单后左栏比右栏高 15%，超过两栏平衡的 10% 上限；
+            下载组约 300px，移过来正好补平。
+          */}
+          <SettingsGroup title="下载" icon={<Download size={20} />}>
+            <SettingsRow label="下载目录">
+              <div className="settings-path">
+                <span>{settings.downloadDir}</span>
+                <button type="button" onClick={changeDownloadDir}>
+                  <FolderOpen size={14} />
+                  更改
+                </button>
+              </div>
+            </SettingsRow>
+            <SettingsRow label="下载音质">
+              <StyledSelect
+                value={settings.downloadQuality}
+                onChange={(downloadQuality) => setAppSettings({ downloadQuality: downloadQuality as AppSettings['downloadQuality'] })}
+                options={['标准', '高品质', '无损']}
+              />
+            </SettingsRow>
+            <SettingsRow label="默认下载格式" description="音频仅含声音，视频含画面+声音">
+              <SegmentedControl
+                options={[
+                  { value: 'audio' as DownloadFormat, label: '音频' },
+                  { value: 'video' as DownloadFormat, label: '视频' },
+                ]}
+                value={settings.downloadFormat}
+                onChange={(downloadFormat) => setAppSettings({ downloadFormat })}
+              />
+            </SettingsRow>
+            <SettingsRow label="打开目录" description="在文件管理器中打开下载目录">
+              <button type="button" onClick={() => platform.download?.openDownloadDir?.(settings.downloadDir)}>
+                <FolderOpen size={14} />
+                打开
+              </button>
+            </SettingsRow>
+            {isMvExportSupported() && (
+              <>
+                <SettingsRow label="MV 导出水印" description="导出播放界面 MV 时在画面角落加 BiliMusic 角标">
+                  <ToggleSwitch checked={settings.mvWatermark} onChange={() => setAppSettings({ mvWatermark: !settings.mvWatermark })} />
+                </SettingsRow>
+                {/* v1.4.9-pre3 无控件导出：只留封面、标题歌手、歌词与水印，隐藏进度条/时间/播放按钮/音量/循环；v1.4.10-pre1 起连频谱柱状图一并隐藏 */}
+                <SettingsRow label="MV 无控件导出" description="导出时隐藏播放控件与频谱柱状图，只保留封面、歌曲信息与歌词（纯净成片）">
+                  <ToggleSwitch checked={settings.mvCleanExport} onChange={() => setAppSettings({ mvCleanExport: !settings.mvCleanExport })} />
+                </SettingsRow>
+                <SettingsRow label="MV 导出流畅度" description="关键帧密度：档位越高画面越流畅，导出越慢、临时占用越大">
+                  <select
+                    className="settings-select"
+                    value={settings.mvSmoothness}
+                    onChange={(e) => setAppSettings({ mvSmoothness: e.target.value as typeof settings.mvSmoothness })}
+                  >
+                    <option value="快速">快速（0.15 秒/帧）</option>
+                    <option value="标准">标准（0.1 秒/帧）</option>
+                    <option value="流畅">流畅（0.05 秒/帧）</option>
+                    <option value="极致">极致（0.03 秒/帧）</option>
+                  </select>
+                </SettingsRow>
+              </>
+            )}
+          </SettingsGroup>
+
+          {/* v1.4.13-pre11：歌单迁移与云同步同栏（既有测试钉住这条约束） */}
           <SettingsGroup title="歌单迁移" icon={<FileDown size={20} />}>
             <div className="settings-actions settings-actions--stacked">
               <button type="button" onClick={exportPlaylists}>
@@ -763,6 +767,8 @@ export default function Settings() {
               {playlistTransferMessage && <span>{playlistTransferMessage}</span>}
             </div>
           </SettingsGroup>
+
+
         </div>
 
 
@@ -770,6 +776,11 @@ export default function Settings() {
 
 
         <div className="settings-column">
+
+
+
+
+
           {/* v1.4.11-pre3 AI 底座：Provider 配置。密钥不写注册表、经 safeStorage 加密落盘，
               并随「导出全部数据」一并导出。
               放在右栏首位：组内 5 行，最小窗口下也落在首屏内。
@@ -823,144 +834,29 @@ export default function Settings() {
               <AiPlaylistPanel config={aiConfig} Row={SettingsRow} />
               {/* v1.4.12-pre1 听歌画像 */}
               <AiPortraitPanel config={aiConfig} Row={SettingsRow} />
-              {/* 来源与预设合并一行（板块 7 行上限）：描述里说清当前来源，按钮切换 */}
+              {/*
+                v1.4.13-pre11：AI 连接配置整体收进二级菜单。
+                用户要求「AI 功能配置较多，可均放入二级菜单，顶部提供三个分页」。
+                这一行只显示当前生效来源，点「连接设置」打开二级菜单。
+              */}
               <SettingsRow
-                label="服务预设"
+                label="AI 连接"
                 description={
                   aiConfig.source === 'workbuddy'
-                    ? '当前：WorkBuddy · ' + (aiConfig.wbRegion === 'global' ? '国际版' : '国内版') + ' · ' + (aiConfig.wbModel || '未选模型')
-                    : 'OpenAI 兼容格式；选预设填入地址与模型，仍可手改'
+                    ? '当前：WorkBuddy ' + (aiConfig.wbRegion === 'global' ? '国际版' : '中国版')
+                      + ' · ' + (aiConfig.wbModel || '未选模型')
+                    : aiConfig.baseUrl
+                      ? '当前：' + labelFromUrl(aiConfig.baseUrl) + ' · ' + (aiConfig.model || '未选模型')
+                      : '尚未配置；点「连接设置」选择服务'
                 }
               >
-                <select
-                  className="settings-select"
-                  value={currentPresetId}
-                  onChange={(e) => {
-                    const id = e.target.value
-                    if (id === 'workbuddy') {
-                      /*
-                       * WorkBuddy 不是一个 baseUrl，选中即开面板走登录/模型选择。
-                       * 来源当场切过去：否则「选完 WorkBuddy 再切走」会因为
-                       * source 仍是 provider 而回显成别的预设（用户看到的「登录丢失」）。
-                       */
-                      // 清空已填的 API 密钥：WorkBuddy 用账号凭据，留着只会误导
-                      patchAiConfig({ source: 'workbuddy', apiKey: '' })
-                      setWbOpen(true)
-                      return
-                    }
-                    if (id === '') {
-                      // 自定义：清空地址与模型，让地址框露出来等待手填
-                      patchAiConfig({ source: 'provider', baseUrl: '', model: '' })
-                      return
-                    }
-                    const preset = AI_PRESETS.find((p) => p.id === id)
-                    if (!preset) return
-                    patchAiConfig({ source: 'provider', baseUrl: preset.baseUrl, model: preset.model })
-                    // v1.4.13-pre7：切换预设即自动刷新模型列表，不必再点按钮
-                    void refreshModels(preset.baseUrl, preset.model)
-                  }}
-                >
-                  <option value="">自定义</option>
-                  {AI_PRESETS.map((p) => (
-                    <option key={p.id} value={p.id}>{p.label}</option>
-                  ))}
-                </select>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <ActionButton onClick={() => setAiSheetOpen(true)}>连接设置</ActionButton>
+                  {(aiConfig.savedApis?.length || 0) > 0 && (
+                    <span style={{ fontSize: 12, opacity: 0.6 }}>已记 {aiConfig.savedApis?.length} 套</span>
+                  )}
+                </div>
               </SettingsRow>
-              <SettingsRow
-                label="地址与模型"
-                stacked
-                description={
-                  aiConfig.source === 'workbuddy'
-                    ? '当前使用 WorkBuddy 账号的模型；换模型请在上方「服务预设」里重选 WorkBuddy'
-                    : (modelSource || '地址填到 /v1 即可，路径会自动补全；模型从下拉选择')
-                }
-              >
-                {aiConfig.source === 'workbuddy' ? (
-                  /*
-                   * v1.4.13-pre8（用户第 5 项）：WorkBuddy 时要显示它自己的模型名
-                   * （如 deepseek-v4.1-flash），而不是别的预设的接口名。
-                   * 这一行在这里只做只读回显——可改的地方是 WorkBuddy 面板，
-                   * 所以不放下拉，免得又出现「在这里选了却不生效」。
-                   */
-                  <div style={{ display: 'flex', gap: 8, width: '100%', alignItems: 'center' }}>
-                    <input
-                      className="settings-input"
-                      type="text"
-                      readOnly
-                      value={aiConfig.wbModel || '（尚未选择模型）'}
-                    />
-                    <ActionButton onClick={() => setWbOpen(true)}>更换模型</ActionButton>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
-                    {/*
-                      用户第 6 项：选「自定义」时要能填网址。
-                      v1.4.13-pre6 的判断写反过（!baseUrl），pre7 改对了条件，
-                      但「自定义」当时反查不出正确预设，所以框始终不出现。
-                    */}
-                    {isCustomPreset && (
-                      <input
-                        className="settings-input"
-                        type="url"
-                        placeholder="自定义 API 地址，例如 https://api.example.com/v1"
-                        value={aiConfig.baseUrl}
-                        onChange={(e) => patchAiConfig({ baseUrl: e.target.value })}
-                      />
-                    )}
-                    <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-                      <select
-                        className="settings-select"
-                        value={customModel ? '__custom__' : aiConfig.model}
-                        onChange={(e) => {
-                          if (e.target.value === '__custom__') { setCustomModel(true); return }
-                          setCustomModel(false)
-                          patchAiConfig({ model: e.target.value })
-                        }}
-                      >
-                        {/* 当前值若不在列表里（手填或列表未刷新）也要能显示出来 */}
-                        {!customModel && !modelOptions.some((m) => m.id === aiConfig.model) && aiConfig.model && (
-                          <option value={aiConfig.model}>{aiConfig.model}</option>
-                        )}
-                        {modelOptions.map((m) => (
-                          <option key={m.id} value={m.id}>{m.label}</option>
-                        ))}
-                        {/* 下拉之外仍可自定义：接口新增模型时不必等我们更新内置表 */}
-                        <option value="__custom__">自定义…</option>
-                      </select>
-                      <ActionButton onClick={() => void refreshModels()}>刷新模型</ActionButton>
-                    </div>
-                    {/* 用户第 6 项：选「自定义」模型时提供接口名输入框 */}
-                    {customModel && (
-                      <input
-                        className="settings-input"
-                        type="text"
-                        placeholder="填写模型接口名，例如 gpt-4o-mini"
-                        value={aiConfig.model}
-                        onChange={(e) => patchAiConfig({ model: e.target.value })}
-                      />
-                    )}
-                  </div>
-                )}
-              </SettingsRow>
-              <SettingsRow
-                label="API 密钥"
-                stacked
-                description={
-                  aiConfig.source === 'workbuddy'
-                    ? 'WorkBuddy 用账号凭据，不需要 API 密钥'
-                    : '经系统加密后存本地，不写注册表、不进明文配置'
-                }
-              >
-                <input
-                  className="settings-input"
-                  type="password"
-                  placeholder={aiConfig.source === 'workbuddy' ? '使用 WorkBuddy 账号，无需填写' : 'sk-...'}
-                  value={aiConfig.apiKey}
-                  disabled={aiConfig.source === 'workbuddy'}
-                  onChange={(e) => patchAiConfig({ apiKey: e.target.value })}
-                />
-              </SettingsRow>
-              {/* stacked：代理行同时有下拉与地址输入框，非 stacked 时说明文字被挤成逐字竖排（v1.4.9 踩过的坑） */}
               <SettingsRow label="代理" stacked description="默认跟随系统代理；选手动后独占使用下方地址">
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
                   <select
@@ -991,6 +887,40 @@ export default function Settings() {
                   </ActionButton>
                   <ActionButton onClick={() => { clearUsage(); setUsageText(formatUsage(loadUsage())) }}>清零用量</ActionButton>
                 </div>
+              </SettingsRow>
+            </SettingsGroup>
+          )}
+
+          {/*
+            v1.4.13-pre11（用户第 4 项）：用量与费用独立成组。
+            DeepSeek 的金额只有在区分「命中缓存 / 未命中缓存」之后才算得准
+            （缓存命中价约为未命中的 1/10），所以这里把三段分开显示。
+            同时把右栏高度补回来——AI 连接配置收进二级菜单后两栏差 15%。
+          */}
+          {isAiSupported() && (
+            <SettingsGroup title="AI 用量" icon={<Sparkles size={20} />}>
+              <SettingsRow
+                label="本月消耗"
+                stacked
+                description={aiConfig.source === 'workbuddy'
+                  ? 'WorkBuddy 按积分计费；积分来自上游回传，未提供时不计'
+                  : 'token 为估算值（字符数/3）；金额按内置单价估算，非账单'}
+              >
+                <span style={{ fontSize: 12, opacity: 0.8 }}>{usageText}</span>
+              </SettingsRow>
+              <SettingsRow label="输入明细" description="命中缓存的输入单价约为未命中的 1/10，分开记才不会高估">
+                <span style={{ fontSize: 12, opacity: 0.75 }}>
+                  {(() => {
+                    const u = loadUsage()
+                    if (!u.calls) return '暂无数据'
+                    return '缓存命中 ' + u.cacheHitTokens.toLocaleString()
+                      + ' · 未命中 ' + u.cacheMissTokens.toLocaleString()
+                      + ' · 输出 ' + u.outputTokens.toLocaleString()
+                  })()}
+                </span>
+              </SettingsRow>
+              <SettingsRow label="刷新" description="重新读取本地统计">
+                <ActionButton onClick={() => setUsageText(formatUsage(loadUsage()))}>刷新</ActionButton>
               </SettingsRow>
             </SettingsGroup>
           )}
@@ -1027,6 +957,27 @@ export default function Settings() {
               <SettingsRow label="歌词字体" description="桌面歌词使用的字体（桌面歌词窗内也可调）">
                 <FontSelect value={settings.lyricFontFamily} onChange={(lyricFontFamily) => setAppSettings({ lyricFontFamily })} />
               </SettingsRow>
+              {/*
+                v1.4.13-pre11（用户第 5、6 项）：两个开关合并成一行——
+                板块有 7 行上限，拆成两行会超（实测 8 行）。
+                副行 = 主行下方的译文或 AI 增强；外文自动增强默认关闭（会消耗 API）。
+              */}
+              <SettingsRow
+                label="双语副行"
+                description="桌面歌词在主行下方显示译文或 AI 增强；开启「自动」后，外文歌词没有现成译文时会自动翻译一次（消耗 API）"
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <ToggleSwitch
+                    checked={settings.desktopLyricSubline}
+                    onChange={() => setAppSettings({ desktopLyricSubline: !settings.desktopLyricSubline })}
+                  />
+                  <span style={{ fontSize: 12, opacity: 0.7 }}>自动</span>
+                  <ToggleSwitch
+                    checked={settings.autoAiLyricForeign}
+                    onChange={() => setAppSettings({ autoAiLyricForeign: !settings.autoAiLyricForeign })}
+                  />
+                </div>
+              </SettingsRow>
               <SettingsRow label="样式预设" description={lyricPresetMessage || `把当前歌词窗外观存为预设，最多 ${MAX_LYRIC_PRESETS} 个，同名覆盖`} stacked>
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
                   <input
@@ -1051,6 +1002,8 @@ export default function Settings() {
           {/* v1.4.9-pre4 桌面歌词板块：歌词窗外观（配色/字号/粗细/字体/样式预设）。
               放左栏与「外观」相邻——两者都是「视觉呈现」，语义连贯且高度配平。 */}
 
+
+
           <SettingsGroup title="播放页" icon={<Monitor size={20} />}>
             {/*
               v1.4.11-pre3 修正：封面取景原先排在「播放页」组末尾，实测在 1280×720 及更矮窗口下
@@ -1069,15 +1022,12 @@ export default function Settings() {
                 <option value="fill">拉伸（填满，会变形）</option>
               </select>
             </SettingsRow>
-            {/* v1.4.10-pre1 音频可视化：播放页与 MV 导出画面共用这一开关，小字里要说清它影响导出。
-                桌面端此时播放源会切为 Blob（Web Audio 需同源音频），起播延迟略增，故默认关。 */}
             <SettingsRow label="音频可视化" description="播放页与导出的 MV 显示频谱柱状图（开启后起播与导出略慢；勾选 MV 无控件导出时不含）">
               <ToggleSwitch checked={settings.audioVisualizer} onChange={() => setAppSettings({ audioVisualizer: !settings.audioVisualizer })} />
             </SettingsRow>
             <SettingsRow label="歌词显示" description="播放页自动显示歌词">
               <ToggleSwitch checked={settings.showLyrics} onChange={() => setAppSettings({ showLyrics: !settings.showLyrics })} />
             </SettingsRow>
-            {/* v1.4.9-pre2 歌词双语：目前只有网易云源带翻译（tlyric），其余源无译文时行为不变 */}
             <SettingsRow label="歌词双语" description="歌词行下方显示译文（仅网易云源提供翻译）">
               <ToggleSwitch checked={settings.lyricBilingual} onChange={() => setAppSettings({ lyricBilingual: !settings.lyricBilingual })} />
             </SettingsRow>
@@ -1146,15 +1096,221 @@ export default function Settings() {
             </div>
           </SettingsGroup>
       </div>
-          {wbOpen && (
+          {/*
+            v1.4.13-pre11 AI 配置二级菜单：顶部三个分页（直连 / WorkBuddy 中国版 / 国际版）。
+            「不要清除原 API」体现在：切到 WorkBuddy 或改地址时，先把当前直连配置
+            rememberApi 进记忆，再切来源；记忆里的条目可在下拉里切回，只有点「清除」才删。
+          */}
+      {aiSheetOpen && (
+        <AiConfigSheet
+          active={aiTab}
+          onChange={setAiTab}
+          onClose={() => setAiSheetOpen(false)}
+        >
+          {aiTab === 'direct' ? (
+            <>
+              <div className="ai-sheet__field">
+                <span className="ai-sheet__label">服务预设</span>
+                <div className="ai-sheet__row">
+                  <select
+                    className="settings-select"
+                    value={currentPresetId}
+                    onChange={(e) => {
+                      const id = e.target.value
+                      // 先把当前这套直连配置记进记忆，再切——这就是「不清除原 API」
+                      if (aiConfig.baseUrl) {
+                        patchAiConfig({
+                          savedApis: rememberApi(aiConfig.savedApis || [], {
+                            label: labelFromUrl(aiConfig.baseUrl),
+                            baseUrl: aiConfig.baseUrl,
+                            model: aiConfig.model,
+                            apiKey: aiConfig.apiKey,
+                          }),
+                        })
+                      }
+                      if (id === '') {
+                        patchAiConfig({ source: 'provider', baseUrl: '', model: '' })
+                        return
+                      }
+                      const preset = AI_PRESETS.find((p) => p.id === id)
+                      if (!preset) return
+                      patchAiConfig({ source: 'provider', baseUrl: preset.baseUrl, model: preset.model })
+                      void refreshModels(preset.baseUrl, preset.model)
+                    }}
+                  >
+                    <option value="">自定义</option>
+                    {AI_PRESETS.filter((p) => p.id !== 'workbuddy').map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="ai-sheet__field">
+                <span className="ai-sheet__label">API 地址</span>
+                <input
+                  className="settings-input"
+                  type="url"
+                  placeholder="https://api.example.com/v1"
+                  value={aiConfig.baseUrl}
+                  onChange={(e) => patchAiConfig({ baseUrl: e.target.value })}
+                />
+              </div>
+
+              <div className="ai-sheet__field">
+                <span className="ai-sheet__label">模型</span>
+                <div className="ai-sheet__row">
+                  <select
+                    className="settings-select"
+                    value={customModel ? '__custom__' : aiConfig.model}
+                    onChange={(e) => {
+                      if (e.target.value === '__custom__') { setCustomModel(true); return }
+                      setCustomModel(false)
+                      patchAiConfig({ model: e.target.value })
+                    }}
+                  >
+                    {!customModel && !modelOptions.some((m) => m.id === aiConfig.model) && aiConfig.model && (
+                      <option value={aiConfig.model}>{aiConfig.model}</option>
+                    )}
+                    {modelOptions.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                    <option value="__custom__">自定义…</option>
+                  </select>
+                  <ActionButton onClick={() => void refreshModels()}>刷新模型</ActionButton>
+                </div>
+                {modelSource && <span className="ai-sheet__hint">{modelSource}</span>}
+                {customModel && (
+                  <input
+                    className="settings-input"
+                    type="text"
+                    placeholder="填写模型接口名，例如 gpt-4o-mini"
+                    value={aiConfig.model}
+                    onChange={(e) => patchAiConfig({ model: e.target.value })}
+                  />
+                )}
+              </div>
+
+              <div className="ai-sheet__field">
+                <span className="ai-sheet__label">API 密钥</span>
+                <input
+                  className="settings-input"
+                  type="password"
+                  placeholder="sk-..."
+                  value={aiConfig.apiKey}
+                  onChange={(e) => patchAiConfig({ apiKey: e.target.value })}
+                />
+                <span className="ai-sheet__hint">经系统加密后存本地，不写注册表、不进明文配置</span>
+              </div>
+
+              <div className="ai-sheet__field">
+                <span className="ai-sheet__label">已保存的 API（{aiConfig.savedApis?.length || 0}）</span>
+                <div className="ai-sheet__row">
+                  <ActionButton
+                    onClick={() => {
+                      if (!aiConfig.baseUrl) return
+                      patchAiConfig({
+                        savedApis: rememberApi(aiConfig.savedApis || [], {
+                          label: labelFromUrl(aiConfig.baseUrl),
+                          baseUrl: aiConfig.baseUrl,
+                          model: aiConfig.model,
+                          apiKey: aiConfig.apiKey,
+                        }),
+                      })
+                      setAiMessage('已记入 API 记忆')
+                    }}
+                    disabled={!aiConfig.baseUrl}
+                  >
+                    保存当前
+                  </ActionButton>
+                </div>
+                {(aiConfig.savedApis?.length || 0) === 0 ? (
+                  <span className="ai-sheet__hint">
+                    切换预设或改地址时不会清除原 API，会自动记到这里，之后可一键切回。
+                  </span>
+                ) : (
+                  <div className="ai-sheet__saved">
+                    {(aiConfig.savedApis || []).map((item) => (
+                      <div key={item.id} className="ai-sheet__saved-item">
+                        <strong>{item.label}</strong>
+                        <em>{item.model || '未选模型'}</em>
+                        <span style={{ flex: 1 }} />
+                        <ActionButton
+                          onClick={() => {
+                            patchAiConfig({
+                              source: 'provider',
+                              baseUrl: item.baseUrl,
+                              model: item.model,
+                              apiKey: item.apiKey || '',
+                              savedApis: rememberApi(aiConfig.savedApis || [], {
+                                ...item,
+                                usedAt: Date.now(),
+                              }),
+                            })
+                            void refreshModels(item.baseUrl, item.model)
+                            setAiMessage('已切回 ' + item.label)
+                          }}
+                        >
+                          切回
+                        </ActionButton>
+                        <ActionButton
+                          onClick={() => patchAiConfig({ savedApis: forgetApi(aiConfig.savedApis || [], item.id) })}
+                        >
+                          清除
+                        </ActionButton>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="ai-sheet__field">
+                <span className="ai-sheet__hint">
+                  当前分页：{aiTab === 'wb-global' ? 'WorkBuddy 国际版（workbuddy.ai）' : 'WorkBuddy 中国版（codebuddy.cn）'}
+                  。登录与账号池在下方面板里维护；切到 WorkBuddy 不会清除你已保存的直连 API。
+                </span>
+              </div>
+              <div className="ai-sheet__row">
+                <ActionButton
+                  onClick={() => {
+                    // 切来源前先把直连配置记进记忆
+                    if (aiConfig.baseUrl && aiConfig.source !== 'workbuddy') {
+                      patchAiConfig({
+                        savedApis: rememberApi(aiConfig.savedApis || [], {
+                          label: labelFromUrl(aiConfig.baseUrl),
+                          baseUrl: aiConfig.baseUrl,
+                          model: aiConfig.model,
+                          apiKey: aiConfig.apiKey,
+                        }),
+                      })
+                    }
+                    patchAiConfig({ source: 'workbuddy', wbRegion: aiTab === 'wb-global' ? 'global' : 'cn' })
+                    setWbOpen(true)
+                  }}
+                >
+                  打开 WorkBuddy 面板
+                </ActionButton>
+                {aiConfig.source === 'workbuddy' && (
+                  <span style={{ fontSize: 12, opacity: 0.7 }}>
+                    当前：{aiConfig.wbRegion === 'global' ? '国际版' : '中国版'} · {aiConfig.wbModel || '未选模型'}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+        </AiConfigSheet>
+      )}
+
+      {wbOpen && (
         <WorkBuddyPanel
           onClose={() => setWbOpen(false)}
           initialModel={aiConfig.wbModel}
           onPick={(cred, model) => {
-            // v1.4.13-pre4 选定 WorkBuddy 模型：切来源为 workbuddy，记录区域与模型 id。
-            // 之后所有 AI 功能都经主进程用 WorkBuddy 凭据发请求。
-            // v1.4.13-pre7：切到 WorkBuddy 时清空 API 密钥，避免「以为还在用 API」
-      patchAiConfig({ source: 'workbuddy', wbRegion: cred.region, wbModel: model, apiKey: '' })
+            // 选定模型：切来源为 workbuddy，记录区域与模型 id。
+            // v1.4.13-pre11：不再清空 apiKey——它已进记忆，随时可切回。
+            patchAiConfig({ source: 'workbuddy', wbRegion: cred.region, wbModel: model })
             setWbOpen(false)
             setAiMessage('已切换到 WorkBuddy 模型：' + model)
           }}

@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePlayer, usePlayerProgress } from '@/contexts/PlayerContext'
 import { getLyricForTrack, LYRIC_OFFSET_CHANGED_EVENT } from '@/services/lyrics'
 import { useAppSettings } from '@/hooks/useAppSettings'
+import { attachSubLines, detectLyricLanguage } from '@/services/desktopLyricLines'
+import { aiChat } from '@/services/ai'
+import { getAiConfig } from '@/services/ai'
+import { AI_LYRIC_BATCH, pickTranslatableIndexes, parseLyricLines } from '@/services/aiLyrics'
 import { platform } from '@/platform'
 import type { MiniPlayerState, MiniCommand } from '@/types/electron'
 import type { AppSettings } from '@/types'
@@ -16,16 +20,62 @@ import type { AppSettings } from '@/types'
  *   约 250ms 一次），歌词高亮与播放/暂停切换即时同步
  * - 监听并处理小窗发来的音量 / 进度 / 播放顺序命令
  */
+/**
+ * v1.4.13-pre11：为桌面歌词做一次「只翻译」的 AI 增强。
+ *
+ * 与播放页的 aiLyrics 复用同一套分批与解析，但不落任何缓存——
+ * 桌面歌词的副行是瞬时展示，关掉开关就该消失，不该污染歌词缓存。
+ *
+ * @returns 行号 → 译文（只含有结果的行）
+ */
+async function enhanceLyricsForDesktop(lines: { time: number; text: string }[]): Promise<Map<number, string>> {
+  const config = await getAiConfig()
+  const indexes = pickTranslatableIndexes(lines as never)
+  const out = new Map<number, string>()
+  for (let start = 0; start < indexes.length; start += AI_LYRIC_BATCH) {
+    const batch = indexes.slice(start, start + AI_LYRIC_BATCH)
+    const payload = batch.map((i) => ({ index: i, text: lines[i].text }))
+    const reply = await aiChat(config, {
+      messages: [
+        {
+          role: 'system',
+          content:
+            '你是歌词翻译。把每行歌词译成简体中文，保留语气。'
+            + '只返回 JSON 数组，元素形如 {"index": 原行号, "text": "译文"}，不要解释。',
+        },
+        { role: 'user', content: JSON.stringify(payload) },
+      ],
+      temperature: 0.2,
+      timeoutMs: 45000,
+    })
+    for (const item of parseLyricLines(reply)) {
+      if (item.text) out.set(item.index, item.text)
+    }
+  }
+  return out
+}
+
 export function useMiniWindowSync() {
   const player = usePlayer()
   const { progress, duration, setProgress } = usePlayerProgress()
   const { settings, setAppSettings } = useAppSettings()
-  const [lyrics, setLyrics] = useState<{ lines: { time: number; text: string }[]; synced: boolean; noLyric: boolean }>({
+  const [lyrics, setLyrics] = useState<{
+    lines: { time: number; text: string; sub?: string }[]
+    synced: boolean
+    noLyric: boolean
+  }>({
     lines: [],
     synced: false,
     noLyric: false,
   })
   const trackId = player.currentTrack?.id
+  /**
+   * v1.4.13-pre11：拉歌词的 effect 依赖里不能塞整个 settings
+   * （设置每次变化都会重拉一次歌词，代价太大），
+   * 但又要读到最新的两个开关——用 ref 取当前值。
+   */
+  const settingsRef = useRef(settings)
+  settingsRef.current = settings
 
   // 主题状态：监听 <html data-theme> 变化，保证实时推送里 theme 不滞后
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
@@ -56,10 +106,36 @@ export function useMiniWindowSync() {
       return
     }
     getLyricForTrack(track)
-      .then((res) => {
+      .then(async (res) => {
         if (cancelled) return
+        /*
+         * v1.4.13-pre11（用户第 5 项）：把译文 / AI 增强作为副行一起送进歌词窗。
+         * 官方 tlyric 优先；没有译文时若开了「外文自动增强」，再补一次 AI 结果。
+         * 副行开关关闭时不下发 sub，歌词窗自然只显示主行。
+         */
+        const baseLines = res?.lines || []
+        let withSub = baseLines
+        if (settingsRef.current.desktopLyricSubline) {
+          const subMap = new Map<number, string>()
+          baseLines.forEach((line, i) => {
+            const translated = (line as { ttext?: string }).ttext
+            if (translated && translated.trim()) subMap.set(i, translated.trim())
+          })
+          if (subMap.size === 0 && settingsRef.current.autoAiLyricForeign) {
+            const lang = detectLyricLanguage(baseLines)
+            if (lang === 'foreign') {
+              try {
+                const ai = await enhanceLyricsForDesktop(baseLines)
+                ai.forEach((text, i) => subMap.set(i, text))
+              } catch {
+                /* 自动增强失败不阻塞歌词显示 */
+              }
+            }
+          }
+          withSub = attachSubLines(baseLines, subMap)
+        }
         // v1.4.5：透传 noLyric（用户主动「不显示歌词」），歌词窗据此显示「无歌词」
-        setLyrics({ lines: res?.lines || [], synced: Boolean(res?.synced), noLyric: Boolean(res?.noLyric) })
+        setLyrics({ lines: withSub, synced: Boolean(res?.synced), noLyric: Boolean(res?.noLyric) })
       })
       .catch(() => {
         if (!cancelled) setLyrics({ lines: [], synced: false, noLyric: false })

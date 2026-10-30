@@ -111,6 +111,22 @@ export interface PlatformWorkBuddy {
   saveCredential: (cred: unknown) => Promise<{ ok: boolean; message?: string }>
   models: (region: 'cn' | 'global', token: string) => Promise<{ id: string; name: string }[]>
   chat: (cred: unknown, model: string, messages: unknown[], temperature?: number) => Promise<string>
+  /** v1.4.13-pre11 账号池：本机桌面端 + 已保存的网页登录 */
+  accounts: () => Promise<WorkBuddyAccount[]>
+  /** v1.4.13-pre11 查账号积分；上游不提供时返回 null */
+  credits: (cred: unknown) => Promise<{ remaining: number; used: number } | null>
+  /** 最近一次对话消耗的积分 */
+  lastCredits: () => Promise<number>
+}
+
+/** v1.4.13-pre11 WorkBuddy 账号池条目 */
+export interface WorkBuddyAccount {
+  id: string
+  region: 'cn' | 'global'
+  account: string
+  expiresAt: number
+  origin: 'local' | 'saved'
+  active: boolean
 }
 
 export interface PlatformAiConfig {

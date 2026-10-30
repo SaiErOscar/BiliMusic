@@ -5413,3 +5413,200 @@ body {
   }
 }
 
+
+
+/* ===== v1.4.13-pre11 省略号粒子效果 ===== */
+
+/*
+ * 三个主点继续做呼吸，外围再撒几颗小粒子做上浮/闪烁。
+ * 粒子用伪元素 + box-shadow 铺点，不新增 DOM 节点，也不引入额外渲染成本。
+ */
+.discover-ai__dots {
+  position: relative;
+}
+
+.discover-ai__dots::before,
+.discover-ai__dots::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle at 12% 62%, currentColor 1px, transparent 1.4px),
+    radial-gradient(circle at 46% 18%, currentColor 1px, transparent 1.4px),
+    radial-gradient(circle at 78% 70%, currentColor 1px, transparent 1.4px),
+    radial-gradient(circle at 30% 88%, currentColor 0.8px, transparent 1.2px),
+    radial-gradient(circle at 88% 30%, currentColor 0.8px, transparent 1.2px);
+  opacity: 0;
+  animation: discover-particle 2.1s ease-in-out infinite;
+}
+
+.discover-ai__dots::after {
+  animation-delay: 1.05s;
+  transform: scale(0.9);
+}
+
+@keyframes discover-particle {
+  0%   { opacity: 0;    transform: translateY(2px) scale(0.85); }
+  35%  { opacity: 0.55; }
+  70%  { opacity: 0.15; transform: translateY(-3px) scale(1.05); }
+  100% { opacity: 0;    transform: translateY(-5px) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .discover-ai__dots::before,
+  .discover-ai__dots::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+
+
+/* ===== v1.4.13-pre11 AI 配置二级菜单 ===== */
+
+.ai-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.ai-sheet {
+  width: min(560px, calc(100vw - 48px));
+  max-height: min(76vh, 640px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-heavy);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+  overflow: hidden;
+}
+
+.ai-sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+}
+
+.ai-sheet__close {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.ai-sheet__close:hover { opacity: 1; }
+
+.ai-sheet__tabs {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 10px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.ai-sheet__tab {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0.66;
+}
+
+.ai-sheet__tab:hover { opacity: 0.9; }
+
+.ai-sheet__tab--on {
+  opacity: 1;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.ai-sheet__body {
+  padding: 14px 16px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ai-sheet__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-sheet__label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ai-sheet__hint {
+  font-size: 12px;
+  opacity: 0.62;
+  line-height: 1.5;
+}
+
+.ai-sheet__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ai-sheet__saved {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+}
+
+.ai-sheet__saved-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.ai-sheet__saved-item strong { font-weight: 600; }
+.ai-sheet__saved-item em { opacity: 0.6; font-style: normal; }
+
+
+
+/* ===== v1.4.13-pre11 WorkBuddy 账号池 ===== */
+
+.wb-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  font-size: 12px;
+}
+
+.wb-account strong {
+  font-weight: 600;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-account em {
+  font-style: normal;
+  opacity: 0.62;
+}
+

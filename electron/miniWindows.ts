@@ -16,6 +16,13 @@ const __dirname = path.dirname(__filename)
 export interface MiniLyricLine {
   time: number
   text: string
+  /**
+   * v1.4.13-pre11：次级文本（译文 / AI 增强），显示在主行下方。
+   *
+   * 用户要求「桌面歌词中上下显示双语字幕或 AI 增强字幕」，
+   * 所以副行随行一起传下去，由歌词窗决定是否显示。
+   */
+  sub?: string
 }
 
 export interface MiniPlayerState {

@@ -224,6 +224,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveCredential: (cred) => ipcRenderer.invoke('wb:save-credential', cred),
     models: (region, token) => ipcRenderer.invoke('wb:models', region, token),
     chat: (cred, model, messages, temperature) => ipcRenderer.invoke('wb:chat', cred, model, messages, temperature),
+    // v1.4.13-pre11 账号池与积分
+    accounts: () => ipcRenderer.invoke('wb:accounts'),
+    credits: (cred) => ipcRenderer.invoke('wb:credits', cred),
+    lastCredits: () => ipcRenderer.invoke('wb:last-credits'),
   },
   biliApi,
   lyricsApi,
