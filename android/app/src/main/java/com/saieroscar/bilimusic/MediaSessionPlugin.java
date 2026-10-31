@@ -53,8 +53,11 @@ public class MediaSessionPlugin extends Plugin implements MediaNotificationServi
         i.putExtra("title", call.getString("title", ""));
         i.putExtra("artist", call.getString("artist", ""));
         i.putExtra("isPlaying", call.getBoolean("isPlaying", false));
-        i.putExtra("positionSec", (double) call.getFloat("positionSec", 0f));
-        i.putExtra("durationSec", (double) call.getFloat("durationSec", 0f));
+        // JS 侧传的是整数（Math.round），JSON 反序列化后可能落在 Integer 或 Long：
+        // getDouble 只认 Double/Float/Integer，遇到 Long 会静默返回默认值，
+        // 位置与时长就变成 0。这里先用 getDouble，取不到再退回 getLong。
+        i.putExtra("positionSec", toSeconds(call, "positionSec"));
+        i.putExtra("durationSec", toSeconds(call, "durationSec"));
         i.putExtra("coverUrl", call.getString("coverUrl", ""));
         try {
             ContextCompat.startForegroundService(getContext(), i);
@@ -66,6 +69,17 @@ public class MediaSessionPlugin extends Plugin implements MediaNotificationServi
             return;
         }
         call.resolve();
+    }
+
+    /**
+     * 读一个秒值：先走 getDouble（Double/Float/Integer 都认），取不到再走 getLong（Long 分支）。
+     * 两个 getter 都可能返回 null（字段缺失），全部先判空再拆箱，避免 NPE。
+     */
+    private static double toSeconds(PluginCall call, String name) {
+        Double d = call.getDouble(name);
+        if (d != null) return d.doubleValue();
+        Long l = call.getLong(name);
+        return l == null ? 0d : l.doubleValue();
     }
 
     @PluginMethod

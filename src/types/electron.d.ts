@@ -61,6 +61,14 @@ export interface MvExportApi {
   onMvExportProgress: (callback: (progress: MvExportProgress) => void) => () => void
 }
 
+/**
+ * v1.4.13-pre14 原生对话框能力：渲染层确认框交给主进程 dialog.showMessageBox。
+ * 返回 true = 用户点「确定」；false = 取消 / 关闭对话框（语义同 window.confirm）。
+ */
+export interface NativeDialogApi {
+  confirm: (options: { message: string; detail?: string }) => Promise<boolean>
+}
+
 export interface BiliApi {
   downloadAudio: (audioUrl: string, filename: string, customDir?: string, options?: DownloadOptions) => Promise<{
     filePath: string
@@ -356,6 +364,8 @@ declare global {
       exportMvSingle?: MvExportApi['exportMvSingle']
       cancelMvExport?: MvExportApi['cancelMvExport']
       onMvExportProgress?: MvExportApi['onMvExportProgress']
+      /** v1.4.13-pre14 原生确认框（dialog.showMessageBox）；老 preload 无此字段，调用方降级 window.confirm */
+      nativeDialog?: NativeDialogApi
     }
   }
 }

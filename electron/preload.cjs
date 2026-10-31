@@ -231,4 +231,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   biliApi,
   lyricsApi,
+  // v1.4.13-pre14 原生确认框：交给主进程 dialog.showMessageBox，替代渲染层 window.confirm
+  nativeDialog: {
+    confirm: (options) => ipcRenderer.invoke('dialog:confirm', options),
+  },
 })

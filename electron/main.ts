@@ -10,11 +10,12 @@ import { registerMiniWindowHandlers, onMainWindowActivityChanged, destroyLyricWi
 import { registerSystemFontsHandlers } from './systemFonts'
 import { registerColorPickerHandlers } from './colorPicker'
 import { registerBackupHandlers } from './backup'
+import { registerNativeDialogHandlers } from './nativeDialog'
 import { registerAiHandlers } from './ai'
 import { registerProfileHandlers } from './profile'
 import { registerWorkBuddyHandlers } from './workbuddy'
 import { registerMvExportHandlers, killMvExportChildren } from './mvExport'
-import { registerMediaKeysIpc, unregisterAllMediaKeys } from './mediaKeys'
+import { registerMediaKeysIpc, setMediaKeysFeatureSwitch, unregisterAllMediaKeys } from './mediaKeys'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -33,17 +34,15 @@ if (process.env.VITE_DEV_SERVER_URL) {
   app.commandLine.appendSwitch('remote-allow-origins', '*')
 }
 
-// v1.4.9-pre3 修复：Windows 上全局媒体键「注册成功但不触发」。
+// v1.4.13-pre14 系统媒体控制：HardwareMediaKeyHandling 的去留由 mediaKeys 模块统一决定。
 //
-// 根因：Chromium 自带 HardwareMediaKeyHandling，会先把硬件媒体键接管到自己的
-// MediaSession 层（对应 navigator.mediaSession），再由它分发给「当前活跃媒体会话」。
-// Electron 的 globalShortcut.register('MediaPlayPause') 因此能返回 true（键位登记成功），
-// 但按键事件被 Chromium 提前消费，注册的回调永远不触发——UI 上开关显示已开启、
-// 媒体键状态回报也正常，实际按键毫无反应。
+// 历史：v1.4.9-pre3 曾无条件 disable 这个 feature（见 mediaKeys.ts 顶部长注释）。
+// 但该 feature 同时也是 Chromium 把渲染层 navigator.mediaSession 桥接到
+// Windows SMTC 的开关——关掉之后系统音量浮层里永远不会出现 BiliMusic。
+// 两者互斥，因此改为按用户的「全局媒体键」设置二选一，见 resolveMediaKeysFeature。
 //
-// 处置：关掉该 feature，让媒体键回到 OS 全局热键路径，globalShortcut 才能收到。
-// 必须在 app ready 之前 appendSwitch，故放在模块顶层。
-app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling')
+// 必须在 app ready 之前 appendSwitch，故仍在模块顶层执行（此时开关值已可读盘）。
+setMediaKeysFeatureSwitch()
 
 // B站请求头处理
 //
@@ -847,6 +846,8 @@ app.whenReady().then(() => {
   registerSystemFontsHandlers()
   registerColorPickerHandlers()
   registerBackupHandlers()
+  // v1.4.13-pre14 原生确认框：渲染层不再用 window.confirm，改由主进程弹系统对话框
+  registerNativeDialogHandlers()
   registerMvExportHandlers()
   // v1.4.11-pre3 AI 底座：Provider 配置（safeStorage 加密落盘）+ 代理下发
   registerAiHandlers()

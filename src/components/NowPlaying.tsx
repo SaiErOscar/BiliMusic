@@ -622,7 +622,18 @@ function LyricsPanel({
      * 所以不直接拒绝，也不默默执行——问一句，让用户自己决定。
      */
     if (detectLyricLanguage(lyrics.rawResult.lines) === 'zh') {
-      const ok = window.confirm('这是中文歌曲。\n\n翻译对中文歌通常没有意义，且会消耗 API 额度。\n仍要做 AI 增强吗？')
+      /*
+       * v1.4.13-pre14：改用系统原生对话框（主进程 dialog.showMessageBox），
+       * 不再用 window.confirm 的 Chromium 自绘弹窗。无该 capability（Web / 移动端 /
+       * 老 preload）时降级回 window.confirm，行为与原来完全一致。
+       */
+      const ask = platform.nativeDialog?.confirm
+      const ok = ask
+        ? await ask({
+            message: '这是中文歌曲',
+            detail: '翻译对中文歌通常没有意义，且会消耗 API 额度。仍要做 AI 增强吗？',
+          })
+        : window.confirm('这是中文歌曲。\n\n翻译对中文歌通常没有意义，且会消耗 API 额度。\n仍要做 AI 增强吗？')
       if (!ok) return
     }
     setAiLyricBusy(true)

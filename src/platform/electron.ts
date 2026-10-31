@@ -45,6 +45,11 @@ export const electronPlatform: Platform = {
     const a = api()
     return a?.workbuddy ? a.workbuddy : undefined
   },
+  /** v1.4.13-pre14 原生确认框：缺失（老 preload / 非桌面）时调用方降级 window.confirm */
+  get nativeDialog() {
+    const confirm = api()?.nativeDialog?.confirm
+    return confirm ? { confirm } : undefined
+  },
   /** v1.4.13-pre1 用户画像：外部文件编辑 + 学习记录 */
   get userProfile() {
     const a = api()

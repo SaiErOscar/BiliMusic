@@ -134,6 +134,15 @@ export interface PlatformAiConfig {
   set: (config: AiSettings) => Promise<{ ok: boolean }>
 }
 
+/**
+ * v1.4.13-pre14 原生确认框能力：渲染层把确认请求交给主进程 dialog.showMessageBox，
+ * 弹出系统原生对话框（模态于当前窗口）。手机端/Web 无此能力，
+ * 字段可选，调用方以 `if (platform.nativeDialog)` 探测后降级到 window.confirm。
+ */
+export interface PlatformNativeDialog {
+  confirm: (options: { message: string; detail?: string }) => Promise<boolean>
+}
+
 /** 字体能力：枚举系统字体。字段可选，缺失时调用方回退内置保底列表（非桌面平台） */
 export interface PlatformFonts {
   listSystemFonts?: Window['electronAPI']['listSystemFonts']
@@ -258,8 +267,13 @@ export interface PlatformMediaNotify {
 export interface MediaKeysSetResult {
   /** 全部键位注册成功为 true；关闭时恒 true */
   ok: boolean
-  /** partial：部分键位被占用；occupied：全部失败；not-ready：应用未就绪；error：异常 */
-  reason?: 'not-ready' | 'occupied' | 'partial' | 'error'
+  /**
+   * partial：部分键位被占用；occupied：全部失败；not-ready：应用未就绪；error：异常；
+   * requires-restart（v1.4.13-pre14）：本次启动已固定走另一条收键路径
+   * （HardwareMediaKeyHandling 与 Windows SMTC 互斥，appendSwitch 只在 app ready 前有效），
+   * 此时不注册也不反注册任何键位，需重启应用后生效。
+   */
+  reason?: 'not-ready' | 'occupied' | 'partial' | 'error' | 'requires-restart'
   /** 本次注册失败的键位（partial/occupied 时非空） */
   failedKeys?: string[]
   /** reason=error 时的原始错误文本 */
@@ -301,4 +315,6 @@ export interface Platform {
   userProfile?: PlatformUserProfile
   /** v1.4.13-pre4 WorkBuddy 国内/国际版 */
   workbuddy?: PlatformWorkBuddy
+  /** v1.4.13-pre14 原生确认框（dialog.showMessageBox），非桌面端缺失即降级 window.confirm */
+  nativeDialog?: PlatformNativeDialog
 }

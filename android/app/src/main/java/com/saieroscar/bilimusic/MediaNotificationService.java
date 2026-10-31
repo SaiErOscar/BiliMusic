@@ -62,6 +62,9 @@ public class MediaNotificationService extends Service {
     private String lastTitle = "";
     private String lastArtist = "";
     private boolean lastPlaying = false;
+    // 曲目总时长（毫秒）。锁屏/通知的进度条读 METADATA_KEY_DURATION，
+    // 只给 PlaybackState 的 position 而没有 metadata 时长时，系统无法画出可拖动的进度
+    private long lastDurationMs = 0;
 
     @Nullable
     @Override
@@ -107,11 +110,13 @@ public class MediaNotificationService extends Service {
         lastPlaying = intent.getBooleanExtra("isPlaying", false);
         long positionMs = (long) (intent.getDoubleExtra("positionSec", 0) * 1000);
         long durationMs = (long) (intent.getDoubleExtra("durationSec", 0) * 1000);
+        lastDurationMs = durationMs;
         String newCover = intent.getStringExtra("coverUrl");
 
         MediaMetadataCompat.Builder md = new MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, lastTitle == null ? "" : lastTitle)
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, lastArtist == null ? "" : lastArtist);
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, lastArtist == null ? "" : lastArtist)
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs);
         if (cover != null) md.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, cover);
         session.setMetadata(md.build());
         session.setPlaybackState(new PlaybackStateCompat.Builder()
@@ -149,6 +154,7 @@ public class MediaNotificationService extends Service {
                         MediaMetadataCompat.Builder md = new MediaMetadataCompat.Builder()
                                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, lastTitle)
                                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, lastArtist)
+                                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, lastDurationMs)
                                 .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, cover);
                         if (session != null) session.setMetadata(md.build());
                         try {

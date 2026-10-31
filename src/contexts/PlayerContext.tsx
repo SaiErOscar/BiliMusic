@@ -7,6 +7,11 @@ import { resolveAudioPlayableUrl, releaseAudioPlayableUrl } from '@/services/htt
 import { ensureAudioGraph, disposeAudioGraph } from '@/services/audioGraph'
 import { normalizePlaybackRate } from '@/utils/playbackRate'
 import { applySleepAction, formatSleepRemaining } from '@/utils/sleepTimer'
+import {
+  clearSystemMediaActions,
+  registerSystemMediaActions,
+  type SystemMediaTarget,
+} from '@/utils/systemMedia'
 import { platform } from '@/platform'
 
 function shuffleArray<T>(arr: T[]): T[] {
@@ -52,7 +57,8 @@ function getArtworkType(url: string): string {
 /** v1.4.8-pre5 全局媒体键真实注册态（来自主进程回报，不是持久化的意愿值） */
 export interface MediaKeysStatus {
   ok: boolean
-  reason?: 'not-ready' | 'occupied' | 'partial' | 'error'
+  /** requires-restart：本次启动的收键路径与开关相反，重启后才会生效 */
+  reason?: 'not-ready' | 'occupied' | 'partial' | 'error' | 'requires-restart'
   /** 注册失败的 accelerator 名（partial/occupied 时非空） */
   failedKeys: string[]
 }
@@ -234,6 +240,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const progressRef = useRef(progress)
   const durationRef = useRef(duration)
+  // v1.4.13-pre14 系统媒体控制：系统面板回调只在注册时拿一次闭包，
+  // 必须经 ref 读最新状态，否则按暂停会按到几秒前的 isPlaying、切歌会切到旧队列。
+  const currentTrackRef = useRef(currentTrack)
+  // 播放控制函数也走 ref：它们随依赖（队列/乱序）变化，而 actionHandler 不重注册
+  const systemMediaTargetRef = useRef<SystemMediaTarget | null>(null)
 
   const showToast = useCallback((msg: string) => {
     setToast(msg)
@@ -897,6 +908,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         mediaKeysNoticeRef.current = ''
         return
       }
+      // v1.4.13-pre14：收键路径在启动时就固定了（HardwareMediaKeyHandling 与
+      // SMTC 互斥，appendSwitch 只在 app ready 前有效）。本次启动走的是另一条
+      // 路径，注册不会发生——把开关回退并说清要重启，而不是让它停在「已开启」。
+      if (res.reason === 'requires-restart') {
+        // 这里**不能**把开关回退。主进程已把意图写进镜像文件，下次启动才会切到
+        // hardware-keys 路径；若此刻回退成 false，下次启动又会走 media-session，
+        // 于是「开了→要重启→回退→再开」永远循环，用户再也开不起来。
+        // 保持用户的选择，只如实提示需要重启；状态里 ok=false 已让界面显示未生效。
+        const sig = 'requires-restart'
+        if (mediaKeysNoticeRef.current === sig) return
+        mediaKeysNoticeRef.current = sig
+        showToast('已切换媒体键来源，重启应用后生效')
+        return
+      }
       const sig = `${res.reason ?? 'unknown'}:${failedKeys.join(',')}`
       if (mediaKeysNoticeRef.current === sig) return
       mediaKeysNoticeRef.current = sig
@@ -949,6 +974,75 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (!('mediaSession' in navigator)) return
     navigator.mediaSession.playbackState = currentTrack ? (isPlaying ? 'playing' : 'paused') : 'none'
   }, [currentTrack, isPlaying])
+
+  // v1.4.13-pre14 系统媒体控制：把最新状态与最新控制函数同步进 ref。
+  // actionHandler 只在挂载时注册一次（避免反复重注册导致系统面板短暂丢失控件），
+  // 因此回调里读到的一切都必须来自 ref，而不是注册时的闭包。
+  useEffect(() => {
+    currentTrackRef.current = currentTrack
+  }, [currentTrack])
+
+  // 无依赖：每次渲染后刷新，保证 ref 里永远是本次渲染的 next/prev/pause 版本
+  useEffect(() => {
+    systemMediaTargetRef.current = {
+      play: () => {
+        if (!currentTrackRef.current) return
+        shouldAutoplayRef.current = true
+        audioRef.current?.play().then(() => setIsPlaying(true)).catch(() => {})
+      },
+      pause: () => {
+        shouldAutoplayRef.current = false
+        audioRef.current?.pause()
+        setIsPlaying(false)
+      },
+      next,
+      prev,
+      seek: (seconds, fast) => {
+        const audio = audioRef.current
+        if (!audio) return
+        if (fast && typeof audio.fastSeek === 'function') {
+          // fastSeek 只保证「近似到位」，正是系统拖拽进度条期望的语义
+          audio.fastSeek(seconds)
+        } else {
+          audio.currentTime = seconds
+        }
+        setProgress(seconds)
+      },
+    }
+  })
+
+  /**
+   * v1.4.13-pre14 注册系统媒体面板动作（Windows SMTC / macOS Now Playing）。
+   *
+   * 与全局媒体键的关系：globalShortcut 注册的 MediaPlayPause 等键位在
+   * HardwareMediaKeyHandling 关闭后才由 OS 直接投递给本应用；而 MediaSession 的
+   * actionHandler 走的是 Chromium 的媒体会话通道。两者都能收到硬件媒体键，
+   * 但只有后者能让系统面板（音量浮层）出现 BiliMusic 卡片与可用控件。
+   * 因此这里无条件注册，与 globalMediaKeys 开关无关。
+   */
+  const hasTrack = Boolean(currentTrack)
+
+  useEffect(() => {
+    const mediaSession = 'mediaSession' in navigator ? navigator.mediaSession : undefined
+    if (!mediaSession || typeof mediaSession.setActionHandler !== 'function') return
+
+    // 没有在播曲目时不注册：系统面板上不该出现一个点了没反应的播放按钮。
+    // 清空队列 / 退出时由 cleanup 解绑，避免残留指向已卸载曲目的控件。
+    if (!hasTrack) {
+      clearSystemMediaActions(mediaSession)
+      return
+    }
+
+    const registered = registerSystemMediaActions(
+      mediaSession,
+      () => systemMediaTargetRef.current,
+      () => ({ currentTime: progressRef.current, duration: durationRef.current }),
+    )
+
+    return () => {
+      clearSystemMediaActions(mediaSession, registered)
+    }
+  }, [hasTrack])
 
   useEffect(() => {
     if (!('mediaSession' in navigator) || !currentTrack || duration <= 0) return
