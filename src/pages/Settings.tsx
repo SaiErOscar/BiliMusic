@@ -37,10 +37,10 @@ import { useAppSettings } from '@/hooks/useAppSettings'
 import { selectDownloadFolder } from '@/services/api'
 import { isMvExportSupported } from '@/services/mvExport'
 import { AI_PRESETS, aiUnsupportedReason, getAiConfig, isAiSupported, saveAiConfig, testAiConnection } from '@/services/ai'
-import { clearUsage, formatUsage, loadUsage } from '@/services/aiUsage'
+import { clearUsage, estimateCostYuan, formatUsage, loadUsage } from '@/services/aiUsage'
 import { FALLBACK_MODELS, fetchModelOptions, hostOf, type ModelOption } from '@/services/aiModels'
-import WorkBuddyPanel from '@/components/WorkBuddyPanel'
 import AiConfigSheet, { type AiSourceTab } from '@/components/AiConfigSheet'
+import WorkBuddyPane from '@/components/WorkBuddyPane'
 import { forgetApi, labelFromUrl, rememberApi } from '@/services/aiApiMemory'
 import type { AiSettings } from '@/types'
 import { platform, isNativeApp } from '@/platform'
@@ -141,8 +141,7 @@ export default function Settings() {
   const [modelSource, setModelSource] = useState('')
   /** 是否处于「自定义模型名」模式（下拉里选不到时手填） */
   const [customModel, setCustomModel] = useState(false)
-  /** v1.4.13-pre4 WorkBuddy 接入面板 */
-  const [wbOpen, setWbOpen] = useState(false)
+  /* v1.4.13-pre12：WorkBuddy 面板已并入 AI 配置面板，不再有独立弹窗状态 */
   /** v1.4.13-pre11 AI 配置二级菜单 */
   const [aiSheetOpen, setAiSheetOpen] = useState(false)
   /** 二级菜单当前分页：直连 / WorkBuddy 中国版 / WorkBuddy 国际版 */
@@ -683,6 +682,30 @@ export default function Settings() {
             </div>
           </SettingsGroup>
 
+
+
+          {/* v1.4.13-pre11：歌单迁移与云同步同栏（既有测试钉住这条约束） */}
+          <SettingsGroup title="歌单迁移" icon={<FileDown size={20} />}>
+            <div className="settings-actions settings-actions--stacked">
+              <button type="button" onClick={exportPlaylists}>
+                <FileDown size={14} />
+                导出歌单
+              </button>
+              <button type="button" onClick={() => importInputRef.current?.click()}>
+                <FileUp size={14} />
+                导入歌单
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json,.json"
+                hidden
+                onChange={(e) => importPlaylists(e.target.files?.[0])}
+              />
+              {playlistTransferMessage && <span>{playlistTransferMessage}</span>}
+            </div>
+          </SettingsGroup>
+
           {/*
             v1.4.13-pre11：「下载」从左侧移到右侧。
             AI 连接配置收进二级菜单后左栏比右栏高 15%，超过两栏平衡的 10% 上限；
@@ -746,27 +769,6 @@ export default function Settings() {
             )}
           </SettingsGroup>
 
-          {/* v1.4.13-pre11：歌单迁移与云同步同栏（既有测试钉住这条约束） */}
-          <SettingsGroup title="歌单迁移" icon={<FileDown size={20} />}>
-            <div className="settings-actions settings-actions--stacked">
-              <button type="button" onClick={exportPlaylists}>
-                <FileDown size={14} />
-                导出歌单
-              </button>
-              <button type="button" onClick={() => importInputRef.current?.click()}>
-                <FileUp size={14} />
-                导入歌单
-              </button>
-              <input
-                ref={importInputRef}
-                type="file"
-                accept="application/json,.json"
-                hidden
-                onChange={(e) => importPlaylists(e.target.files?.[0])}
-              />
-              {playlistTransferMessage && <span>{playlistTransferMessage}</span>}
-            </div>
-          </SettingsGroup>
 
 
         </div>
@@ -778,6 +780,14 @@ export default function Settings() {
         <div className="settings-column">
 
 
+
+
+
+          {/*
+            v1.4.13-pre12：歌单云同步与歌单迁移一起移到右侧。
+            「代理」「保存与测试」移入 AI 配置面板后右栏变矮 13.5%，需要补回；
+            两者同属「歌单搬运」，既有测试也钉住了它们必须同栏。
+          */}
 
 
 
@@ -857,37 +867,6 @@ export default function Settings() {
                   )}
                 </div>
               </SettingsRow>
-              <SettingsRow label="代理" stacked description="默认跟随系统代理；选手动后独占使用下方地址">
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
-                  <select
-                    className="settings-select"
-                    value={aiConfig.proxyMode}
-                    onChange={(e) => patchAiConfig({ proxyMode: e.target.value as AiSettings['proxyMode'] })}
-                  >
-                    <option value="system">跟随系统</option>
-                    <option value="manual">手动指定</option>
-                  </select>
-                  {aiConfig.proxyMode === 'manual' && (
-                    <input
-                      className="settings-input"
-                      type="text"
-                      placeholder="http://127.0.0.1:7890"
-                      value={aiConfig.proxyUrl}
-                      onChange={(e) => patchAiConfig({ proxyUrl: e.target.value })}
-                    />
-                  )}
-                </div>
-              </SettingsRow>
-              {/* v1.4.13-pre1 用量统计并入本行（板块有 7 行上限），description 同时承载状态与用量 */}
-              <SettingsRow label="保存与测试" stacked description={aiMessage || usageText || '先保存，再测试地址、密钥、模型与代理是否都通'}>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <ActionButton onClick={() => void persistAiConfig(aiConfig)}>保存</ActionButton>
-                  <ActionButton onClick={() => void runAiTest()} disabled={aiTesting}>
-                    {aiTesting ? '测试中…' : '测试连接'}
-                  </ActionButton>
-                  <ActionButton onClick={() => { clearUsage(); setUsageText(formatUsage(loadUsage())) }}>清零用量</ActionButton>
-                </div>
-              </SettingsRow>
             </SettingsGroup>
           )}
 
@@ -916,6 +895,33 @@ export default function Settings() {
                     return '缓存命中 ' + u.cacheHitTokens.toLocaleString()
                       + ' · 未命中 ' + u.cacheMissTokens.toLocaleString()
                       + ' · 输出 ' + u.outputTokens.toLocaleString()
+                  })()}
+                </span>
+              </SettingsRow>
+              {/* v1.4.13-pre12（用户第 4 项）：金额与积分单独成行，比挤在一句话里可读 */}
+              <SettingsRow
+                label="估算金额"
+                stacked
+                description="按内置单价估算（元），非账单；官方调价后需更新内置表"
+              >
+                <span style={{ fontSize: 12, opacity: 0.8 }}>
+                  {(() => {
+                    const u = loadUsage()
+                    if (!u.calls) return '暂无数据'
+                    const cost = estimateCostYuan(u)
+                    return cost === null ? '不适用' : '约 ¥' + cost.toFixed(2)
+                  })()}
+                </span>
+              </SettingsRow>
+              <SettingsRow
+                label="WorkBuddy 积分"
+                stacked
+                description="由上游回传的 usage.credit 累加；未提供时不计"
+              >
+                <span style={{ fontSize: 12, opacity: 0.8 }}>
+                  {(() => {
+                    const u = loadUsage()
+                    return u.wbCredits > 0 ? u.wbCredits.toFixed(2) : '本月未消耗'
                   })()}
                 </span>
               </SettingsRow>
@@ -1263,59 +1269,75 @@ export default function Settings() {
                   </div>
                 )}
               </div>
-            </>
-          ) : (
-            <>
+
+              {/* v1.4.13-pre12（用户第 3 项）：「代理」从设置页移入面板 */}
               <div className="ai-sheet__field">
+                <span className="ai-sheet__label">代理</span>
+                <div className="ai-sheet__row">
+                  <select
+                    className="settings-select"
+                    value={aiConfig.proxyMode}
+                    onChange={(e) => patchAiConfig({ proxyMode: e.target.value as AiSettings['proxyMode'] })}
+                  >
+                    <option value="system">跟随系统</option>
+                    <option value="manual">手动指定</option>
+                  </select>
+                  {aiConfig.proxyMode === 'manual' && (
+                    <input
+                      className="settings-input"
+                      type="text"
+                      placeholder="http://127.0.0.1:7890"
+                      value={aiConfig.proxyUrl}
+                      onChange={(e) => patchAiConfig({ proxyUrl: e.target.value })}
+                    />
+                  )}
+                </div>
+                <span className="ai-sheet__hint">默认跟随系统代理；选手动后独占使用该地址</span>
+              </div>
+
+              {/* v1.4.13-pre12（用户第 3 项）：「保存与测试」从设置页移入面板 */}
+              <div className="ai-sheet__field">
+                <span className="ai-sheet__label">保存与测试</span>
+                <div className="ai-sheet__row" style={{ flexWrap: 'wrap' }}>
+                  <ActionButton onClick={() => void persistAiConfig(aiConfig)}>保存</ActionButton>
+                  <ActionButton onClick={() => void runAiTest()} disabled={aiTesting}>
+                    {aiTesting ? '测试中…' : '测试连接'}
+                  </ActionButton>
+                  <ActionButton onClick={() => { clearUsage(); setUsageText(formatUsage(loadUsage())) }}>清零用量</ActionButton>
+                </div>
                 <span className="ai-sheet__hint">
-                  当前分页：{aiTab === 'wb-global' ? 'WorkBuddy 国际版（workbuddy.ai）' : 'WorkBuddy 中国版（codebuddy.cn）'}
-                  。登录与账号池在下方面板里维护；切到 WorkBuddy 不会清除你已保存的直连 API。
+                  {aiMessage || usageText || '先保存，再测试地址、密钥、模型与代理是否都通'}
                 </span>
               </div>
-              <div className="ai-sheet__row">
-                <ActionButton
-                  onClick={() => {
-                    // 切来源前先把直连配置记进记忆
-                    if (aiConfig.baseUrl && aiConfig.source !== 'workbuddy') {
-                      patchAiConfig({
-                        savedApis: rememberApi(aiConfig.savedApis || [], {
-                          label: labelFromUrl(aiConfig.baseUrl),
-                          baseUrl: aiConfig.baseUrl,
-                          model: aiConfig.model,
-                          apiKey: aiConfig.apiKey,
-                        }),
-                      })
-                    }
-                    patchAiConfig({ source: 'workbuddy', wbRegion: aiTab === 'wb-global' ? 'global' : 'cn' })
-                    setWbOpen(true)
-                  }}
-                >
-                  打开 WorkBuddy 面板
-                </ActionButton>
-                {aiConfig.source === 'workbuddy' && (
-                  <span style={{ fontSize: 12, opacity: 0.7 }}>
-                    当前：{aiConfig.wbRegion === 'global' ? '国际版' : '中国版'} · {aiConfig.wbModel || '未选模型'}
-                  </span>
-                )}
-              </div>
             </>
+          ) : (
+            /*
+             * v1.4.13-pre12（用户第 2 项）：WorkBuddy 面板完全并入这里，不再有独立弹窗。
+             * 区域由分页决定——国内版分页只配国内、国际版分页只配国际，故取消「区域」下拉。
+             * 切到 WorkBuddy 前先把直连配置记进记忆（不清除原 API）。
+             */
+            <WorkBuddyPane
+              region={aiTab === 'wb-global' ? 'global' : 'cn'}
+              initialModel={aiConfig.wbRegion === (aiTab === 'wb-global' ? 'global' : 'cn') ? aiConfig.wbModel : ''}
+              onPick={(cred, model) => {
+                if (aiConfig.baseUrl && aiConfig.source !== 'workbuddy') {
+                  patchAiConfig({
+                    savedApis: rememberApi(aiConfig.savedApis || [], {
+                      label: labelFromUrl(aiConfig.baseUrl),
+                      baseUrl: aiConfig.baseUrl,
+                      model: aiConfig.model,
+                      apiKey: aiConfig.apiKey,
+                    }),
+                  })
+                }
+                patchAiConfig({ source: 'workbuddy', wbRegion: cred.region, wbModel: model })
+                setAiMessage('已切换到 WorkBuddy 模型：' + model)
+              }}
+            />
           )}
         </AiConfigSheet>
       )}
 
-      {wbOpen && (
-        <WorkBuddyPanel
-          onClose={() => setWbOpen(false)}
-          initialModel={aiConfig.wbModel}
-          onPick={(cred, model) => {
-            // 选定模型：切来源为 workbuddy，记录区域与模型 id。
-            // v1.4.13-pre11：不再清空 apiKey——它已进记忆，随时可切回。
-            patchAiConfig({ source: 'workbuddy', wbRegion: cred.region, wbModel: model })
-            setWbOpen(false)
-            setAiMessage('已切换到 WorkBuddy 模型：' + model)
-          }}
-        />
-      )}
 
 </MusicPageShell>
     {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}

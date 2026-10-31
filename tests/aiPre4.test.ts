@@ -286,7 +286,8 @@ describe('配置持久化不再丢字段（pre8 真根因）', () => {
 
 describe('WorkBuddy 预设的显示与可用性（pre8）', () => {
   const settings = readFileSync(path.resolve(__dirname, '../src/pages/Settings.tsx'), 'utf8')
-  const panel = readFileSync(path.resolve(__dirname, '../src/components/WorkBuddyPanel.tsx'), 'utf8')
+  // v1.4.13-pre12：WorkBuddy 面板已并入 AI 配置面板，改读新组件
+  const panel = readFileSync(path.resolve(__dirname, '../src/components/WorkBuddyPane.tsx'), 'utf8')
 
   // v1.4.13-pre11：WorkBuddy 的模型名在「AI 连接」行的描述里回显
   it('WorkBuddy 时显示自己的 wbModel', () => {
@@ -307,9 +308,22 @@ describe('WorkBuddy 预设的显示与可用性（pre8）', () => {
   })
 
   // 用户第 3 项：绑定账号后要能持久显示 —— 打开面板就拉模型并回显
-  it('打开面板时恢复已存凭据并回显上次模型', () => {
+  it('打开分页时恢复已存凭据并回显上次模型', () => {
     expect(panel).toContain('initialModel')
-    expect(panel).toContain('cap.models(s.region, s.accessToken)')
+    // v1.4.13-pre12：取消区域切换，改用当前分页所属区域的凭据
+    expect(panel).toContain('cap.models(cred.region, cred.accessToken)')
+  })
+
+  // v1.4.13-pre12（用户第 2 项）：区域由分页决定，面板内不再有「区域」下拉
+  it('不再提供区域下拉', () => {
+    expect(panel).not.toContain('>区域<')
+    expect(panel).not.toContain('国内版（codebuddy.cn）')
+  })
+
+  // 国内分页不显示国际凭据，反之亦然
+  it('按分页过滤本机凭据与账号池', () => {
+    expect(panel).toContain('c.region === region')
+    expect(panel).toContain('a.region === region')
   })
 
   // 用户第 4 项：推荐方式要持久 —— 去掉防抖，改完立即落盘
