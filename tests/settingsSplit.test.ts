@@ -29,11 +29,19 @@ function columns(): { left: string; right: string } {
   const second = settingsSrc.indexOf(marker, first + 1)
   expect(first).toBeGreaterThan(-1)
   expect(second).toBeGreaterThan(first)
-  // 右栏到「账号」板块（settings-span）为止
-  const spanStart = settingsSrc.indexOf('className="settings-span"', second)
+  /*
+   * v1.4.13-pre13：右栏要一直取到文件末尾，**不能**截到 settings-span 之前。
+   *
+   * 原实现把「账号」「关于」两块（settings-span，横跨整行）从右栏里切掉了，
+   * 于是估算只算了它们上面那部分。实际渲染时这两块排在右栏下方，
+   * 会让右栏明显更高——用户看到的「右栏比左栏高」就是这么来的，
+   * 而测试因为漏算反而报「已配平」。
+   *
+   * 通栏板块在视觉上归到右栏末尾（左栏先结束），所以计入右栏才符合真实观感。
+   */
   return {
     left: settingsSrc.slice(first, second),
-    right: settingsSrc.slice(second, spanStart > second ? spanStart : settingsSrc.length),
+    right: settingsSrc.slice(second),
   }
 }
 

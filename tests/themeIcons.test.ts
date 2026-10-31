@@ -6,6 +6,42 @@ import path from 'path'
 // v1.4.13-pre3：主题化图标。
 // 真实切换效果需真机看，这里守住「图标集齐全 + 主进程按主题取图 + 找不到时回落」。
 
+// v1.4.13-pre13：守住「引用的 CSS 变量必须真的定义过」。
+//
+// 这是 pre12/pre13 两次「浅色下面板文字看不见」的共同根因：
+// 代码里写 var(--color-text) / var(--color-surface)，而项目里根本不存在这两个变量
+// （实际是 --color-foreground / --color-card），声明静默失效后回退到继承值或硬编码色，
+// 于是深色正常、浅色白字白底，且没有任何报错。
+describe('CSS 变量引用必须已定义', () => {
+  const css = readFileSync(path.resolve(__dirname, '../src/styles/index.css'), 'utf8')
+
+  /** 收集所有「定义」的变量名（--x: ...） */
+  const defined = new Set(
+    [...css.matchAll(/(--[a-z0-9-]+)\s*:/gi)].map((m) => m[1]),
+  )
+
+  /** 收集所有「引用」的变量名（var(--x)） */
+  const referenced = new Set(
+    [...css.matchAll(/var\((--[a-z0-9-]+)/gi)].map((m) => m[1]),
+  )
+
+  it('没有引用未定义的变量', () => {
+    const missing = [...referenced].filter((name) => !defined.has(name))
+    expect(missing, '以下变量被引用但从未定义：' + missing.join(', ')).toEqual([])
+  })
+
+  /*
+   * 这两个名字曾让浅色主题出过两次问题。现在已在 :root 里显式定义
+   * （指向 --color-foreground / --color-card），所以断言改为
+   * 「必须有定义」而不是「不许出现」——名字本身不是错，未定义才是。
+   */
+  it('曾出问题的两个变量已有定义', () => {
+    expect(defined.has('--color-text')).toBe(true)
+    expect(defined.has('--color-surface')).toBe(true)
+  })
+})
+
+
 const ICON_DIR = path.resolve(__dirname, '../electron/icons')
 const THEMES = ['default', 'ocean', 'forest', 'twilight', 'graphite']
 

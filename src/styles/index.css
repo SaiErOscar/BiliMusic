@@ -4058,7 +4058,9 @@ body {
  * 这里在设置行作用域内改用主题前景色与实心浅底。
  */
 .settings-row__control .am-action {
-  color: var(--color-text);
+  /* v1.4.13-pre13：原写 var(--color-text)，但该变量在项目里不存在，
+     color 声明静默失效，于是回退到 .am-action 的 #fff——浅色下白字白底 */
+  color: var(--color-foreground);
   background: rgba(127, 127, 127, 0.12);
   border: 1px solid rgba(127, 127, 127, 0.22);
   backdrop-filter: none;
@@ -5211,7 +5213,8 @@ body {
   border-radius: 999px;
   border: 1px solid rgba(127, 127, 127, 0.22);
   background: rgba(127, 127, 127, 0.1);
-  color: var(--color-text);
+  /* v1.4.13-pre13：--color-text 不存在，改真实 token */
+  color: var(--color-foreground);
   font-size: 13px;
   cursor: pointer;
 }
@@ -5249,7 +5252,8 @@ body {
   border: 0;
   border-radius: 14px;
   background: rgba(127, 127, 127, 0.08);
-  color: var(--color-text);
+  /* v1.4.13-pre13：--color-text 不存在，改真实 token */
+  color: var(--color-foreground);
   cursor: pointer;
   text-align: left;
 }
@@ -5698,5 +5702,28 @@ body {
 [data-theme='light'] .ai-sheet__saved,
 [data-theme='light'] .wb-account {
   border-color: rgba(0, 0, 0, 0.1);
+}
+
+
+
+/* ===== v1.4.13-pre13 补齐被引用但从未定义的 CSS 变量 ===== */
+
+/*
+ * 这几个变量此前被引用却没定义（或只靠 var() 的第二参数兜底）。
+ * 未定义时声明会静默失效、回退到继承值，浅色主题下就会出现
+ * 「白字白底」这类无法从代码上看出来的问题。这里显式补上。
+ */
+:root {
+  --color-text: var(--color-foreground);
+  --color-text-primary: var(--color-foreground);
+  --color-surface: var(--color-card);
+  --color-surface-muted: rgba(20, 20, 24, 0.72);
+  --text-secondary: var(--color-muted-foreground);
+  --color-success: #34c759;
+  --comment-cover: none;
+}
+
+[data-theme='light'] {
+  --color-surface-muted: rgba(245, 245, 247, 0.86);
 }
 

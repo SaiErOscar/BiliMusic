@@ -898,35 +898,32 @@ export default function Settings() {
                   })()}
                 </span>
               </SettingsRow>
-              {/* v1.4.13-pre12（用户第 4 项）：金额与积分单独成行，比挤在一句话里可读 */}
+              {/*
+                v1.4.13-pre13（用户要求）：金额、积分、刷新合并成一行。
+                拆成三行时右栏比左栏高 14.6%（脚本已修正口径后实测），
+                合并后省下约 220px。
+              */}
               <SettingsRow
-                label="估算金额"
-                stacked
-                description="按内置单价估算（元），非账单；官方调价后需更新内置表"
+                label="费用与积分"
+                description="金额按内置单价估算（非账单）；积分由上游回传，未提供时不计"
               >
-                <span style={{ fontSize: 12, opacity: 0.8 }}>
-                  {(() => {
-                    const u = loadUsage()
-                    if (!u.calls) return '暂无数据'
-                    const cost = estimateCostYuan(u)
-                    return cost === null ? '不适用' : '约 ¥' + cost.toFixed(2)
-                  })()}
-                </span>
-              </SettingsRow>
-              <SettingsRow
-                label="WorkBuddy 积分"
-                stacked
-                description="由上游回传的 usage.credit 累加；未提供时不计"
-              >
-                <span style={{ fontSize: 12, opacity: 0.8 }}>
-                  {(() => {
-                    const u = loadUsage()
-                    return u.wbCredits > 0 ? u.wbCredits.toFixed(2) : '本月未消耗'
-                  })()}
-                </span>
-              </SettingsRow>
-              <SettingsRow label="刷新" description="重新读取本地统计">
-                <ActionButton onClick={() => setUsageText(formatUsage(loadUsage()))}>刷新</ActionButton>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, opacity: 0.85 }}>
+                    {(() => {
+                      const u = loadUsage()
+                      if (!u.calls) return '金额：暂无数据'
+                      const cost = estimateCostYuan(u)
+                      return '金额：' + (cost === null ? '不适用' : '约 ¥' + cost.toFixed(2))
+                    })()}
+                  </span>
+                  <span style={{ fontSize: 12, opacity: 0.85 }}>
+                    {(() => {
+                      const u = loadUsage()
+                      return '积分：' + (u.wbCredits > 0 ? u.wbCredits.toFixed(2) : '本月未消耗')
+                    })()}
+                  </span>
+                  <ActionButton onClick={() => setUsageText(formatUsage(loadUsage()))}>刷新</ActionButton>
+                </div>
               </SettingsRow>
             </SettingsGroup>
           )}
