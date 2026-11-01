@@ -45,9 +45,61 @@ function columns(): { left: string; right: string } {
   }
 }
 
-/** 统计某段源码里的 SettingsRow 数量 */
+/**
+ * 统计某段源码里的 SettingsRow 数量。
+ *
+ * v1.4.14-pre4：先剥掉 JSX 注释再数。注释里解释口径时会出现字面量 <SettingsRow>
+ * （「测试只数静态 <SettingsRow>」这类），不剥掉就会被当成真实的行。
+ */
 function countRows(fragment: string): number {
-  return (fragment.match(/<SettingsRow\b/g) || []).length
+  const code = fragment.replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+  return (code.match(/<SettingsRow\b/g) || []).length
+}
+
+/**
+ * 通过 render-prop 往分组里注入行的子面板。
+ *
+ * 键是设置页里的 JSX 标签名，值是面板源码路径。
+ * 新增这类面板时补一条，下面的行数口径才会把它算进去。
+ */
+const INJECTING_PANELS: Record<string, string> = {
+  AiPlaylistPanel: '../src/components/AiPlaylistPanel.tsx',
+  AiPortraitPanel: '../src/components/AiPortraitPanel.tsx',
+}
+
+/**
+ * 读一个子面板注入的行数：常驻行 + 条件行。
+ *
+ * 面板不写字面量 <SettingsRow>，而是调用设置页传进去的 Row({...})。
+ * 其中无条件的 Row({...}) 是常驻行；写在三元里的「? Row({...})」
+ * 是预览/结果行——生成之后才出现，但用户看得到，必须计入最坏行数。
+ * 按这个特征判定而不是按面板名硬编码，面板以后加减行数时这里会跟着变。
+ */
+function panelInjectedRows(panelPath: string): { always: number; conditional: number } {
+  const src = readFileSync(path.resolve(__dirname, panelPath), 'utf8').replace(/\r\n/g, '\n')
+  const total = (src.match(/\bRow\(\{/g) || []).length
+  const conditional = (src.match(/[?:]\s*Row\(\{/g) || []).length
+  return { always: total - conditional, conditional }
+}
+
+/**
+ * v1.4.14-pre4：统计一段分组源码在**真实渲染**下的行数。
+ *
+ * 旧口径只数源码里的 <SettingsRow>，漏掉了子面板通过 render-prop 注入的行。
+ * 于是「AI 助手」静态 4 行看着安全，真实渲染却是默认 7 行、
+ * 生成歌单/画像预览后 9 行——测试一直绿着，超限只能靠人工数。
+ *
+ * 现在把被引用到的子面板一并计入，返回**最坏情况**（常驻行 + 条件行全展开），
+ * 因为「生成预览后超限」正是这次要根治的观感问题。
+ */
+function countRealRows(fragment: string): number {
+  let rows = countRows(fragment)
+  for (const [tag, panelPath] of Object.entries(INJECTING_PANELS)) {
+    if (!fragment.includes('<' + tag)) continue
+    const injected = panelInjectedRows(panelPath)
+    rows += injected.always + injected.conditional
+  }
+  return rows
 }
 
 /**
@@ -147,13 +199,45 @@ describe('设置页「播放」板块拆分（v1.4.9-pre4）', () => {
     expect(between).not.toContain('<SettingsGroup')
   })
 
-  it('没有板块超过 7 行（避免再次出现单块过长）', () => {
+  /*
+   * v1.4.14-pre4：口径从「数静态 <SettingsRow>」改成「数真实渲染行」。
+   *
+   * 旧口径漏掉子面板注入的行，于是「AI 助手」静态 4 行 / 真实 7 行（预览后 9 行）
+   * 一直是绿的。现在子面板的行也计入，且按最坏情况（预览展开）算。
+   */
+  it('没有板块超过 7 行（含子面板注入的行，避免再次出现单块过长）', () => {
     const blocks = [...settingsSrc.matchAll(/<SettingsGroup title="([^"]+)"[\s\S]*?<\/SettingsGroup>/g)]
     expect(blocks.length).toBeGreaterThan(0)
     for (const m of blocks) {
-      const rows = countRows(m[0])
-      expect(rows, `板块「${m[1]}」有 ${rows} 行，超过上限`).toBeLessThanOrEqual(7)
+      const rows = countRealRows(m[0])
+      expect(rows, '板块「' + m[1] + '」真实渲染有 ' + rows + ' 行，超过上限').toBeLessThanOrEqual(7)
     }
+  })
+
+  it('「AI 助手」板块真实渲染留有余量（不超过 5 行）', () => {
+    /*
+     * 「AI 助手」有两份互斥渲染：!isAiSupported() 时的「不可用」降级分支，
+     * 和正常分支。indexOf 命中的是第一份（降级），必须往后找真正的那个。
+     * 这里剥掉降级分支再定位，与 estimateHeight 的口径保持一致。
+     */
+    const withoutFallback = settingsSrc.replace(
+      /\{!isAiSupported\(\) \? \([\s\S]*?\) : \(/,
+      '(',
+    )
+    const start = withoutFallback.indexOf('<SettingsGroup title="AI 助手"')
+    expect(start).toBeGreaterThan(-1)
+    const end = withoutFallback.indexOf('</SettingsGroup>', start)
+    const block = withoutFallback.slice(start, end)
+    /*
+     * 只断言「不超 5」而不是「正好 3」：歌单预览与画像结果各会多出一行，
+     * 最坏 5 行。留 2 行缓冲是刻意的——刚好卡在 7 行等于把上限变成靶子，
+     * 下次谁再加一行就又要重排。
+     */
+    const rows = countRealRows(block)
+    expect(rows, '「AI 助手」真实渲染 ' + rows + ' 行').toBeLessThanOrEqual(5)
+    // 生成入口必须还在组内（它们是功能入口，不是配置）
+    expect(block).toContain('<AiPlaylistPanel')
+    expect(block).toContain('<AiPortraitPanel')
   })
 
   it('左右两栏估算高度差不超过 10%（按真实行高，不按行数）', () => {

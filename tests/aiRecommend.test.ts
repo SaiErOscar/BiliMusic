@@ -63,8 +63,12 @@ describe('推荐方式与隐私约束', () => {
     expect(src).toMatch(/recommendMode: 'click'/)
   })
 
+  /*
+   * v1.4.14-pre4：推荐方式下拉从设置页搬进了 AI 设置抽屉（AiSettingsSheet）。
+   * 断言目标跟着改到新文件——三档取值必须仍然齐全，否则用户选不到「不推荐」。
+   */
   it('三种模式都存在', () => {
-    const src = readFileSync(path.resolve(__dirname, '../src/pages/Settings.tsx'), 'utf8')
+    const src = readFileSync(path.resolve(__dirname, '../src/components/AiSettingsSheet.tsx'), 'utf8')
     for (const m of ['click', 'auto', 'off']) expect(src).toContain('value="' + m + '"')
   })
 

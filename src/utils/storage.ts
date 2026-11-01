@@ -60,6 +60,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   // v1.4.11-pre2 封面取景默认 cover：与 v1.4.10/pre1 已发布行为一致，
   // 升级用户观感零变化；contain / fill 作为显式可选项。
   coverFit: 'cover',
+  // v1.4.14-pre4 曲目标题清洗默认「程序清洗」：免费且确定性，
+  // AI 清洗要消耗额度，必须由用户显式选择。
+  titleCleanMode: 'rule',
 }
 
 function notifySettingsChanged() {

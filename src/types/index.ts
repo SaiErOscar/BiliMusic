@@ -133,6 +133,14 @@ export interface AppSettings {
   //   fill    = 非等比拉伸填满方框（画面会变形）
   // contain 时容器改为跟随封面真实比例（见 useCoverAspect / COVER_ASPECT_LIMIT）
   coverFit: CoverFitMode
+  /**
+   * v1.4.14-pre4 曲目标题清洗模式（喂给 AI 之前先把 B 站标题的噪声去掉）：
+   * - off  ：不清洗，原样使用
+   * - rule ：程序规则清洗（默认，零成本、确定性）
+   * - ai   ：单独一次 AI 请求清洗（更准，但消耗 API 额度）
+   * 老用户没有该字段时由 loadAppSettings 的默认值合并兜底成 rule。
+   */
+  titleCleanMode: TitleCleanMode
 }
 
 /**
@@ -140,6 +148,13 @@ export interface AppSettings {
  * 命名对齐 CSS object-fit 的三个取值，便于直接把模式名映射成样式，不必再维护一张对照表。
  */
 export type CoverFitMode = 'cover' | 'contain' | 'fill'
+
+/**
+ * v1.4.14-pre4 曲目标题清洗模式。
+ * 与 src/services/titleClean.ts 的 TitleCleanMode 是同一套取值；
+ * 这里单独声明是为了让 types 不反向依赖 services。
+ */
+export type TitleCleanMode = 'off' | 'rule' | 'ai'
 
 /**
  * v1.4.11-pre3 AI 底座：OpenAI 兼容 Provider 配置。

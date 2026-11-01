@@ -32,6 +32,7 @@ import FontSelect from '@/components/FontSelect'
 import ColorField from '@/components/ColorField'
 import AiPlaylistPanel from '@/components/AiPlaylistPanel'
 import AiPortraitPanel from '@/components/AiPortraitPanel'
+import AiSettingsSheet, { type AiSettingsTab } from '@/components/AiSettingsSheet'
 import { useTheme } from '@/hooks/useTheme'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { selectDownloadFolder } from '@/services/api'
@@ -47,7 +48,7 @@ import { platform, isNativeApp } from '@/platform'
 import { usePlayer, useSleepRemainingText, formatMediaKeyName } from '@/contexts/PlayerContext'
 import { SLEEP_PRESET_MINUTES } from '@/utils/sleepTimer'
 import { useAuth } from '@/contexts/AuthContext'
-import { createPlaylistsExport, importPlaylistsFromText } from '@/utils/storage'
+import { clearPlayStats, createPlaylistsExport, importPlaylistsFromText } from '@/utils/storage'
 import { runSync, forceUpload, forceDownload, getLastSync, SYNC_STATE_EVENT, WEBDAV_CONFIGURED_EVENT, type SyncResult } from '@/utils/sync'
 import { clearNonCriticalCache } from '@/utils/safeStorage'
 import type { AppSettings, DownloadFormat, SidebarState, ThemeMode } from '@/types'
@@ -146,6 +147,20 @@ export default function Settings() {
   const [aiSheetOpen, setAiSheetOpen] = useState(false)
   /** 二级菜单当前分页：直连 / WorkBuddy 中国版 / WorkBuddy 国际版 */
   const [aiTab, setAiTab] = useState<AiSourceTab>('direct')
+  /**
+   * v1.4.14-pre4「AI 助手」设置抽屉。
+   *
+   * 与上面 aiSheetOpen（连接来源三页）是两个抽屉：这里放配置分区
+   * （推荐 / 画像 / 清洗 / 连接），连接分区里再进上面那个。
+   * 拆成两层而不是硬塞进一个抽屉，是因为连接面板本身已有三页，
+   * 再叠四页会变成七页一排，比原来的行数问题更难用。
+   */
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false)
+  const [aiSettingsTab, setAiSettingsTab] = useState<AiSettingsTab>('recommend')
+  /** 清除播放统计后自增，通知听歌画像面板重置已生成的结果 */
+  const [playStatsResetSignal, setPlayStatsResetSignal] = useState(0)
+  /** 抽屉里「清除播放统计」的反馈文案 */
+  const [playStatsMessage, setPlayStatsMessage] = useState('')
   /**
    * 刷新模型列表。
    *
@@ -294,6 +309,32 @@ export default function Settings() {
       setAiTesting(false)
     }
   }
+
+  /*
+   * v1.4.14-pre4 抽屉入口行的摘要。
+   *
+   * 配置收进抽屉后，分组里这一行是用户唯一能看见 AI 配置状态的地方，
+   * 所以它要同时回答「当前用什么模型」和「推荐怎么触发」两个高频问题，
+   * 而不是只写一句「打开设置」。
+   */
+  const aiConnectSummary = aiConfig.source === 'workbuddy'
+    ? '当前：WorkBuddy ' + (aiConfig.wbRegion === 'global' ? '国际版' : '中国版')
+      + ' · ' + (aiConfig.wbModel || '未选模型')
+    : aiConfig.baseUrl
+      ? '当前：' + labelFromUrl(aiConfig.baseUrl) + ' · ' + (aiConfig.model || '未选模型')
+      : '尚未配置；进「连接」分区选择服务'
+  const recommendModeLabel = aiConfig.recommendMode === 'auto'
+    ? '自动推荐'
+    : aiConfig.recommendMode === 'off' ? '不推荐' : '点击后推荐'
+  const aiSettingsSummary = aiConnectSummary + ' · ' + recommendModeLabel
+
+  /** 清除播放统计：抽屉里触发，分组里的画像结果也要一并清掉 */
+  const clearPlayStatsAndReset = () => {
+    clearPlayStats()
+    setPlayStatsResetSignal((n) => n + 1)
+    setPlayStatsMessage('已清除播放统计')
+  }
+
   const [updateStatus, setUpdateStatus] = useState('')
   const [updateAction, setUpdateAction] = useState<'restart' | 'reload' | null>(null)
   const [cacheMsg, setCacheMsg] = useState('')
@@ -811,68 +852,24 @@ export default function Settings() {
             </SettingsGroup>
           ) : (
             <SettingsGroup title="AI 助手" icon={<Sparkles size={20} />}>
-              {/* v1.4.12-pre2 推荐触发方式：默认「点击后推荐」，非点击不消耗 API */}
-              <SettingsRow label="推荐方式" description="发现页 AI 推荐板块的触发方式；点击方式不点不消耗 API">
-                <select
-                  className="settings-select"
-                  value={aiConfig.recommendMode}
-                  onChange={(e) => patchAiConfig({ recommendMode: e.target.value as AiSettings['recommendMode'] })}
-                >
-                  <option value="click">点击后推荐（省费用）</option>
-                  <option value="auto">自动推荐（打开即生成）</option>
-                  <option value="off">不推荐（不显示板块）</option>
-                </select>
-              </SettingsRow>
-
-              {/* 用户画像与「听歌画像」不同：后者由播放统计自动生成，这里由用户自己写。
-                  隐私口径写进 description，不单占一行（板块有 7 行上限）。 */}
-              <SettingsRow
-                label="画像与人设"
-                stacked
-                description={profileMessage || '画像：点「编辑」用系统编辑器改本地文件（只存本地，仅随 AI 请求发给你配置的服务商）。人设：你希望 AI 用什么口吻说话，只影响推荐措辞'}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <ActionButton onClick={() => void openProfile()}>编辑画像</ActionButton>
-                    <ActionButton onClick={() => void revealProfile()}>定位文件</ActionButton>
-                    <ActionButton onClick={() => void applyLearned()}>应用学习结果</ActionButton>
-                    <ActionButton onClick={() => void clearLearned()}>清除学习记录</ActionButton>
-                  </div>
-                  <input
-                    className="settings-input"
-                    type="text"
-                    placeholder="人设：例：像个话不多的老朋友，别用感叹号"
-                    value={aiConfig.persona}
-                    onChange={(e) => patchAiConfig({ persona: e.target.value })}
-                  />
-                </div>
-              </SettingsRow>
-              {/* v1.4.11-pre5 智能歌单放在组首：配置行较长，放组尾会落到首屏之外 */}
-              <AiPlaylistPanel config={aiConfig} Row={SettingsRow} />
-              {/* v1.4.12-pre1 听歌画像 */}
-              <AiPortraitPanel config={aiConfig} Row={SettingsRow} />
               {/*
-                v1.4.13-pre11：AI 连接配置整体收进二级菜单。
-                用户要求「AI 功能配置较多，可均放入二级菜单，顶部提供三个分页」。
-                这一行只显示当前生效来源，点「连接设置」打开二级菜单。
+                v1.4.14-pre4「AI 设置抽屉化」。
+
+                旧版这里静态 4 行（推荐方式 / 标题清洗 / 画像与人设 / AI 连接），
+                看着没超限；但两个子面板通过 Row(...) 注入的行不进静态标签，
+                默认态真实渲染 7 行（正好顶上限），生成歌单/画像预览后到 9 行。
+                测试只数静态 <SettingsRow>，所以一直是绿的——检测口径与真实观感脱节。
+
+                现在：配置全部收进 AiSettingsSheet（推荐 / 画像 / 清洗 / 连接 四个分区），
+                分组只留三个高频入口——
+                  智能歌单（生成）、听歌画像（生成）、AI 设置（抽屉）。
+                生成入口刻意留在组内：它们是功能入口不是配置，藏进抽屉等于把主功能埋掉。
+                行数：默认 3 行，歌单预览 / 画像结果各 +1，最坏 5 行（上限 7，留 2 行缓冲）。
               */}
-              <SettingsRow
-                label="AI 连接"
-                description={
-                  aiConfig.source === 'workbuddy'
-                    ? '当前：WorkBuddy ' + (aiConfig.wbRegion === 'global' ? '国际版' : '中国版')
-                      + ' · ' + (aiConfig.wbModel || '未选模型')
-                    : aiConfig.baseUrl
-                      ? '当前：' + labelFromUrl(aiConfig.baseUrl) + ' · ' + (aiConfig.model || '未选模型')
-                      : '尚未配置；点「连接设置」选择服务'
-                }
-              >
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <ActionButton onClick={() => setAiSheetOpen(true)}>连接设置</ActionButton>
-                  {(aiConfig.savedApis?.length || 0) > 0 && (
-                    <span style={{ fontSize: 12, opacity: 0.6 }}>已记 {aiConfig.savedApis?.length} 套</span>
-                  )}
-                </div>
+              <AiPlaylistPanel config={aiConfig} Row={SettingsRow} />
+              <AiPortraitPanel config={aiConfig} Row={SettingsRow} resetSignal={playStatsResetSignal} />
+              <SettingsRow label="AI 设置" description={aiSettingsSummary}>
+                <ActionButton onClick={() => setAiSettingsOpen(true)}>打开设置</ActionButton>
               </SettingsRow>
             </SettingsGroup>
           )}
@@ -1111,6 +1108,38 @@ export default function Settings() {
             「不要清除原 API」体现在：切到 WorkBuddy 或改地址时，先把当前直连配置
             rememberApi 进记忆，再切来源；记忆里的条目可在下拉里切回，只有点「清除」才删。
           */}
+      {/*
+        v1.4.14-pre4「AI 助手」设置抽屉：分组里的配置项都在这里。
+        与下面那个连接抽屉是父子关系——连接分区的「连接设置」按钮打开它。
+      */}
+      {aiSettingsOpen && (
+        <AiSettingsSheet
+          active={aiSettingsTab}
+          onChange={setAiSettingsTab}
+          onClose={() => setAiSettingsOpen(false)}
+          config={aiConfig}
+          patchConfig={patchAiConfig}
+          titleCleanMode={settings.titleCleanMode}
+          onTitleCleanModeChange={(mode) => setAppSettings({ titleCleanMode: mode })}
+          onOpenProfile={() => void openProfile()}
+          onRevealProfile={() => void revealProfile()}
+          onApplyLearned={() => void applyLearned()}
+          onClearLearned={() => void clearLearned()}
+          profileMessage={profileMessage}
+          onClearPlayStats={clearPlayStatsAndReset}
+          playStatsMessage={playStatsMessage}
+          onOpenConnect={() => setAiSheetOpen(true)}
+          connectSummary={aiConnectSummary}
+          savedApiCount={aiConfig.savedApis?.length || 0}
+          aiMessage={aiMessage}
+          usageText={usageText}
+          aiTesting={aiTesting}
+          onSave={() => void persistAiConfig(aiConfig)}
+          onTest={() => void runAiTest()}
+          onClearUsage={() => { clearUsage(); setUsageText(formatUsage(loadUsage())) }}
+        />
+      )}
+
       {aiSheetOpen && (
         <AiConfigSheet
           active={aiTab}

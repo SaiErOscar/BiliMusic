@@ -5819,3 +5819,234 @@ body {
   cursor: default;
 }
 
+/* ===== v1.4.14-pre4 播放页 AI 曲目解析 ===== */
+
+/*
+ * 与评论面板同一套右侧浮层语言（毛玻璃 + 圆角 + 深色底），
+ * 但更窄：它只放一小段文字，撑到 462px 会显得空。
+ */
+.now-playing-insight {
+  position: absolute;
+  z-index: 7;
+  top: clamp(74px, 10vh, 108px);
+  right: clamp(22px, 5vw, 76px);
+  width: min(408px, calc(100vw - 44px));
+  max-height: calc(100% - clamp(102px, 15vh, 166px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.095), rgba(255, 255, 255, 0.035)),
+    rgba(10, 10, 14, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.145);
+  box-shadow:
+    0 34px 92px rgba(0, 0, 0, 0.52),
+    0 0 0 1px rgba(255, 255, 255, 0.035),
+    inset 0 1px rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(38px) saturate(1.55);
+  -webkit-backdrop-filter: blur(38px) saturate(1.55);
+}
+
+.now-playing-insight__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 20px 20px 15px;
+}
+
+.now-playing-insight__head div {
+  min-width: 0;
+}
+
+.now-playing-insight__head span,
+.now-playing-insight__head small {
+  display: flex;
+  align-items: center;
+}
+
+.now-playing-insight__head span {
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.98);
+  font-size: 19px;
+  line-height: 1.15;
+  font-weight: 900;
+}
+
+.now-playing-insight__head small {
+  margin-top: 5px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.now-playing-insight__head button {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.075);
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition:
+    background var(--duration-fast),
+    border-color var(--duration-fast),
+    color var(--duration-fast),
+    transform var(--duration-fast);
+}
+
+.now-playing-insight__head button:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+.now-playing-insight__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 20px 20px;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.now-playing-insight__body:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+.now-playing-insight__body::-webkit-scrollbar {
+  width: 7px;
+}
+
+.now-playing-insight__body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: transparent;
+}
+
+.now-playing-insight__body:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* 三种「非结果」状态（未配置 / 生成中 / 失败）沿用歌词区的居中排版 */
+.now-playing-insight__body .lyrics-centered {
+  padding: 26px 8px 20px;
+}
+
+.now-playing-insight__summary {
+  margin: 0 0 16px;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 14px;
+  line-height: 1.7;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.now-playing-insight__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.now-playing-insight__cell {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.now-playing-insight__cell span {
+  flex: 0 0 auto;
+  min-width: 34px;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.02em;
+}
+
+.now-playing-insight__cell strong {
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 13.5px;
+  line-height: 1.55;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.now-playing-insight__foot {
+  margin-top: 16px;
+  padding-top: 13px;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.now-playing-insight__foot > span {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.now-playing-insight__foot button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.72);
+  font: 750 12px/1 var(--font-body);
+  cursor: pointer;
+  transition: background var(--duration-fast), border-color var(--duration-fast), color var(--duration-fast);
+}
+
+.now-playing-insight__foot button:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.13);
+}
+
+@media (max-width: 960px) {
+  .now-playing-insight {
+    top: 70px;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    max-height: calc(100% - 86px);
+    border-radius: 24px;
+  }
+
+  .now-playing-insight__head {
+    padding: 17px 17px 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .now-playing-insight__head button,
+  .now-playing-insight__foot button {
+    transition: none;
+  }
+
+  .now-playing-insight__head button:hover {
+    transform: none;
+  }
+}
+
+

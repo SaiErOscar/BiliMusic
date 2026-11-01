@@ -16,8 +16,16 @@ import PlayerSlider from '@/components/PlayerSlider'
 import LyricsView from '@/components/LyricsView'
 import AudioVisualizer from '@/components/AudioVisualizer'
 import { enhanceLyrics } from '@/services/aiLyrics'
-import { getAiConfig, isAiSupported, saveAiConfig } from '@/services/ai'
+import { aiUnsupportedReason, getAiConfig, isAiSupported, saveAiConfig } from '@/services/ai'
+import {
+  createTrackInsightCache,
+  insightCacheKey,
+  isAiConfigured,
+  loadTrackInsight,
+  type TrackInsight,
+} from '@/services/aiTrackInsight'
 import { detectLyricLanguage } from '@/services/desktopLyricLines'
+import { cleanTrackTitle } from '@/services/titleClean'
 import {
   searchMultiSourceRound,
   initialMultiSourceState,
@@ -63,6 +71,25 @@ export default function NowPlaying() {
   const [commentsTotal, setCommentsTotal] = useState(0)
   const [commentsError, setCommentsError] = useState('')
   const [commentsLoadingMore, setCommentsLoadingMore] = useState(false)
+
+  /*
+   * v1.4.14-pre4 播放页 AI 曲目解析。
+   *
+   * 缓存只活一个会话（Map 放 ref，不触发重渲染）：同一首歌二次点击直接命中，
+   * 不再消耗额度。请求期间不碰 player，播放继续。
+   */
+  const insightCacheRef = useRef(createTrackInsightCache())
+  /** 请求序号：切歌或取消后，晚到的结果不回写，避免串到别的曲目上 */
+  const insightSeqRef = useRef(0)
+  const [insightOpen, setInsightOpen] = useState(false)
+  const [insightBusy, setInsightBusy] = useState(false)
+  const [insight, setInsight] = useState<TrackInsight | null>(null)
+  const [insightError, setInsightError] = useState('')
+  const [insightCached, setInsightCached] = useState(false)
+  /** 未配置 / 环境不支持：与「请求失败」分开，给的是去设置页的指引而不是报错 */
+  const [insightNeedConfig, setInsightNeedConfig] = useState(false)
+  /** 用户主动取消：既不等于失败也不等于加载中，单独一个状态免得卡片空白 */
+  const [insightCancelled, setInsightCancelled] = useState(false)
 
   useEffect(() => {
     if (!expanded) return
@@ -145,6 +172,100 @@ export default function NowPlaying() {
     }
   }
 
+  /**
+   * v1.4.14-pre4：生成（或命中缓存）当前曲目的 AI 解析。
+   *
+   * 三个原则：
+   * 1. **未配置不发请求**——直接给「去设置页」的指引，比让用户等一次 401 更省事；
+   * 2. **全程不碰 player**——这是「实时、可感知」而不是「打断播放」，请求期间音频照常；
+   * 3. **可取消**：序号自增后，在途结果回来时发现序号已变就丢弃，不会串到别的曲目上。
+   */
+  const runInsight = async (force = false) => {
+    if (!track) return
+    setInsightError('')
+    setInsightNeedConfig(false)
+    setInsightCancelled(false)
+
+    if (!isAiSupported()) {
+      setInsightNeedConfig(true)
+      setInsightError(aiUnsupportedReason())
+      return
+    }
+
+    const seq = ++insightSeqRef.current
+    setInsightBusy(true)
+    try {
+      const config = await getAiConfig()
+      if (seq !== insightSeqRef.current) return
+      if (!isAiConfigured(config)) {
+        setInsightNeedConfig(true)
+        setInsight(null)
+        return
+      }
+      /*
+       * 歌词片段：只在已经加载出歌词时顺带送前若干行，用来判断语言与主题。
+       * 没有歌词不算失败——退化成「只根据标题与歌手」即可（服务层会据此降置信度）。
+       */
+      const lyricSnippet = lyrics.rawResult?.lines?.map((l) => l.text) || []
+      /*
+       * v1.4.14-pre4 标题清洗接线：B 站标题常带【4K修复】【翻唱】、UP 主前缀、播放量等噪声，
+       * 直接交给模型会带偏对曲目的理解。清洗模式由设置里的 titleCleanMode 决定
+       * （off 用原标题 / rule 程序清洗 / ai 让模型洗一次）。
+       *
+       * 在 UI 侧清洗而不是服务层：cleanTrackTitle 需要 AppSettings（含 titleCleanMode），
+       * 而服务层的 settings 是 AiSettings，两者不是同一份配置。在这里洗完传干净标题进去，
+       * 服务层签名不用改。
+       *
+       * 清洗失败不阻断：cleanTrackTitle 内部已兜底（AI 不可信/未配置时退回程序清洗，
+       * 再不行用原标题），这里再包一层 catch 防止意外把整个解析拖挂。
+       */
+      const rawTitle = track.title
+      let cleanedTitle = rawTitle
+      try {
+        const cleaned = await cleanTrackTitle(rawTitle, { settings })
+        if (cleaned?.title) cleanedTitle = cleaned.title
+      } catch {
+        /* 清洗是增强，失败就用原标题继续 */
+      }
+      const cache = insightCacheRef.current
+      // 「重来」要真的重来：先把这个键从缓存里删掉，否则会原样命中旧结果
+      if (force) cache.delete(insightCacheKey({ id: track.id, title: cleanedTitle, artist: track.artist }))
+      const { insight: result, cached } = await loadTrackInsight(cache, {
+        settings: config,
+        track: { id: track.id, title: cleanedTitle, artist: track.artist },
+        lyricSnippet,
+      })
+      if (seq !== insightSeqRef.current) return
+      setInsight(result)
+      setInsightCached(cached)
+    } catch (err) {
+      if (seq !== insightSeqRef.current) return
+      setInsight(null)
+      setInsightError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (seq === insightSeqRef.current) setInsightBusy(false)
+    }
+  }
+
+  const toggleInsight = () => {
+    const nextOpen = !insightOpen
+    setInsightOpen(nextOpen)
+    if (nextOpen && !insight && !insightBusy) void runInsight()
+  }
+
+  /**
+   * 取消：作废在途请求（fetch 无法真正 abort，但结果不会再被采用）。
+   *
+   * 必须留一句可见的说明——取消后既没有结果也没有错误，四个状态全不匹配，
+   * 卡片会变成一片空白，看起来像坏了。
+   */
+  const cancelInsight = () => {
+    insightSeqRef.current += 1
+    setInsightBusy(false)
+    setInsightError('')
+    setInsightCancelled(true)
+  }
+
   useEffect(() => {
     if (!expanded || !fullscreen) {
       setControlsVisible(true)
@@ -175,6 +296,18 @@ export default function NowPlaying() {
     setCommentsTotal(0)
     setCommentsError('')
     setCommentsLoadingMore(false)
+    /*
+     * v1.4.14-pre4：切歌时收起解析卡片并作废在途请求。
+     * 缓存不清——同一首歌切回来还该命中；但界面上的结果必须属于当前这首。
+     */
+    insightSeqRef.current += 1
+    setInsightOpen(false)
+    setInsightBusy(false)
+    setInsight(null)
+    setInsightError('')
+    setInsightCached(false)
+    setInsightNeedConfig(false)
+    setInsightCancelled(false)
   }, [track?.id])
 
   return (
@@ -440,6 +573,14 @@ export default function NowPlaying() {
                   <RoundIcon active={commentsOpen} onClick={toggleComments} title="查看评论">
                     <MessageCircle size={20} />
                   </RoundIcon>
+                  {/* v1.4.14-pre4 AI 曲目解析入口：与评论同一排，复用同一套圆形按钮样式 */}
+                  <RoundIcon
+                    active={insightOpen}
+                    onClick={toggleInsight}
+                    title="让 AI 说说这首歌（风格、在唱什么、适合什么时候听）"
+                  >
+                    <Sparkles size={20} />
+                  </RoundIcon>
                 </div>
               </div>
             </motion.section>
@@ -461,6 +602,29 @@ export default function NowPlaying() {
               )}
             </motion.section>
           </main>
+
+          <AnimatePresence>
+            {insightOpen && (
+              <InsightPanel
+                track={track}
+                insight={insight}
+                busy={insightBusy}
+                error={insightError}
+                needConfig={insightNeedConfig}
+                cancelled={insightCancelled}
+                cached={insightCached}
+                onClose={() => setInsightOpen(false)}
+                onRetry={() => void runInsight(true)}
+                onCancel={cancelInsight}
+                onOpenSettings={() => {
+                  // 去设置页前先收起卡片：回来时不该看到一个仍然「未配置」的空面板
+                  setInsightOpen(false)
+                  close()
+                  navigate('/settings')
+                }}
+              />
+            )}
+          </AnimatePresence>
 
           <AnimatePresence>
             {commentsOpen && (
@@ -489,6 +653,140 @@ export default function NowPlaying() {
         title={track.title}
       />}
     </AnimatePresence>
+  )
+}
+
+/**
+ * v1.4.14-pre4 AI 曲目解析卡片。
+ *
+ * 与评论面板同一套视觉语言（右侧浮层 + 毛玻璃），但只做一件事：
+ * 把「风格 / 在唱什么 / 适合什么时候听」三件事说清楚。
+ *
+ * 四种状态互斥且都有明确文案——未配置给指引、失败给原因、生成中可取消。
+ * 绝不静默失败：宁可显示一行「为什么没有结果」，也不留一片空白。
+ */
+function InsightPanel({
+  track,
+  insight,
+  busy,
+  error,
+  needConfig,
+  cancelled,
+  cached,
+  onClose,
+  onRetry,
+  onCancel,
+  onOpenSettings,
+}: {
+  track: { title: string; artist: string }
+  insight: TrackInsight | null
+  busy: boolean
+  error: string
+  needConfig: boolean
+  cancelled: boolean
+  cached: boolean
+  onClose: () => void
+  onRetry: () => void
+  onCancel: () => void
+  onOpenSettings: () => void
+}) {
+  return (
+    <motion.aside
+      className="now-playing-insight"
+      initial={{ opacity: 0, x: 42, scale: 0.985 }}
+      animate={{ opacity: 1, x: 0, scale: 1 }}
+      exit={{ opacity: 0, x: 42, scale: 0.985 }}
+      transition={spring}
+      role="dialog"
+      aria-label="AI 曲目解析"
+    >
+      <div className="now-playing-insight__head">
+        <div>
+          <span><Sparkles size={17} />AI 解析</span>
+          <small>
+            {cached ? '来自本次会话的缓存' : busy ? '正在听你这首歌…' : '风格 · 在唱什么 · 适合什么时候听'}
+          </small>
+        </div>
+        <button type="button" onClick={onClose} title="关闭解析">
+          <X size={18} />
+        </button>
+      </div>
+
+      <div className="now-playing-insight__body">
+        {needConfig && (
+          <Centered>
+            <Sparkles size={42} strokeWidth={1.25} />
+            <strong>还没有配置 AI</strong>
+            <span>{error || '在设置里填好 API 地址、密钥与模型后就能用了'}</span>
+            <button type="button" onClick={onOpenSettings}>去设置页配置</button>
+          </Centered>
+        )}
+
+        {!needConfig && busy && (
+          <Centered>
+            <Loader2 size={28} className="spin" />
+            <strong>正在解析《{track.title}》</strong>
+            <span>不影响播放，你可以继续听</span>
+            <button type="button" onClick={onCancel}>取消</button>
+          </Centered>
+        )}
+
+        {!needConfig && !busy && !error && cancelled && (
+          <Centered>
+            <Sparkles size={38} strokeWidth={1.25} />
+            <strong>已取消</strong>
+            <span>这次没有生成解析，需要时随时可以重来</span>
+            <button type="button" onClick={onRetry}><RefreshCw size={14} /> 重新生成</button>
+          </Centered>
+        )}
+
+        {!needConfig && !busy && error && (
+          <Centered>
+            <RefreshCw size={38} strokeWidth={1.25} />
+            <strong>解析失败</strong>
+            <span>{error}</span>
+            <button type="button" onClick={onRetry}><RefreshCw size={14} /> 重新生成</button>
+          </Centered>
+        )}
+
+        {!needConfig && !busy && !error && !cancelled && insight && (
+          <div className="now-playing-insight__content">
+            {insight.summary && <p className="now-playing-insight__summary">{insight.summary}</p>}
+
+            <div className="now-playing-insight__grid">
+              {insight.style && (
+                <div className="now-playing-insight__cell">
+                  <span>风格</span>
+                  <strong>{insight.style}</strong>
+                </div>
+              )}
+              {insight.mood && (
+                <div className="now-playing-insight__cell">
+                  <span>情绪</span>
+                  <strong>{insight.mood}</strong>
+                </div>
+              )}
+              {insight.scene && (
+                <div className="now-playing-insight__cell">
+                  <span>适合</span>
+                  <strong>{insight.scene}</strong>
+                </div>
+              )}
+            </div>
+
+            <div className="now-playing-insight__foot">
+              <span>
+                {insight.usedLyrics ? '结合了歌词片段' : '仅根据歌名与歌手'}
+                {typeof insight.confidence === 'number' && ` · 置信度 ${Math.round(insight.confidence * 100)}%`}
+              </span>
+              <button type="button" onClick={onRetry} title="重新生成">
+                <RefreshCw size={13} /> 重来
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </motion.aside>
   )
 }
 
