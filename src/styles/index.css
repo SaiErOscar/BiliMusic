@@ -5727,3 +5727,95 @@ body {
   --color-surface-muted: rgba(245, 245, 247, 0.86);
 }
 
+
+
+/* ===== v1.4.14-pre3 推荐反馈闭环（喜欢 / 不感兴趣）===== */
+
+/*
+ * 列表项从 <button> 改成容器：反馈按钮要能单独点，而 button 不能嵌套 button。
+ * 容器只负责排布，可点区域收进 .discover-ai__play。
+ */
+.discover-ai__item {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  cursor: default;
+}
+
+.discover-ai__play {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.discover-ai__play:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+.discover-ai__acts {
+  display: flex;
+  gap: 6px;
+}
+
+.discover-ai__act {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-muted-foreground);
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.discover-ai__act:hover {
+  color: var(--color-foreground);
+  border-color: var(--color-muted-foreground);
+}
+
+.discover-ai__act:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* 已喜欢：描边 + 底色 + 文案三重标识，不只靠颜色 */
+.discover-ai__act--like.is-active {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+/* 已忽略：换成中性实底，与喜欢明显区分（不抢视觉注意力） */
+.discover-ai__act--dislike.is-active {
+  color: var(--color-foreground);
+  border-color: var(--color-muted-foreground);
+  background: rgba(127, 127, 127, 0.18);
+}
+
+/* 已喜欢：整项描一圈主题色，滚动时一眼能认出 */
+.discover-ai__item--liked {
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+/* 已忽略：整项变灰并降低可点性，明确「这条已被你否掉」 */
+.discover-ai__item--muted {
+  opacity: 0.45;
+}
+
+.discover-ai__item--muted .discover-ai__play {
+  cursor: default;
+}
+

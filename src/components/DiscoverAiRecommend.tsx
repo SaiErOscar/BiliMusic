@@ -9,7 +9,7 @@
  * 组件自己管请求与错误态，不污染 Discover 页的数据流。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Sparkles, RefreshCw } from 'lucide-react'
+import { Sparkles, RefreshCw, Heart, EyeOff } from 'lucide-react'
 import { getAiConfig, isAiSupported } from '@/services/ai'
 import { platform } from '@/platform'
 import { generateRecommendation, type AiRecommendation } from '@/services/aiRecommend'
@@ -30,6 +30,21 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
   const [data, setData] = useState<AiRecommendation | null>(null)
   /** v1.4.13-pre1：本轮已播放过的曲目 id，用于判定哪些被跳过 */
   const playedRef = useRef<Set<string>>(new Set())
+  /**
+   * v1.4.14-pre3 显式反馈的本地状态，key 为 track.id。
+   *
+   * 只存本轮的 UI 状态，不存次数——真实计数在 ai-learned.json 里。
+   * 用 state 而不是 ref：点了按钮必须立刻重渲染出「已喜欢 / 已忽略」。
+   */
+  const [feedback, setFeedback] = useState<Record<string, 'liked' | 'disliked'>>({})
+  /**
+   * 同一份反馈的 ref 副本。
+   *
+   * load 的依赖数组只有 [settings]（不重造它，否则 auto 模式会反复触发请求），
+   * 直接闭包读 state 会拿到旧值——换一批时就会给已表态的曲目补记 skipped。
+   * 用 ref 让 load 始终读到最新表态。
+   */
+  const feedbackRef = useRef<Record<string, 'liked' | 'disliked'>>({})
 
   // 读取设置（模式与 Provider 配置都在这）
   useEffect(() => {
@@ -52,17 +67,36 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
       ? !!settings.wbModel
       : !!(settings?.baseUrl && settings?.apiKey && settings?.model)
 
+  /**
+   * v1.4.14-pre3：记一次显式表态。
+   *
+   * 互斥在前端也做一层：同一首点了喜欢又点不感兴趣时，UI 只保留最后一次选择；
+   * 落盘的互斥由主进程 applyExplicitFeedback 保证（它会清掉对侧计数）。
+   * 前端这层是为了让按钮状态和磁盘状态永远一致，不依赖 IPC 往返时序。
+   */
+  const feedbackKey = (t: { artist: string; title: string }) => t.artist + '|' + t.title
+  const sendFeedback = useCallback((id: string, kind: 'liked' | 'disliked', key: string) => {
+    if (feedbackRef.current[id] === kind) return
+    feedbackRef.current = { ...feedbackRef.current, [id]: kind }
+    setFeedback(feedbackRef.current)
+    void platform.userProfile?.record(kind, key).catch(() => {})
+  }, [])
+
   const load = useCallback(async () => {
     if (!settings) return
     // v1.4.13-pre1 学习信号：换一批时把上一批里「一首都没播」的记作跳过
+    // v1.4.14-pre3：已经显式表态过的曲目不再补记 skipped——用户已经说得很清楚，
+    // 再叠一条隐式信号只会让同一件事被计两次，稀释权重
     if (data && platform.userProfile) {
       for (const t of data.tracks) {
-        if (!playedRef.current.has(t.id)) {
+        if (!playedRef.current.has(t.id) && !feedbackRef.current[t.id]) {
           void platform.userProfile.record('skipped', t.artist + '|' + t.title).catch(() => {})
         }
       }
     }
     playedRef.current = new Set()
+    feedbackRef.current = {}
+    setFeedback({})
     setBusy(true)
     setError('')
     try {
@@ -154,28 +188,84 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
 
       {tracks.length > 0 && (
         <div className="discover-ai__list">
-          {tracks.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className="discover-ai__item"
-              onClick={() => {
-                onPlayTrack(t)
-                // 顺手加入播放队列，避免只播一首就停
-                if (!player.queue.some((q) => q.id === t.id)) player.addToQueue(t)
-                // v1.4.13-pre1 学习信号：记下「被播放」，与跳过互斥
-                playedRef.current.add(t.id)
-                void platform.userProfile?.record('played', t.artist + '|' + t.title).catch(() => {})
-              }}
-            >
-              <img src={toHttpsUrl(t.coverUrl)} alt="" loading="lazy" />
-              <div className="discover-ai__meta">
-                <strong>{t.title}</strong>
-                <span>{t.artist}</span>
-                {data?.reasons[t.id] && <em>{data.reasons[t.id]}</em>}
+          {tracks.map((t) => {
+            const state = feedback[t.id]
+            const disliked = state === 'disliked'
+            return (
+              /*
+                v1.4.14-pre3：整项从 <button> 改成容器。
+                反馈按钮必须能单独点，而 button 不能嵌套 button——
+                否则键盘 Tab 会进到非法结构里，点反馈也会冒泡触发播放。
+              */
+              <div
+                key={t.id}
+                className={
+                  'discover-ai__item' +
+                  (state ? ' discover-ai__item--' + state : '') +
+                  (disliked ? ' discover-ai__item--muted' : '')
+                }
+              >
+                <button
+                  type="button"
+                  className="discover-ai__play"
+                  onClick={() => {
+                    if (disliked) return
+                    onPlayTrack(t)
+                    // 顺手加入播放队列，避免只播一首就停
+                    if (!player.queue.some((q) => q.id === t.id)) player.addToQueue(t)
+                    // v1.4.13-pre1 学习信号：记下「被播放」，与跳过互斥
+                    playedRef.current.add(t.id)
+                    void platform.userProfile?.record('played', t.artist + '|' + t.title).catch(() => {})
+                  }}
+                  aria-label={'播放 ' + t.title + (t.artist ? ' - ' + t.artist : '')}
+                >
+                  <img src={toHttpsUrl(t.coverUrl)} alt="" loading="lazy" />
+                  <div className="discover-ai__meta">
+                    <strong>{t.title}</strong>
+                    <span>{t.artist}</span>
+                    {data?.reasons[t.id] && <em>{data.reasons[t.id]}</em>}
+                  </div>
+                </button>
+                {/*
+                  降级：platform.userProfile 缺失（Web / 移动端）时整组按钮不渲染，
+                  而不是渲染出点了没反应的死按钮。
+                */}
+                {platform.userProfile && (
+                  <div className="discover-ai__acts">
+                    <button
+                      type="button"
+                      className={
+                        'discover-ai__act discover-ai__act--like' +
+                        (state === 'liked' ? ' is-active' : '')
+                      }
+                      aria-pressed={state === 'liked'}
+                      aria-label={state === 'liked' ? '已喜欢 ' + t.title : '喜欢 ' + t.title}
+                      title={state === 'liked' ? '已喜欢' : '喜欢'}
+                      onClick={() => sendFeedback(t.id, 'liked', feedbackKey(t))}
+                    >
+                      <Heart size={14} aria-hidden="true" />
+                      {/* 文字与图标同时存在：不靠颜色区分状态 */}
+                      <span>{state === 'liked' ? '已喜欢' : '喜欢'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={
+                        'discover-ai__act discover-ai__act--dislike' +
+                        (disliked ? ' is-active' : '')
+                      }
+                      aria-pressed={disliked}
+                      aria-label={disliked ? '已忽略 ' + t.title : '不感兴趣 ' + t.title}
+                      title={disliked ? '已忽略' : '不感兴趣'}
+                      onClick={() => sendFeedback(t.id, 'disliked', feedbackKey(t))}
+                    >
+                      <EyeOff size={14} aria-hidden="true" />
+                      <span>{disliked ? '已忽略' : '不感兴趣'}</span>
+                    </button>
+                  </div>
+                )}
               </div>
-            </button>
-          ))}
+            )
+          })}
         </div>
       )}
 

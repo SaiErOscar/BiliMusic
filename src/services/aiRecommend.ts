@@ -14,7 +14,7 @@ import { aiChat } from '@/services/ai'
 import { summarize, renderSummary } from '@/services/aiPortrait'
 import { loadPlayStats } from '@/utils/storage'
 import { buildCandidatePool, type AiPlaylistCandidate } from '@/services/aiPlaylist'
-import { loadProfileContext } from '@/services/aiProfileContext'
+import { loadProfileContext, renderExplicitFeedback, type ProfileContext } from '@/services/aiProfileContext'
 import type { AiSettings, Track } from '@/types'
 
 
@@ -116,24 +116,59 @@ export interface RecommendInput {
   now?: Date
 }
 
-/** 生成推荐（不落库、不改任何状态） */
-export async function generateRecommendation(input: RecommendInput): Promise<AiRecommendation> {
-  const { settings, limit = 5, now = new Date() } = input
-  const pool = buildCandidatePool()
-  if (!pool.length) throw new Error('曲库为空：先收藏、播放或下载一些歌曲')
+/**
+ * v1.4.14-pre3 反馈闭环：从候选池里剔除用户明确表示「不感兴趣」的曲目。
+ *
+ * 判断：**剔除，而不是只靠提示词嘱咐**。
+ * - 提示词是软约束，模型完全可能因为「凑够 limit 首」而把被否掉的歌再挑回来；
+ *   一旦发生，用户会觉得「点了不感兴趣也没用」，反馈闭环当场失信。
+ * - 曲库通常远大于一次推荐的 5 首，剔除十几首不会让池子见底；
+ *   万一真的剔到不够（只剩不到 3 首），buildRecommendPrompt 会退回未剔除的池子，
+ *   宁可推出用户否过的歌，也不能让「曲库不为空却推荐失败」。
+ * 显式喜欢的曲目**不剔除也不加权**：用户已经知道它，重复推荐只是浪费名额；
+ * 但把它留在池里作为「口味锚点」交给模型参考，比硬编码加权更稳。
+ */
+export function excludeDisliked(
+  pool: AiPlaylistCandidate[],
+  disliked: string[],
+): AiPlaylistCandidate[] {
+  if (!disliked.length) return pool
+  const banned = new Set(disliked)
+  const kept = pool.filter((c) => !banned.has(trackKey(c.track)))
+  // 剔除后不足以凑一盘时退回原池：宁可有噪音，也不要让推荐直接失败
+  if (kept.length < 3) return pool
+  // 编号必须重排，否则提示词里的清单会出现跳号，模型容易挑到不存在的编号
+  return kept.map((c, i) => ({ track: c.track, index: i + 1 }))
+}
 
-  const ctx = timeContext(now)
-  const portrait = summarize(loadPlayStats(), 'month')
-  const hasHistory = portrait.totalPlays > 0
-  // v1.4.13-pre1：画像改读外部文件 + 学习信号，不再从 settings 里取
-  const { profile: userText, learned } = await loadProfileContext()
+/** artist|title 归一化串，与主进程 profile.ts 的 key 口径一致 */
+function trackKey(track: { artist?: string; title?: string }): string {
+  return (track.artist || '') + '|' + (track.title || '')
+}
 
-  // v1.4.13-pre4 推荐去重：把最近推过的曲目告诉模型，别再推
-  const recently = new Set(loadRecentlyRecommended())
-  const freshPool = pool.filter((c) => !recently.has(c.track.id))
-  const usablePool = freshPool.length >= 3 ? freshPool : pool
+/** 提示词构造的输入（抽成纯函数，便于单测断言注入内容） */
+export interface RecommendPromptInput {
+  settings: AiSettings
+  limit: number
+  contextLabel: string
+  hour: number
+  profileContext: ProfileContext
+  portraitText: string
+  hasHistory: boolean
+  pool: AiPlaylistCandidate[]
+}
 
-  // v1.4.13-pre4 人设：影响问候语的口吻，不影响挑选逻辑
+/** 组装推荐提示词；纯函数，不发请求 */
+export function buildRecommendPrompt(input: RecommendPromptInput): {
+  system: string
+  user: string
+} {
+  const { settings, limit, contextLabel, hour, profileContext, portraitText, hasHistory, pool } = input
+  const userText = profileContext.profile
+  const learned = profileContext.learned
+  // v1.4.14-pre3：显式表态单独成段，并带上「必须避开」的行动指令
+  const explicit = renderExplicitFeedback(profileContext)
+
   const persona = (settings.persona || '').trim()
   const personaLine = persona ? '你的说话风格：' + persona : ''
 
@@ -144,20 +179,61 @@ export async function generateRecommendation(input: RecommendInput): Promise<AiR
     '1. 只能从候选清单里挑，index 必须是清单中真实存在的数字，不得编造；',
     '2. 推荐 ' + limit + ' 首左右，宁少勿滥；',
     '3. 问候语要结合当前时段与听歌习惯，不要空洞套话，不要「根据数据显示」这类表述；',
-    '4. 只输出一个 JSON 对象，不要任何解释文字或代码围栏：',
+    // v1.4.14-pre3：把显式否定升级为硬约束，避免模型为凑数而回捞
+    '4. 用户明确表示不感兴趣的曲目一律不得推荐，即使候选清单里还有它们；',
+    '5. 只输出一个 JSON 对象，不要任何解释文字或代码围栏：',
     '{"greeting":"问候语（60 字内）","picks":[{"index":编号,"reason":"一句推荐理由（20 字内）"}]}',
-  ].join('\n')
+  ]
+    .filter(Boolean)
+    .join('\n')
 
   const userLines = [
-    '当前时间：' + ctx.label + '（' + ctx.hour + ' 点）',
+    '当前时间：' + contextLabel + '（' + hour + ' 点）',
     '用户自述偏好：' + (userText || '（未填写）'),
     learned ? '从使用中观察到的偏好：\n' + learned : '',
+    explicit ? '用户的显式反馈（权重最高）：\n' + explicit : '',
     '最近一个月的听歌状况：',
-    hasHistory ? renderSummary(portrait, 'month') : '（暂无播放记录）',
+    hasHistory ? portraitText : '（暂无播放记录）',
     '',
     '候选曲目：',
-    usablePool.map((c) => c.index + '. ' + c.track.title + (c.track.artist ? ' - ' + c.track.artist : '')).join('\n'),
-  ].filter(Boolean).join('\n')
+    pool.map((c) => c.index + '. ' + c.track.title + (c.track.artist ? ' - ' + c.track.artist : '')).join('\n'),
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  return { system, user: userLines }
+}
+
+/** 生成推荐（不落库、不改任何状态） */
+export async function generateRecommendation(input: RecommendInput): Promise<AiRecommendation> {
+  const { settings, limit = 5, now = new Date() } = input
+  const pool = buildCandidatePool()
+  if (!pool.length) throw new Error('曲库为空：先收藏、播放或下载一些歌曲')
+
+  const ctx = timeContext(now)
+  const portrait = summarize(loadPlayStats(), 'month')
+  const hasHistory = portrait.totalPlays > 0
+  // v1.4.13-pre1：画像改读外部文件 + 学习信号，不再从 settings 里取
+  // v1.4.14-pre3：同时取显式表态（liked / disliked），既用于剔除候选，也用于提示词
+  const profileContext = await loadProfileContext()
+
+  // v1.4.13-pre4 推荐去重：把最近推过的曲目告诉模型，别再推
+  const recently = new Set(loadRecentlyRecommended())
+  const freshPool = pool.filter((c) => !recently.has(c.track.id))
+  const dedupedPool = freshPool.length >= 3 ? freshPool : pool
+  // v1.4.14-pre3 反馈闭环：明确「不感兴趣」的曲目先从池子里剔除（理由见 excludeDisliked）
+  const usablePool = excludeDisliked(dedupedPool, profileContext.disliked || [])
+
+  const { system, user: userLines } = buildRecommendPrompt({
+    settings,
+    limit,
+    contextLabel: ctx.label,
+    hour: ctx.hour,
+    profileContext,
+    portraitText: hasHistory ? renderSummary(portrait, 'month') : '',
+    hasHistory,
+    pool: usablePool,
+  })
 
   const reply = await aiChat(settings, {
     messages: [

@@ -342,7 +342,11 @@ declare global {
         getLearned: () => Promise<unknown>
         applyLearned: () => Promise<{ ok: boolean; message: string }>
         clearLearned: () => Promise<{ ok: boolean }>
-        record: (kind: 'played' | 'skipped' | 'lyricReverted', key?: string) => Promise<{ ok: boolean }>
+        /** v1.4.14-pre3：liked / disliked 是用户显式表态，与 played / skipped 的隐式行为区分 */
+        record: (
+          kind: 'played' | 'skipped' | 'lyricReverted' | 'liked' | 'disliked',
+          key?: string,
+        ) => Promise<{ ok: boolean }>
         recordPlaylist: (tracks: number) => Promise<{ ok: boolean }>
         writeText?: (text: string) => Promise<{ ok: boolean; message?: string }>
         setLearned?: (signals: unknown) => Promise<{ ok: boolean; message?: string }>

@@ -84,7 +84,14 @@ export interface PlatformUserProfile {
   getLearned: () => Promise<unknown>
   applyLearned: () => Promise<{ ok: boolean; message: string }>
   clearLearned: () => Promise<{ ok: boolean }>
-  record: (kind: 'played' | 'skipped' | 'lyricReverted', key?: string) => Promise<{ ok: boolean }>
+  /**
+   * 记一次学习信号。v1.4.14-pre3 起新增 liked / disliked：
+   * 前者是隐式行为（播放 / 跳过），后者是用户在推荐列表上的显式表态。
+   */
+  record: (
+    kind: 'played' | 'skipped' | 'lyricReverted' | 'liked' | 'disliked',
+    key?: string,
+  ) => Promise<{ ok: boolean }>
   recordPlaylist: (tracks: number) => Promise<{ ok: boolean }>
   /** v1.4.13-pre4 备份恢复：写回画像正文 */
   writeText?: (text: string) => Promise<{ ok: boolean; message?: string }>
