@@ -81,6 +81,20 @@ function currentRendererVersion(): string {
   return state.activeVersion || app.getVersion()
 }
 
+/**
+ * 当前实际生效的版本号（v1.4.14-pre1 修复「OTA 热重载后版本号不更新」）。
+ *
+ * app.getVersion() 读的是安装包外壳的 package.json 版本，OTA 只替换渲染层 asar、
+ * 不动外壳，所以热重载后外壳版本恒为装的那个包。界面若直接显示 app.getVersion()，
+ * 用户会看到「更新已应用但版本号没变」，误以为更新失败。
+ *
+ * 这里按实际生效的渲染层回报：有已套用的 OTA 包时返回它的版本，否则回落外壳版本。
+ * 与 currentRendererVersion() 同源，保证「显示的版本」与「更新判定的基准」永远一致。
+ */
+export function getEffectiveVersion(): string {
+  return currentRendererVersion()
+}
+
 // 该 manifest 的渲染补丁是否可下发：环境支持 OTA + 非黑名单 + 版本更新 + 外壳满足 minShell
 export function rendererUpdateAvailable(manifest: OtaManifest, appVersion: string): boolean {
   if (!otaRoot) return false
@@ -214,6 +228,11 @@ export function markRendererVerified(): void {
     state.verified = true
     writeState()
   }
+  // v1.4.14-pre1：bootReconcile 可能在本轮启动时才把 pending 提升为 active，
+  // 那一刻界面已经加载完，拿到的仍是外壳版本。渲染层就绪时补推一次真实生效版本。
+  if (state.activeVersion) {
+    emitUpdater({ type: 'version-changed', version: state.activeVersion })
+  }
 }
 
 // 手动「立即重载」：把 pending 提升为 active 并重载窗口
@@ -226,6 +245,9 @@ function applyNow(): void {
   state.pendingVersion = null
   state.pendingFile = null
   writeState()
+  // v1.4.14-pre1：先把新版本号推给界面再重载。重载后渲染层重新挂载也会拉一次，
+  // 但若重载失败或用户正停在设置页，这条事件能保证版本号当场就变。
+  emitUpdater({ type: 'version-changed', version: state.activeVersion })
   reloadWindow()
 }
 

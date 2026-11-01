@@ -3,6 +3,7 @@ import { emitUpdater, setUpdaterWindow, ulog } from './updaterBus'
 import {
   fetchManifest,
   getActiveRendererRoot,
+  getEffectiveVersion,
   initOtaUpdater,
   rendererUpdateAvailable,
   semverGt,
@@ -119,7 +120,9 @@ export function initUpdates(opts: {
   ipcMain.on('updater:quit-and-install', () => {
     if (canAutoUpdateShell()) void loadAutoUpdater().then((u) => u.quitAndInstall())
   })
-  ipcMain.handle('app:get-version', () => app.getVersion())
+  // v1.4.14-pre1：返回「实际生效的版本」而非安装包外壳版本。
+  // OTA 只换渲染层 asar、不动外壳，用 app.getVersion() 会让热重载后版本号看起来没变。
+  ipcMain.handle('app:get-version', () => getEffectiveVersion())
 
   // 非开发态：启动后延迟首检 + 周期检查（含鸿蒙 .hap；dev server 运行时跳过）
   if (!process.env.VITE_DEV_SERVER_URL) {

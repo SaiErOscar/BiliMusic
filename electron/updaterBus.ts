@@ -11,6 +11,12 @@ export type UpdaterEvent =
   | { type: 'renderer-available'; version: string }
   | { type: 'renderer-progress'; percent: number }
   | { type: 'renderer-ready-to-apply'; version: string }
+  /**
+   * v1.4.14-pre1：OTA 已套用、实际生效版本发生变化。
+   * 界面据此刷新版本号显示——app.getVersion() 是外壳版本，OTA 不会改变它，
+   * 若只听外壳版本，热重载后版本号看起来永远不会更新。
+   */
+  | { type: 'version-changed'; version: string }
   | { type: 'error'; message: string }
 
 let getWindow: () => BrowserWindow | null = () => null

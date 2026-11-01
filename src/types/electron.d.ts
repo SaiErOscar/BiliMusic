@@ -269,6 +269,8 @@ export type UpdaterEvent =
   | { type: 'renderer-available'; version: string }
   | { type: 'renderer-progress'; percent: number }
   | { type: 'renderer-ready-to-apply'; version: string }
+  /** v1.4.14-pre1：OTA 已套用，实际生效版本变化（外壳版本不变，界面据此刷新） */
+  | { type: 'version-changed'; version: string }
   | { type: 'error'; message: string }
 
 declare global {

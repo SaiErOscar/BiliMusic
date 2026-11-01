@@ -326,6 +326,13 @@ export default function Settings() {
           setUpdateStatus(`正在下载界面更新… ${event.percent}%`); break
         case 'renderer-ready-to-apply':
           setUpdateStatus(`界面更新 v${event.version} 已就绪`); setUpdateAction('reload'); break
+        /*
+         * v1.4.14-pre1 修复「OTA 热重载后版本号不更新」：
+         * 版本号原本只在挂载时拉一次 app:get-version，而 OTA 只替换渲染层、
+         * 不改外壳版本。这里收到主进程推来的生效版本就立即刷新显示。
+         */
+        case 'version-changed':
+          setAppVersion(event.version); break
         case 'error':
           setUpdateStatus(`检查更新失败：${event.message}`); setUpdateAction(null); break
       }
