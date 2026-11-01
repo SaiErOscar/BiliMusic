@@ -141,6 +141,14 @@ export interface AppSettings {
    * 老用户没有该字段时由 loadAppSettings 的默认值合并兜底成 rule。
    */
   titleCleanMode: TitleCleanMode
+  /**
+   * v1.4.14-pre6 池外推荐：在歌单/收藏/喜欢之外**额外**推荐几首。
+   *
+   * 默认关闭：池外候选由模型自由生成，还要逐条查接口 + 一次 AI 核对，
+   * 比池内推荐明显更贵，必须由用户显式打开（与 autoAiLyricForeign 同一口径）。
+   * 老用户没有该字段时由 loadAppSettings 的默认值合并兜底成 false。
+   */
+  aiExternalRecommend: boolean
 }
 
 /**

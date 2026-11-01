@@ -19,6 +19,7 @@
  */
 import { ActionButton } from '@/components/AppleMusicPage'
 import AiConfigSheet, { type AiSheetTab } from '@/components/AiConfigSheet'
+import { loadAppSettings, updateAppSettings } from '@/utils/storage'
 import type { AiSettings, TitleCleanMode } from '@/types'
 
 /** 抽屉分区：推荐 / 画像 / 清洗 / 连接 */
@@ -88,6 +89,18 @@ export default function AiSettingsSheet({
   onTest,
   onClearUsage,
 }: Props) {
+  /*
+   * v1.4.14-pre6 池外推荐开关落在 AppSettings 里（不是 AiSettings）：
+   * 它管的是「发现页要不要多问一轮」，属于界面行为，与 Provider 凭据无关。
+   *
+   * 这里刻意**不用** useAppSettings hook：本组件会被测试以普通函数方式直接调用
+   * （不经 React 渲染器），任何 hook 都会抛 Invalid hook call。
+   * 改为每次渲染同步读一次 localStorage——数据量很小；写入走 updateAppSettings
+   * 会派发 SETTINGS_CHANGED_EVENT，设置页的 useAppSettings 收到后重渲染，
+   * 本组件随之重读，开关状态自然同步。
+   */
+  const externalOn = loadAppSettings().aiExternalRecommend
+
   return (
     <AiConfigSheet<AiSettingsTab>
       active={active}
@@ -97,21 +110,51 @@ export default function AiSettingsSheet({
       onClose={onClose}
     >
       {active === 'recommend' && (
-        <div className="ai-sheet__field">
-          <span className="ai-sheet__label">推荐方式</span>
-          <select
-            className="settings-select"
-            value={config.recommendMode}
-            onChange={(e) => patchConfig({ recommendMode: e.target.value as AiSettings['recommendMode'] })}
-          >
-            <option value="click">点击后推荐（省费用）</option>
-            <option value="auto">自动推荐（打开即生成）</option>
-            <option value="off">不推荐（不显示板块）</option>
-          </select>
-          <span className="ai-sheet__hint">
-            发现页 AI 推荐板块的触发方式；点击方式不点不消耗 API
-          </span>
-        </div>
+        <>
+          <div className="ai-sheet__field">
+            <span className="ai-sheet__label">推荐方式</span>
+            <select
+              className="settings-select"
+              value={config.recommendMode}
+              onChange={(e) => patchConfig({ recommendMode: e.target.value as AiSettings['recommendMode'] })}
+            >
+              <option value="click">点击后推荐（省费用）</option>
+              <option value="auto">自动推荐（打开即生成）</option>
+              <option value="off">不推荐（不显示板块）</option>
+            </select>
+            <span className="ai-sheet__hint">
+              发现页 AI 推荐板块的触发方式；点击方式不点不消耗 API
+            </span>
+          </div>
+
+          {/*
+            v1.4.14-pre6 池外推荐：默认关闭。
+            开关状态要能被读出来（role="switch" + aria-checked），
+            否则「开关打开却没结果」时用户无从判断自己到底有没有开。
+          */}
+          <div className="ai-sheet__field">
+            <span className="ai-sheet__label">曲库之外的推荐</span>
+            <div className="ai-sheet__row">
+              <button
+                type="button"
+                className={'settings-toggle' + (externalOn ? ' is-on' : '')}
+                role="switch"
+                aria-checked={externalOn}
+                aria-label="推荐曲库之外的歌曲"
+                onClick={() => updateAppSettings({ aiExternalRecommend: !externalOn })}
+              >
+                <span />
+              </button>
+              <span className="ai-sheet__hint">
+                {externalOn ? '已开启' : '已关闭'}
+              </span>
+            </div>
+            <span className="ai-sheet__hint">
+              在歌单、收藏、喜欢之外再推几首，会消耗更多额度；
+              候选由模型提出，逐条校验 BV 号与标题后才显示
+            </span>
+          </div>
+        </>
       )}
 
       {active === 'portrait' && (

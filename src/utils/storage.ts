@@ -63,6 +63,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   // v1.4.14-pre4 曲目标题清洗默认「程序清洗」：免费且确定性，
   // AI 清洗要消耗额度，必须由用户显式选择。
   titleCleanMode: 'rule',
+  // v1.4.14-pre6 池外推荐默认关闭：它会在池内推荐之外多发一次请求，
+  // 还要逐条查接口 + 一次 AI 核对，额度消耗明显更高，必须由用户显式打开。
+  aiExternalRecommend: false,
 }
 
 function notifySettingsChanged() {

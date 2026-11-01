@@ -15,6 +15,7 @@ import { platform } from '@/platform'
 import { generateRecommendation, type AiRecommendation } from '@/services/aiRecommend'
 import { usePlayer } from '@/contexts/PlayerContext'
 import { toHttpsUrl } from '@/services/bilibiliApi'
+import { useAppSettings } from '@/hooks/useAppSettings'
 import type { AiSettings } from '@/types'
 
 interface Props {
@@ -24,6 +25,13 @@ interface Props {
 
 export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
   const player = usePlayer()
+  /*
+   * v1.4.14-pre6 池外推荐开关：读 AppSettings。
+   * 用 hook 而不是一次性 loadAppSettings()，是为了让用户在设置抽屉里改完
+   * 立刻生效——hook 订阅了 SETTINGS_CHANGED_EVENT，会同步重渲染。
+   */
+  const { settings: appSettings } = useAppSettings()
+  const externalOn = appSettings.aiExternalRecommend
   const [settings, setSettings] = useState<AiSettings | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -100,14 +108,15 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
     setBusy(true)
     setError('')
     try {
-      const res = await generateRecommendation({ settings })
+      // 开关关闭时 external 为 false：不发任何池外相关请求，行为与上线前一致
+      const res = await generateRecommendation({ settings, external: externalOn })
       setData(res)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
-  }, [settings])
+  }, [settings, externalOn])
 
   // auto 模式：配置就绪后自动请求一次（已有结果不重复请求，避免切回页面就烧钱）
   useEffect(() => {
@@ -119,6 +128,30 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
 
   const greeting = data?.greeting
   const tracks = data?.tracks || []
+  /*
+   * v1.4.14-pre6 池外结果。
+   *
+   * 状态文案必须在「开关开着但没有结果」时出现：静默只显示池内会让用户
+   * 以为开关没生效——这是用户明确点名的失败模式，不能靠"反正池内还有"糊过去。
+   */
+  const externalTracks = data?.externalTracks || []
+  const externalStatus = data?.externalStatus || 'disabled'
+  /*
+   * v1.4.14-pre6 验收修正（S2）：原来不论何种原因失败，文案一律说
+   * 「都没通过 BV 号与标题校验」。但如果候选**全部是 BV 号格式非法**，
+   * 根本没走到存在性查询与标题校验那一步，这句话在事实上是错的。
+   * 现在按实际失败环节给不同说法，用户才知道该改什么（是模型不会写 BV 号，
+   * 还是写了不存在的号，还是标题对不上）。
+   */
+  const externalRejected = data?.externalRejected || 0
+  const externalNotice =
+    externalStatus === 'all-rejected'
+      ? externalRejected > 0
+        ? '曲库外推荐暂未找到可信结果：' + externalRejected + ' 条候选未通过校验（BV 号格式、视频是否存在、标题是否相符）'
+        : '曲库外推荐暂未找到可信结果：这一批候选都没通过校验'
+      : externalStatus === 'ai-failed'
+        ? '曲库外推荐这一批没能校验：模型没有给出可用候选，或校验过程失败'
+        : ''
 
   return (
     <section className="am-section discover-ai">
@@ -266,6 +299,55 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/*
+        v1.4.14-pre6 池外推荐分组。
+        与池内列表用标题 + 分隔线区分，而不是只靠配色——
+        用户要能一眼看出「这几首是我曲库里没有的」。
+      */}
+      {(externalTracks.length > 0 || externalNotice) && (
+        <div className="discover-ai__external">
+          <div className="discover-ai__external-head">
+            <span className="discover-ai__external-title">曲库之外</span>
+            {data?.externalRejected ? (
+              <span className="discover-ai__external-note">
+                已校验，丢弃 {data.externalRejected} 条
+              </span>
+            ) : null}
+          </div>
+
+          {externalNotice && (
+            <p className="discover-ai__external-note discover-ai__external-note--warn">
+              {externalNotice}
+            </p>
+          )}
+
+          {externalTracks.length > 0 && (
+            <div className="discover-ai__list">
+              {externalTracks.map((t) => (
+                <div key={t.id} className="discover-ai__item discover-ai__item--external">
+                  <button
+                    type="button"
+                    className="discover-ai__play"
+                    onClick={() => {
+                      onPlayTrack(t)
+                      if (!player.queue.some((q) => q.id === t.id)) player.addToQueue(t)
+                    }}
+                    aria-label={'播放 ' + t.title + (t.artist ? ' - ' + t.artist : '')}
+                  >
+                    <img src={toHttpsUrl(t.coverUrl)} alt="" loading="lazy" />
+                    <div className="discover-ai__meta">
+                      <strong>{t.title}</strong>
+                      <span>{t.artist}</span>
+                      {data?.reasons[t.id] && <em>{data.reasons[t.id]}</em>}
+                    </div>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

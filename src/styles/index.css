@@ -6307,3 +6307,60 @@ body {
   }
 }
 
+/* ===== v1.4.14-pre6 池外推荐（曲库之外）===== */
+
+/*
+ * 池外分组与池内列表并列，靠标题与上方分隔线区分层级。
+ * 只用既有 token，不引入新色值——主题切换与浅色模式自动跟随。
+ */
+.discover-ai__external {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.discover-ai__external-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.discover-ai__external-title {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.discover-ai__external-note {
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+}
+
+/* 校验失败提示：文案本身已说清，这里只做克制的视觉强调，不用告警红 */
+.discover-ai__external-note--warn {
+  display: block;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-card);
+  color: var(--color-muted-foreground);
+  line-height: 1.5;
+}
+
+/* 池外条目：左侧主题色描边，与池内条目一眼可分 */
+.discover-ai__item--external {
+  border-left: 2px solid var(--color-primary);
+}
+
+.discover-ai__item--external:hover {
+  background: var(--color-primary-light);
+  transition: background var(--duration-fast) ease;
+}
+
+
