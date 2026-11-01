@@ -10,8 +10,41 @@ import { emitUpdater, ulog } from './updaterBus'
 // 鸿蒙：原生移植层能力（沙箱可写 / net.fetch 读 asar / 外网下载）未知 —— 全程防御化，
 // 任一能力缺失即优雅降级到包内 dist，绝不崩；坏包经 ready 心跳缺失自动回滚并加入黑名单。
 const REPO = 'SaiErOscar/BiliMusic'
-const RELEASE_BASE = `https://github.com/${REPO}/releases/latest/download`
-export const OTA_MANIFEST_URL = `${RELEASE_BASE}/ota.json`
+
+/**
+ * OTA 清单与渲染包的下载基址（v1.4.14-pre2）。
+ *
+ * 预览版发布被标记为 prerelease 后，GitHub 的 releases/latest 不再指向它
+ * （latest 只指向非 prerelease 的正式版）。若预览版仍从 latest 拉清单，
+ * 拿到的会是上一个正式版的清单，预览版永远收不到自己的更新。
+ *
+ * 因此按当前外壳版本分流：
+ * - 预览版（含 -pre/-alpha/-beta/-rc）：锁定到自己 tag 的 release 直链，
+ *   只在同 tag 的后续构建内更新，不跨预览版本自动升级。
+ * - 正式版：跟随 releases/latest，正常自动更新。
+ *
+ * 清单地址与渲染包下载地址必须由同一个基址派生——否则会出现
+ * 「从正式版清单读到文件名、却去预览版 release 下载」的错位。
+ */
+export function isPrereleaseVersion(version: string): boolean {
+  return /-(pre|alpha|beta|rc)/.test(version)
+}
+
+export function releaseBaseFor(version: string): string {
+  const tag = 'v' + version
+  return isPrereleaseVersion(version)
+    ? `https://github.com/${REPO}/releases/download/${tag}`
+    : `https://github.com/${REPO}/releases/latest/download`
+}
+
+/** 当前外壳版本对应的下载基址；OTA 清单与渲染包都由它派生 */
+function currentReleaseBase(): string {
+  return releaseBaseFor(app.getVersion())
+}
+
+export function getOtaManifestUrl(): string {
+  return `${currentReleaseBase()}/ota.json`
+}
 
 export interface OtaManifest {
   rendererVersion: string
@@ -105,7 +138,7 @@ export function rendererUpdateAvailable(manifest: OtaManifest, appVersion: strin
 }
 
 export async function fetchManifest(): Promise<OtaManifest | null> {
-  const res = await net.fetch(OTA_MANIFEST_URL, { cache: 'no-store' })
+  const res = await net.fetch(getOtaManifestUrl(), { cache: 'no-store' })
   if (!res.ok) throw new Error(`获取更新信息失败 HTTP ${res.status}`)
   const manifest = (await res.json()) as OtaManifest
   if (!manifest?.rendererVersion || !manifest?.file || !manifest?.sha512) return null
@@ -138,7 +171,8 @@ export async function stageRendererUpdate(manifest: OtaManifest): Promise<void> 
   staging = true
   try {
     emitUpdater({ type: 'renderer-available', version: manifest.rendererVersion })
-    const buf = await downloadBuffer(`${RELEASE_BASE}/${manifest.file}`, (pct) =>
+    // 必须与清单同源：从哪个 release 读到的清单，就去同一个 release 下载渲染包
+    const buf = await downloadBuffer(`${currentReleaseBase()}/${manifest.file}`, (pct) =>
       emitUpdater({ type: 'renderer-progress', percent: pct }),
     )
     const digest = crypto.createHash('sha512').update(buf).digest('base64')

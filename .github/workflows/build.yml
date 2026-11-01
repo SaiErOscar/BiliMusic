@@ -183,6 +183,22 @@ jobs:
     env:
       HAS_RELEASE_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
+      # 发布说明从仓库里的 release-notes/<version>.md 读，故必须先检出。
+      # 该目录只放发布说明，不参与构建。
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # 发布说明的唯一来源：手写的 release-notes/<version>.md（缺则退回 tag message）。
+      # 不再用 generate_release_notes——commit 标题列表对用户没有意义。
+      # 取不到说明时脚本以非零码退出，让发布失败，而不是发一个空 release。
+      - name: Extract release notes
+        run: node scripts/release-notes.mjs > release-notes-body.md
+
       - name: Download Electron artifacts
         uses: actions/download-artifact@v4
         with:
@@ -211,6 +227,9 @@ jobs:
         with:
           name: BiliMusic ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
-          generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          # 发布说明来自 release-notes/<version>.md（v1.4.14-pre2 起）
+          body_path: release-notes-body.md
+          # 预览版（-preN）必须标成 prerelease：否则 releases/latest 会指向预览包，
+          # 而 OTA 清单正是从 latest 拉取，正式版用户会被推送到预览版本。
+          prerelease: ${{ contains(github.ref_name, '-pre') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
           files: release-assets/**
