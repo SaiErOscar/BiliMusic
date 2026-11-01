@@ -85,9 +85,15 @@ export function parseRecommendation(
   const start = raw.indexOf('{')
   const end = raw.lastIndexOf('}')
   if (start < 0 || end <= start) throw new Error('模型未返回可解析的 JSON')
-  const obj = JSON.parse(raw.slice(start, end + 1)) as {
-    greeting?: unknown
-    picks?: unknown
+  /*
+   * v1.4.14-pre5：与 aiPlaylist 同因——模型可能返回截断 JSON。
+   * 原来直接 parse 会让用户看到原生 SyntaxError，现统一为可读中文。
+   */
+  let obj: { greeting?: unknown; picks?: unknown }
+  try {
+    obj = JSON.parse(raw.slice(start, end + 1)) as { greeting?: unknown; picks?: unknown }
+  } catch {
+    throw new Error('模型返回的内容不是合法 JSON，请重试')
   }
   const greeting = typeof obj.greeting === 'string' ? obj.greeting.trim() : ''
   const byIndex = new Map(pool.map((c) => [c.index, c.track]))

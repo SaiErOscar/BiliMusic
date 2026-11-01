@@ -20,6 +20,7 @@ import {
 } from '@/utils/storage'
 import { MusicHero, MusicPageShell, LibraryCard, type LibraryItem } from '@/components/AppleMusicPage'
 import DiscoverAiRecommend from '@/components/DiscoverAiRecommend'
+import AiChatAssistant from '@/components/AiChatAssistant'
 import type { DownloadRecord, Track } from '@/types'
 import { resolveDownloadCover } from '@/utils/downloadCovers'
 import { platform } from '@/platform'
@@ -187,6 +188,12 @@ export default function Discover() {
         subtitle="最近播放、收藏、B 站收藏夹和本地下载，都收在一处，点开即可继续听。"
         tone="pink"
       />
+
+      {/*
+        v1.4.14-pre5 对话式入口：放在页面顶部（推荐板块之上），
+        一眼可见、不用翻菜单——入口埋起来等于没有入口。
+      */}
+      <AiChatAssistant />
 
       {/* v1.4.12-pre3 AI 推荐板块：模式由设置决定（默认点击后推荐，不点不消耗 API） */}
       <DiscoverAiRecommend onPlayTrack={(t) => player.play(t)} />

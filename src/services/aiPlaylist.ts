@@ -80,7 +80,17 @@ export function parsePlaylistJson(reply: string): { name?: string; description?:
   const start = raw.indexOf('{')
   const end = raw.lastIndexOf('}')
   if (start < 0 || end <= start) throw new Error('模型未返回可解析的 JSON')
-  const obj = JSON.parse(raw.slice(start, end + 1)) as { name?: unknown; description?: unknown; indexes?: unknown }
+  /*
+   * v1.4.14-pre5：模型偶尔返回截断的 JSON（生成中途被截断、或写完 {"name":"... 就停了）。
+   * 原实现直接 JSON.parse，用户会看到原生 SyntaxError（英文、带位置信息），
+   * 与 aiTrackInsight 的可读中文报错口径不一致。这里统一成中文提示。
+   */
+  let obj: { name?: unknown; description?: unknown; indexes?: unknown }
+  try {
+    obj = JSON.parse(raw.slice(start, end + 1)) as { name?: unknown; description?: unknown; indexes?: unknown }
+  } catch {
+    throw new Error('模型返回的内容不是合法 JSON，请重试')
+  }
   const indexes = Array.isArray(obj.indexes)
     ? obj.indexes.map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0)
     : []
