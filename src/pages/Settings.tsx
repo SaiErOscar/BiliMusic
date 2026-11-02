@@ -967,11 +967,11 @@ export default function Settings() {
               {/*
                 v1.4.13-pre11（用户第 5、6 项）：两个开关合并成一行——
                 板块有 7 行上限，拆成两行会超（实测 8 行）。
-                副行 = 主行下方的译文或 AI 增强；外文自动增强默认关闭（会消耗 API）。
+                副行 = 主行下方的译文或 AI 翻译；外文自动翻译默认关闭（会消耗 API）。
               */}
               <SettingsRow
                 label="双语副行"
-                description="桌面歌词在主行下方显示译文或 AI 增强；开启「自动」后，外文歌词没有现成译文时会自动翻译一次（消耗 API）"
+                description="桌面歌词在主行下方显示译文或 AI 翻译；开启「自动」后，外文歌词没有现成译文时会自动翻译一次（消耗 API）"
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <ToggleSwitch

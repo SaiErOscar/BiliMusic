@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -902,38 +903,18 @@ function LyricsPanel({
 }) {
   const { status, result, choose, retry, offset, adjustOffset, resetOffset } = lyrics
 
-  // v1.4.11-pre6 AI 歌词增强：单键切换「生成 → 还原」
+  // v1.4.11-pre6 AI 歌词翻译：单键切换「生成 → 还原」
   const [aiLyricBusy, setAiLyricBusy] = useState(false)
-  const toggleAiLyric = async () => {
-    if (lyrics.hasAiEnhance) {
-      lyrics.clearAiEnhance()
-      // v1.4.13-pre2 学习信号：还原说明这次增强不合口味
-      void platform.userProfile?.record('lyricReverted').catch(() => {})
-      return
-    }
+  /*
+   * v1.4.14-pre8（用户反馈）：中文歌的二次确认从系统原生对话框改为应用内抽屉。
+   * 原生框带系统蓝 i 图标、与播放页视觉完全两套，用户明确要求换成抽屉式确认。
+   * 抽屉不打断播放：它只盖在歌词面板上，音频与进度条照常走。
+   */
+  const [zhConfirmOpen, setZhConfirmOpen] = useState(false)
+
+  /** 真正发起翻译（确认路径与免确认路径共用） */
+  const runAiTranslate = async () => {
     if (!lyrics.rawResult?.lines?.length) return
-    /*
-     * v1.4.13-pre11（用户第 7 项）：中文歌先提示「这是中文歌曲」，
-     * 用户确认后再增强。
-     *
-     * 理由：中文歌做翻译没有意义（译出来的还是中文），而这一步会真实消耗 API。
-     * 所以不直接拒绝，也不默默执行——问一句，让用户自己决定。
-     */
-    if (detectLyricLanguage(lyrics.rawResult.lines) === 'zh') {
-      /*
-       * v1.4.13-pre14：改用系统原生对话框（主进程 dialog.showMessageBox），
-       * 不再用 window.confirm 的 Chromium 自绘弹窗。无该 capability（Web / 移动端 /
-       * 老 preload）时降级回 window.confirm，行为与原来完全一致。
-       */
-      const ask = platform.nativeDialog?.confirm
-      const ok = ask
-        ? await ask({
-            message: '这是中文歌曲',
-            detail: '翻译对中文歌通常没有意义，且会消耗 API 额度。仍要做 AI 增强吗？',
-          })
-        : window.confirm('这是中文歌曲。\n\n翻译对中文歌通常没有意义，且会消耗 API 额度。\n仍要做 AI 增强吗？')
-      if (!ok) return
-    }
     setAiLyricBusy(true)
     try {
       const config = await getAiConfig()
@@ -949,6 +930,27 @@ function LyricsPanel({
     } finally {
       setAiLyricBusy(false)
     }
+  }
+
+  const toggleAiLyric = async () => {
+    if (lyrics.hasAiEnhance) {
+      lyrics.clearAiEnhance()
+      // v1.4.13-pre2 学习信号：还原说明这次增强不合口味
+      void platform.userProfile?.record('lyricReverted').catch(() => {})
+      return
+    }
+    if (!lyrics.rawResult?.lines?.length) return
+    /*
+     * v1.4.13-pre11（用户第 7 项）：中文歌先提示「这是中文歌曲」，用户确认后再翻译。
+     *
+     * 理由：中文歌做翻译没有意义（译出来的还是中文），而这一步会真实消耗 API。
+     * 所以不直接拒绝，也不默默执行——问一句，让用户自己决定。
+     */
+    if (detectLyricLanguage(lyrics.rawResult.lines) === 'zh') {
+      setZhConfirmOpen(true)
+      return
+    }
+    await runAiTranslate()
   }
   // v1.4.9-pre2 歌词双语开关：LyricsPanel 是独立组件，需自行读取设置
   // （顶层 NowPlaying 的 settings 不在本作用域内）
@@ -1089,7 +1091,7 @@ function LyricsPanel({
             <Search size={15} />
             <span>切换歌词</span>
           </button>
-          {/* v1.4.11-pre6 AI 歌词增强：翻译 / 逐句赏析，仅叠加显示、不改原歌词 */}
+          {/* v1.4.11-pre6 AI 歌词翻译：翻译 / 逐句赏析，仅叠加显示、不改原歌词 */}
           {isAiSupported() && (
             <button
               type="button"
@@ -1099,7 +1101,7 @@ function LyricsPanel({
               title="用 AI 翻译或逐句赏析当前歌词（只影响显示）"
             >
               <Sparkles size={15} />
-              <span>{aiLyricBusy ? '处理中…' : lyrics.hasAiEnhance ? '还原歌词' : 'AI 增强'}</span>
+              <span>{aiLyricBusy ? '处理中…' : lyrics.hasAiEnhance ? '还原歌词' : 'AI 翻译'}</span>
             </button>
           )}
           {status === 'ok' && (
@@ -1189,6 +1191,79 @@ function LyricsPanel({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/*
+        v1.4.14-pre8（用户反馈）：中文歌翻译前的二次确认。
+        沿用 AI 设置抽屉的外观与交互范式（ai-sheet-overlay / ai-sheet / ai-sheet__*），
+        不再用系统原生对话框，也不用浏览器自带的阻塞式确认框——两者都与产品 UI 两套。
+        只做二次确认，不接管播放：底层音频照常播放，抽屉关掉即回到歌词。
+
+        必须挂到 body：沉浸态下 .lyrics-panel 带 filter/transform，
+        那会让 position: fixed 改为相对该面板定位，再被外层卡片的 overflow: hidden 裁掉。
+      */}
+      {createPortal(
+        <AnimatePresence>
+          {zhConfirmOpen && (
+            <motion.div
+              className="ai-sheet-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              onClick={() => setZhConfirmOpen(false)}
+            >
+              <motion.div
+                className="ai-sheet ai-sheet--confirm"
+                role="dialog"
+                aria-modal="true"
+                aria-label="这是中文歌曲"
+                initial={{ opacity: 0, y: 18, scale: 0.985 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 18, scale: 0.985 }}
+                transition={spring}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="ai-sheet__head">
+                  <strong>这是中文歌曲</strong>
+                  <button type="button" className="ai-sheet__close" onClick={() => setZhConfirmOpen(false)}>×</button>
+                </div>
+                <div className="ai-sheet__body">
+                  <div className="ai-sheet__field">
+                    <span className="ai-sheet__label">翻译对中文歌意义有限</span>
+                    <span className="ai-sheet__hint">
+                      原文已经是中文，翻译的结果只是把同样的意思换一种说法；
+                      歌词的节奏与语气也不会因此变好。
+                    </span>
+                  </div>
+                  <div className="ai-sheet__field">
+                    <span className="ai-sheet__label">会消耗 API 额度</span>
+                    <span className="ai-sheet__hint">
+                      整首歌词会一次性发给所配置的服务商，按量计费；中途关掉不会退回。
+                    </span>
+                  </div>
+                  <div className="ai-sheet__row ai-sheet__row--end">
+                    <button
+                      type="button"
+                      className="ai-sheet__btn"
+                      onClick={() => setZhConfirmOpen(false)}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      className="ai-sheet__btn ai-sheet__btn--primary"
+                      onClick={() => { setZhConfirmOpen(false); void runAiTranslate() }}
+                    >
+                      继续翻译
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
     </div>
   )
 }

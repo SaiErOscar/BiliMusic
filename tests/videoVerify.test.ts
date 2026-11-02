@@ -410,7 +410,12 @@ describe('pickExternalTracks：搜索 → AI 筛选', () => {
 
     expect(r.aiFailed).toBe(false)
     expect(r.considered).toBe(3)
-    expect(r.selected.map((s) => s.bvid)).toEqual(['BV1GJ411x7h7', 'BV1aa411x7h7'])
+    /*
+     * v1.4.14-pre8（用户第 3 项）：一个关键词只贡献一条。
+     * 这三条候选同属关键词「晴天 周杰伦」，AI 虽然挑了两条，
+     * 也只能留下它排序里的第一条。
+     */
+    expect(r.selected.map((s) => s.bvid)).toEqual(['BV1GJ411x7h7'])
     expect(r.selected[0]).toEqual({
       bvid: 'BV1GJ411x7h7',
       title: '周杰伦《晴天》官方MV',
@@ -519,7 +524,10 @@ describe('pickExternalTracks：搜索 → AI 筛选', () => {
     expect(r.considered).toBe(24)
     expect(aiChatMock).toHaveBeenCalledTimes(3)
     expect(aiChatMock.mock.calls.map((call) => bvidsInFilterCall(call).length)).toEqual([10, 10, 4])
-    expect(r.selected).toHaveLength(24)
+    // 分批照旧（24 条候选仍要分三批送），但每个关键词只留一条 → 3 个词最多 3 条
+    expect(r.selected).toHaveLength(3)
+    // 三个关键词各留一条；worker 池的完成顺序不保证，所以只比集合不比顺序
+    expect(r.selected.map((s) => s.keyword).sort()).toEqual(['k1', 'k2', 'k3'])
     expect(r.aiFailed).toBe(false)
   })
 
@@ -548,5 +556,119 @@ describe('pickExternalTracks：搜索 → AI 筛选', () => {
     expect(r.selected).toEqual([])
     expect(r.aiFailed).toBe(true)
     expect(r.considered).toBe(16)
+  })
+})
+
+/*
+ * v1.4.14-pre8（用户第 3 项）：曲库外推荐「每个搜索词只取一首」。
+ *
+ * 动机是用户原话：都验收通过时，每个搜索词只取一首。
+ * 同一关键词的搜索结果彼此高度相似，全收等于让一个词灌满整个池外分组。
+ * 这一组测试把「一个词一条」和「留哪一条」两件事分别钉死。
+ */
+describe('pickExternalTracks：每个关键词只留一条', () => {
+  it('3 个关键词最多 3 条（每词 8 条候选全部通过 AI 也一样）', async () => {
+    searchVideoMock.mockImplementation((keyword: string) => {
+      const base = Number(keyword.slice(1)) * 10
+      return Promise.resolve(
+        searchResult(
+          Array.from({ length: RESULTS_PER_KEYWORD }, (_, i) =>
+            searchItem(makeBvid(base + i), '歌-' + keyword + '-' + i),
+          ),
+        ),
+      )
+    })
+    keepEverything()
+
+    const r = await pickExternalTracks(['k1', 'k2', 'k3'], { intent: '随便', limit: 5 }, baseSettings)
+
+    expect(r.selected).toHaveLength(3)
+    expect(r.selected.map((s) => s.keyword).sort()).toEqual(['k1', 'k2', 'k3'])
+    expect(r.aiFailed).toBe(false)
+  })
+
+  it('保留的是 AI 排序里最先出现的那条，而不是搜索结果里的第一条', async () => {
+    // 同一关键词下 3 条候选；AI 把搜索结果里的第 3 条排在最前面
+    searchVideoMock.mockResolvedValue(
+      searchResult([
+        searchItem('BV1aa411x7h7', '晴天 吉他弹唱'),
+        searchItem('BV1bb411x7h7', '晴天 架子鼓教学'),
+        searchItem('BV1cc411x7h7', '周杰伦《晴天》官方MV'),
+      ]),
+    )
+    aiChatMock.mockResolvedValue(
+      JSON.stringify({
+        picks: [
+          { bvid: 'BV1cc411x7h7', reason: '就是原曲' },
+          { bvid: 'BV1aa411x7h7', reason: '安静的翻唱' },
+          { bvid: 'BV1bb411x7h7', reason: '教学' },
+        ],
+      }),
+    )
+
+    const r = await pickExternalTracks(['晴天'], { intent: '想听原曲', limit: 5 }, baseSettings)
+
+    expect(r.selected.map((s) => s.bvid)).toEqual(['BV1cc411x7h7'])
+    expect(r.selected[0].reason).toBe('就是原曲')
+  })
+
+  it('模型回抄的无效 bvid 不占该关键词的名额', async () => {
+    searchVideoMock.mockResolvedValue(
+      searchResult([searchItem('BV1aa411x7h7', '晴天 吉他弹唱')]),
+    )
+    aiChatMock.mockResolvedValue(
+      JSON.stringify({
+        picks: [
+          // 编造的号：不存在于候选集合，必须丢弃且不能让「晴天」失去唯一名额
+          { bvid: 'BV1xx411c7mD', reason: '编的' },
+          { bvid: 'BV1aa411x7h7', reason: '安静的翻唱' },
+        ],
+      }),
+    )
+
+    const r = await pickExternalTracks(['晴天'], { intent: '随便', limit: 5 }, baseSettings)
+
+    expect(r.selected.map((s) => s.bvid)).toEqual(['BV1aa411x7h7'])
+  })
+
+  it('跨批次也不重复：同词候选落在不同批次里仍只留一条', async () => {
+    /*
+     * 第一批 10 条全是 k1 的候选，第二批含 k1 剩余 + k2 的候选。
+     * 去重状态必须跨批次延续，否则 k1 会在第二批里再贡献一条。
+     */
+    searchVideoMock.mockImplementation((keyword: string) => {
+      if (keyword === 'k1') {
+        return Promise.resolve(
+          searchResult(
+            Array.from({ length: 12 }, (_, i) => searchItem(makeBvid(10 + i), 'k1-' + i)),
+          ),
+        )
+      }
+      return Promise.resolve(
+        searchResult(Array.from({ length: 8 }, (_, i) => searchItem(makeBvid(40 + i), 'k2-' + i))),
+      )
+    })
+    keepEverything()
+
+    const r = await pickExternalTracks(['k1', 'k2'], { intent: '随便', limit: 5 }, baseSettings)
+
+    expect(r.selected).toHaveLength(2)
+    const keywords = r.selected.map((s) => s.keyword)
+    expect(keywords.filter((k) => k === 'k1')).toHaveLength(1)
+    expect(keywords.filter((k) => k === 'k2')).toHaveLength(1)
+    // considered 仍是去重前的候选总数，不受「只留一条」影响
+    expect(r.considered).toBe(20)
+  })
+
+  it('AI 全部判不合适时仍是空结果，不是失败', async () => {
+    searchVideoMock.mockResolvedValue(
+      searchResult([searchItem('BV1aa411x7h7', '晴天 架子鼓教学')]),
+    )
+    aiChatMock.mockResolvedValue(JSON.stringify({ picks: [] }))
+
+    const r = await pickExternalTracks(['晴天'], { intent: '想听原曲', limit: 5 }, baseSettings)
+
+    expect(r.selected).toEqual([])
+    expect(r.aiFailed).toBe(false)
   })
 })

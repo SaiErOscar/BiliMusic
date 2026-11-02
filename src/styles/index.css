@@ -6363,4 +6363,90 @@ body {
   transition: background var(--duration-fast) ease;
 }
 
+/* ===== v1.4.14-pre8 对话助手改为抽屉（用户第 4 项）===== */
+
+/*
+ * 助手入口从「页面顶部常驻板块」改成「为你推荐标题行右侧的按钮」。
+ * 下面只新增：按钮组排布 + 抽屉内部的两处尺寸约束。
+ * 抽屉外壳复用既有的 ai-sheet__* 样式，不复制一份。
+ */
+
+/* 标题行右侧：助手按钮与「换一批」并排，窄屏换行而不是把标题挤扁 */
+.discover-ai__acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 推荐板块不渲染时（AI 不可用 / 推荐方式为 off）只留按钮，右对齐保持原位 */
+.discover-ai__assistant-only {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 抽屉比设置抽屉宽一点：对话流是竖向长内容，窄了气泡会频繁折行 */
+.ai-chat-sheet {
+  width: min(640px, calc(100vw - 48px));
+  max-height: min(82vh, 720px);
+}
+
+/* 对话本体自己带内边距，抽屉 body 只负责滚动，避免两层 padding 叠加 */
+.ai-chat-sheet__body {
+  padding: 0;
+}
+
+/* 抽屉里的对话本体不再画自己的卡片边框——外壳已经是一张卡片 */
+.ai-chat--body {
+  padding: 0 16px 16px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* 对话流在抽屉里限高：输入框与快捷句始终可见，不需要滚回顶部才能提问 */
+.ai-chat-sheet__body .ai-chat__log {
+  max-height: 46vh;
+}
+
+/* ===== v1.4.14-pre8 歌词面板的中文歌确认抽屉 =====
+   复用 ai-sheet__* 的外观与交互范式，只补三个它没覆盖的小件：
+   窄一点的身材、右对齐的操作行，以及两个实心/描边按钮。 */
+
+.ai-sheet--confirm {
+  width: min(420px, calc(100vw - 48px));
+}
+
+.ai-sheet__row--end {
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.ai-sheet__btn {
+  min-height: 34px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  color: var(--color-foreground);
+  font: 600 13px/1 var(--font-body);
+  cursor: pointer;
+  transition: background var(--duration-fast) ease;
+}
+
+.ai-sheet__btn:hover {
+  background: var(--color-primary-light);
+}
+
+.ai-sheet__btn--primary {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-card);
+}
+
+.ai-sheet__btn--primary:hover {
+  background: var(--color-primary);
+  opacity: 0.9;
+}
+
 

@@ -7,9 +7,22 @@
  * - off：整块不渲染
  *
  * 组件自己管请求与错误态，不污染 Discover 页的数据流。
+ *
+ * ## v1.4.14-pre8（用户第 4 项）：对话助手从页面顶部搬到这里
+ *
+ * 用户原话：把「和助手说句话」做成「为你推荐」旁的按钮，需要时在抽屉中打开，
+ * 避免占用启动后「为你推荐」的推荐位、占据焦点，应将焦点还给推荐。
+ *
+ * 于是助手入口渲染成标题行右侧的一个按钮（与「换一批」同一行），
+ * 点击才在抽屉里挂载对话本体。页面初始加载时助手不占任何版面，
+ * 推荐板块重新拿到顶部位置与视觉焦点。
+ *
+ * 放在这里而不是 Discover 页的理由：按钮与抽屉必须共享同一份开关状态，
+ * 而「为你推荐」的标题行就在本组件里——状态跟着 DOM 走，不需要往页面透传。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Sparkles, RefreshCw, Heart, EyeOff } from 'lucide-react'
+import { AiChatSheet, AiChatSheetButton } from '@/components/AiChatAssistant'
 import { getAiConfig, isAiSupported } from '@/services/ai'
 import { platform } from '@/platform'
 import { generateRecommendation, type AiRecommendation } from '@/services/aiRecommend'
@@ -33,6 +46,8 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
   const { settings: appSettings } = useAppSettings()
   const externalOn = appSettings.aiExternalRecommend
   const [settings, setSettings] = useState<AiSettings | null>(null)
+  /** v1.4.14-pre8：助手抽屉开关；关闭时对话本体不挂载，页面顶部不被占位 */
+  const [assistantOpen, setAssistantOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [data, setData] = useState<AiRecommendation | null>(null)
@@ -124,7 +139,21 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
     void load()
   }, [mode, configured, data, busy, load])
 
-  if (!isAiSupported() || mode === 'off') return null
+  /*
+   * 推荐板块本身不渲染时（AI 不可用 / 推荐方式为 off），助手入口不能跟着消失——
+   * 它是独立功能，之前一直挂在页面顶部。
+   *
+   * 此时只渲染那个按钮（对话本体只在抽屉里挂载），所以不会重新占回推荐位，
+   * 也不会在页面加载时抢焦点。
+   */
+  if (!isAiSupported() || mode === 'off') {
+    return (
+      <div className="discover-ai__assistant-only">
+        <AiChatSheetButton open={assistantOpen} onOpenChange={setAssistantOpen} />
+        <AiChatSheet open={assistantOpen} onClose={() => setAssistantOpen(false)} />
+      </div>
+    )
+  }
 
   const greeting = data?.greeting
   const tracks = data?.tracks || []
@@ -169,23 +198,27 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
           )}
           {data?.contextLabel && <span className="discover-ai__ctx">{data.contextLabel}</span>}
         </div>
-        {mode === 'click' && (
-          <button
-            type="button"
-            className="discover-ai__btn"
-            onClick={() => void load()}
-            disabled={busy || !configured}
-          >
-            <RefreshCw size={14} />
-            {busy ? '生成中…' : data ? '换一批' : '获取推荐'}
-          </button>
-        )}
-        {mode === 'auto' && data && (
-          <button type="button" className="discover-ai__btn" onClick={() => void load()} disabled={busy}>
-            <RefreshCw size={14} />
-            {busy ? '生成中…' : '换一批'}
-          </button>
-        )}
+        <div className="discover-ai__acts">
+          {/* v1.4.14-pre8：助手入口挂在推荐标题行右侧，不再占页面顶部 */}
+          <AiChatSheetButton open={assistantOpen} onOpenChange={setAssistantOpen} />
+          {mode === 'click' && (
+            <button
+              type="button"
+              className="discover-ai__btn"
+              onClick={() => void load()}
+              disabled={busy || !configured}
+            >
+              <RefreshCw size={14} />
+              {busy ? '生成中…' : data ? '换一批' : '获取推荐'}
+            </button>
+          )}
+          {mode === 'auto' && data && (
+            <button type="button" className="discover-ai__btn" onClick={() => void load()} disabled={busy}>
+              <RefreshCw size={14} />
+              {busy ? '生成中…' : '换一批'}
+            </button>
+          )}
+        </div>
       </div>
 
       {!configured && (
@@ -353,6 +386,9 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
       {!data && !error && configured && mode === 'click' && !busy && (
         <p className="discover-ai__hint">点「获取推荐」，让 AI 按当前时间与你的听歌习惯挑几首。</p>
       )}
+
+      {/* 抽屉挂在板块末尾：关闭时它渲染 null，不占位、不进 Tab 序 */}
+      <AiChatSheet open={assistantOpen} onClose={() => setAssistantOpen(false)} />
     </section>
   )
 }

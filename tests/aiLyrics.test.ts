@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import path from 'path'
-import { AI_LYRIC_BATCH, AI_LYRIC_MODE_LABELS, parseLyricLines, pickTranslatableIndexes } from '../src/services/aiLyrics'
+import { AI_LYRIC_BATCH, AI_LYRIC_MODE_LABELS, AI_LYRIC_SINGLE_PASS_MAX, parseLyricLines, pickTranslatableIndexes } from '../src/services/aiLyrics'
 
 // v1.4.11-pre6：AI 歌词增强的纯逻辑部分（解析 / 行号对齐 / 分批）。
 // 真实 LLM 调用与渲染效果无法在 jsdom 里测。
@@ -46,8 +46,10 @@ describe('可处理行筛选', () => {
 })
 
 describe('分批与安全约束', () => {
-  it('单批 40 行', () => {
+  it('降级分批时单批 40 行；整首直发阈值是 120 行（v1.4.14-pre8）', () => {
+    // 40 保持不变：桌面歌词那条链路也导入它，那边超时只有 45s
     expect(AI_LYRIC_BATCH).toBe(40)
+    expect(AI_LYRIC_SINGLE_PASS_MAX).toBe(120)
   })
 
   it('两种模式都有中文标签', () => {

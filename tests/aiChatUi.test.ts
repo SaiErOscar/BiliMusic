@@ -113,13 +113,25 @@ describe('对话 UI · 未配置 AI 的降级', () => {
   })
 
   it('入口不因未配置而整块消失', () => {
-    // 组件永远渲染入口：唯一的 return null 在 loadConfig 里（取不到配置就交给调用方给指引），
-    // 而不是在 render 里把整块藏掉——藏起来等于没有入口。
-    const sectionAt = chatSrc.indexOf('<section className="ai-chat"')
-    expect(sectionAt).toBeGreaterThan(-1)
-    const nullAt = chatSrc.indexOf('return null')
-    expect(nullAt).toBeGreaterThan(-1)
-    expect(nullAt).toBeLessThan(sectionAt)
+    /*
+     * v1.4.14-pre8：对话本体搬进抽屉后，组件里合法的 return null 变成两处——
+     * loadConfig 里（取不到配置交给调用方给指引）与 AiChatSheet 里（抽屉关着不挂载）。
+     * 要守的语义没变：**入口按钮**无论如何都渲染，不在 render 里被藏掉。
+     */
+    const bodyAt = chatSrc.indexOf('function AiChatBody()')
+    expect(bodyAt).toBeGreaterThan(-1)
+    // loadConfig 的 return null 在对话本体内部（取不到配置就交给调用方给指引），
+    // 而不是在 render 里把整块藏掉
+    const nullAt = chatSrc.indexOf('return null', bodyAt)
+    expect(nullAt).toBeGreaterThan(bodyAt)
+    expect(nullAt).toBeLessThan(chatSrc.indexOf('className="ai-chat ai-chat--body"'))
+
+    // 入口按钮无条件渲染，不受 open 状态影响
+    const btnAt = chatSrc.indexOf('export function AiChatSheetButton')
+    expect(btnAt).toBeGreaterThan(-1)
+    const btnSrc = chatSrc.slice(btnAt, chatSrc.indexOf('export function AiChatSheet('))
+    expect(btnSrc).toContain('和助手说句话')
+    expect(btnSrc).not.toContain('return null')
   })
 
   it('环境不支持时说明是环境原因', () => {
@@ -168,14 +180,62 @@ describe('对话 UI · 确认框与可访问性', () => {
   })
 })
 
-describe('对话 UI · 入口可发现', () => {
-  it('挂在发现页且排在推荐板块之前', () => {
-    expect(discoverSrc).toContain("import AiChatAssistant from '@/components/AiChatAssistant'")
-    const chatAt = discoverSrc.indexOf('<AiChatAssistant />')
-    const recAt = discoverSrc.indexOf('<DiscoverAiRecommend')
-    expect(chatAt).toBeGreaterThan(-1)
-    expect(recAt).toBeGreaterThan(-1)
-    expect(chatAt).toBeLessThan(recAt)
+/*
+ * v1.4.14-pre8（用户第 4 项）：入口从「页面顶部常驻」改成「为你推荐旁的按钮 + 抽屉」。
+ *
+ * 用户原话：做成「为你推荐」旁的按钮，需要时在抽屉中打开，
+ * 避免占用启动后「为你推荐」的推荐位、占据焦点，应将焦点还给推荐。
+ *
+ * 所以原来的「必须排在推荐板块之前」断言被反过来了：
+ * 现在要守的是「发现页里根本不出现常驻的助手板块」。
+ */
+describe('对话 UI · 入口是「为你推荐」旁的按钮，抽屉里打开', () => {
+  const recommendSrc = read('../src/components/DiscoverAiRecommend.tsx')
+
+  it('发现页不再常驻渲染助手板块', () => {
+    expect(discoverSrc).not.toContain('<AiChatAssistant />')
+    expect(discoverSrc).not.toContain("from '@/components/AiChatAssistant'")
+    // 助手入口搬进了推荐板块组件
+    expect(recommendSrc).toContain("from '@/components/AiChatAssistant'")
+  })
+
+  it('入口按钮挂在「为你推荐」标题行里（与「换一批」同一容器）', () => {
+    const headAt = recommendSrc.indexOf('className="discover-ai__head"')
+    expect(headAt).toBeGreaterThan(-1)
+    // 按钮容器在标题行内部；从容器位置往后找按钮，避开 off 分支里的那一处
+    const actsAt = recommendSrc.indexOf('className="discover-ai__acts"', headAt)
+    expect(actsAt).toBeGreaterThan(headAt)
+    const btnAt = recommendSrc.indexOf('<AiChatSheetButton', actsAt)
+    expect(btnAt).toBeGreaterThan(actsAt)
+    // 按钮仍在标题行闭合之前（标题行之后紧跟的是「未配置」提示块），即真的在那一行里
+    expect(btnAt).toBeLessThan(recommendSrc.indexOf('{!configured && (', btnAt))
+  })
+
+  it('抽屉用既有的 ai-sheet__* 范式，不另起一套外壳', () => {
+    expect(chatSrc).toContain('ai-sheet-overlay')
+    expect(chatSrc).toContain('ai-sheet__head')
+    expect(chatSrc).toContain('ai-sheet__close')
+    expect(chatSrc).toContain('ai-sheet__body')
+    expect(chatSrc).toContain('role="dialog"')
+    expect(chatSrc).toContain('aria-modal="true"')
+  })
+
+  it('关闭时对话本体不挂载：初始加载不占推荐位、不抢焦点', () => {
+    // 抽屉未打开直接 return null —— DOM 里没有输入框，自然无从抢焦点
+    const sheetAt = chatSrc.indexOf('export function AiChatSheet(')
+    expect(sheetAt).toBeGreaterThan(-1)
+    const sheetSrc = chatSrc.slice(sheetAt)
+    const guardAt = sheetSrc.indexOf('if (!open) return null')
+    expect(guardAt).toBeGreaterThan(-1)
+    // 守卫必须在渲染对话本体之前
+    expect(guardAt).toBeLessThan(sheetSrc.indexOf('<AiChatBody />'))
+  })
+
+  it('打开后焦点交给输入框，且可 Esc / 点遮罩关闭', () => {
+    expect(chatSrc).toContain("querySelector<HTMLInputElement>('.ai-chat__input')")
+    expect(chatSrc).toContain("e.key === 'Escape'")
+    expect(chatSrc).toContain('onClick={onClose}')
+    expect(chatSrc).toContain('aria-label="关闭对话助手"')
   })
 })
 

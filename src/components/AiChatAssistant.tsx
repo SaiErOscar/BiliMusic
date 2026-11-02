@@ -14,6 +14,21 @@
  *   不静默失败、不硬猜——猜错会真的去放歌或建歌单，代价比多问一句高。
  * - **未配置 AI 不报错**：入口照常可见，点了给「去设置」的指引，
  *   而不是发一个注定失败的请求再弹红字。
+ *
+ * ## v1.4.14-pre8（用户第 4 项）：从「页面顶部常驻」改成「抽屉里打开」
+ *
+ * 用户原话：把「和助手说句话」做成「为你推荐」旁的按钮，需要时在抽屉中打开，
+ * 避免占用启动后「为你推荐」的推荐位、占据焦点，应将焦点还给推荐。
+ *
+ * 于是本组件拆成两层：
+ * - AiChatAssistant：对话本体（输入框 + 对话流），只管「说一句话之后干什么」，
+ *   六种意图分支、缓存、取消逻辑一行没动，只把最外层容器从 section 换成 div，
+ *   因为抽屉外壳已经提供了 section 语义。
+ * - AiChatSheet：入口按钮 + 抽屉外壳（复用 ai-sheet__* 范式）。
+ *   关闭时对话本体**不挂载**：既不占页面顶部，也不在初始加载时抢焦点。
+ *
+ * 关掉再打开会丢对话记录，这是刻意的——抽屉是「需要时才叫出来」的临时面板，
+ * 保留跨次会话的历史会让「打开抽屉」变成「翻旧账」。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -108,7 +123,13 @@ function searchItemToTrack(item: SearchItem): Track {
   }
 }
 
-export default function AiChatAssistant() {
+/**
+ * 对话本体：输入框 + 对话流 + 六种意图分支。
+ *
+ * 不对外导出——入口与外壳由下面的 AiChatAssistant 负责，
+ * 这样「什么时候显示对话」和「说一句话之后干什么」互不纠缠。
+ */
+function AiChatBody() {
   const player = usePlayer()
   const navigate = useNavigate()
   const { settings } = useAppSettings()
@@ -471,13 +492,15 @@ export default function AiChatAssistant() {
   }, [])
 
   return (
-    <section className="ai-chat" aria-label="对话式音乐助手">
+    <div className="ai-chat ai-chat--body">
+      {/*
+        标题由抽屉头承担（ai-sheet__head），这里只留「清空」——
+        同一个标题出现两次会让抽屉显得像两层嵌套的弹窗。
+      */}
       <div className="ai-chat__head">
-        <div className="ai-chat__title">
-          <MessageCircle size={20} aria-hidden="true" />
-          <strong>和助手说句话</strong>
-          <Sparkles size={14} aria-hidden="true" />
-        </div>
+        <p className="ai-chat__sub">
+          用一句人话说你想听什么、想干什么，助手会去调对应的功能。
+        </p>
         {turns.length > 0 && (
           <button type="button" className="ai-chat__ghost" onClick={clearLog} aria-label="清空对话记录">
             <Trash2 size={14} aria-hidden="true" />
@@ -485,9 +508,6 @@ export default function AiChatAssistant() {
           </button>
         )}
       </div>
-      <p className="ai-chat__sub">
-        用一句人话说你想听什么、想干什么，助手会去调对应的功能。
-      </p>
 
       <form
         className="ai-chat__form"
@@ -686,6 +706,114 @@ export default function AiChatAssistant() {
           )
         })}
       </div>
-    </section>
+    </div>
+  )
+}
+
+interface SheetProps {
+  /** 抽屉开关；由「为你推荐」标题行上的按钮控制 */
+  open: boolean
+  onClose: () => void
+}
+
+/**
+ * 入口按钮（v1.4.14-pre8 用户第 4 项）。
+ *
+ * 只出按钮，摆位交给调用方——「为你推荐」标题行右侧是它该在的地方。
+ * 拆成独立组件是为了让调用方能在推荐板块整块不渲染时（AI 不可用 /
+ * 推荐方式为 off）仍然把这个入口留在页面上。
+ */
+export function AiChatSheetButton({ open, onOpenChange }: { open: boolean; onOpenChange: (next: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      className="discover-ai__btn ai-chat__entry"
+      onClick={() => onOpenChange(true)}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      aria-label="打开对话式音乐助手"
+    >
+      <MessageCircle size={14} aria-hidden="true" />
+      和助手说句话
+    </button>
+  )
+}
+
+/**
+ * 抽屉外壳（v1.4.14-pre8 用户第 4 项）。
+ *
+ * 复用项目既有的 ai-sheet__* 范式：点遮罩关闭、Esc 关闭、打开时焦点进输入框。
+ *
+ * 关闭时对话本体**完全不挂载**——这是「把焦点还给推荐」的硬保证：
+ * 页面初始加载时 DOM 里根本没有助手的输入框，也就无从抢焦点或占位。
+ */
+export function AiChatSheet({ open, onClose }: SheetProps) {
+  const sheetRef = useRef<HTMLDivElement | null>(null)
+
+  // Esc 关闭：抽屉的通用预期，不依赖鼠标
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
+  /*
+   * 打开后把焦点交给输入框：用户点「和助手说句话」就是想马上说，
+   * 让焦点落在对话面板外会白白多一次点击。
+   * 关闭时不主动把焦点送回按钮——浏览器会回退到触发元素，够用且不打断。
+   */
+  useEffect(() => {
+    if (!open) return
+    const input = sheetRef.current?.querySelector<HTMLInputElement>('.ai-chat__input')
+    input?.focus()
+  }, [open])
+
+  if (!open) return null
+
+  return (
+    <div className="ai-sheet-overlay ai-chat-sheet__overlay" onClick={onClose}>
+      <div
+        className="ai-sheet ai-chat-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-label="对话式音乐助手"
+        ref={sheetRef}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="ai-sheet__head">
+          <div className="ai-chat__title">
+            <MessageCircle size={18} aria-hidden="true" />
+            <strong>和助手说句话</strong>
+            <Sparkles size={13} aria-hidden="true" />
+          </div>
+          <button type="button" className="ai-sheet__close" onClick={onClose} aria-label="关闭对话助手">
+            ×
+          </button>
+        </div>
+        <div className="ai-sheet__body ai-chat-sheet__body">
+          <AiChatBody />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 默认导出：按钮 + 抽屉的一体化组合，自带开关状态。
+ *
+ * 给「只想在原位放一个入口」的调用方用；需要把按钮摆进别人的标题行时，
+ * 直接用上面的 AiChatSheetButton + AiChatSheet 两个具名导出共享同一份状态。
+ */
+export default function AiChatAssistant() {
+  const [open, setOpen] = useState(false)
+  const close = useCallback(() => setOpen(false), [])
+  return (
+    <>
+      <AiChatSheetButton open={open} onOpenChange={setOpen} />
+      <AiChatSheet open={open} onClose={close} />
+    </>
   )
 }

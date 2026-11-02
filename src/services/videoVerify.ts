@@ -199,9 +199,22 @@ export function parseFilterReply(reply: string, allowed: Set<string>): FilterJud
 }
 
 /**
- * 主流程：关键词 → 搜索 → AI 筛选。
+ * 主流程：关键词 → 搜索 → AI 筛选 → 每个关键词只留一条。
  *
  * AI 筛选失败时整批丢弃并置 aiFailed=true，**不降级为本地关键词匹配**。
+ *
+ * ## 为什么每个关键词只留一条
+ *
+ * 用户明确要求：曲库外推荐「每个搜索词只取一首」。
+ * 同一关键词的搜索结果彼此高度相似（同一首歌的多个投稿、同一类翻唱），
+ * 全收会让池外分组被一个关键词灌满，看起来像「推荐」实则是同一件事的复读。
+ * 一个词一条，最终条数自然受关键词数量约束——3 个词最多 3 条。
+ *
+ * 保留规则是**AI 排序里最先出现的那条**：AI 已按符合意图的程度排过序，
+ * 首条就是它最认可的一条，不是随便取第一条。
+ *
+ * 与「截断到池内条数」的关系：本函数先按词去重，调用方（aiRecommend）
+ * 再 slice 到条数上限——顺序反过来的话，被截掉的可能是去重后本该留下的那条。
  */
 export async function pickExternalTracks(
   keywords: string[],
@@ -217,6 +230,8 @@ export async function pickExternalTracks(
   const byBvid = new Map(candidates.map((c) => [c.bvid, c]))
   const selected: SelectedCandidate[] = []
   const seen = new Set<string>()
+  /** 已贡献过结果的关键词：一个词只出一条 */
+  const usedKeywords = new Set<string>()
 
   // 分批送 AI：一次太多会降低判断准确度
   for (let i = 0; i < candidates.length; i += FILTER_BATCH_SIZE) {
@@ -241,6 +256,16 @@ export async function pickExternalTracks(
       if (seen.has(j.bvid)) continue
       const base = byBvid.get(j.bvid)
       if (!base) continue
+      /*
+       * 每个关键词只收一条。
+       *
+       * judged 已按 AI 的排序，循环又是顺序的，所以「第一次遇到某个关键词」
+       * 拿到的就是 AI 最认可的那条；后面的同词候选直接跳过。
+       * 判断放在 byBvid 之后：模型回抄的无效 bvid 不占额度，
+       * 否则一个错号就能让该关键词白白失去唯一的名额。
+       */
+      if (usedKeywords.has(base.keyword)) continue
+      usedKeywords.add(base.keyword)
       seen.add(j.bvid)
       selected.push({ ...base, reason: j.reason })
     }

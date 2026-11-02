@@ -20,7 +20,6 @@ import {
 } from '@/utils/storage'
 import { MusicHero, MusicPageShell, LibraryCard, type LibraryItem } from '@/components/AppleMusicPage'
 import DiscoverAiRecommend from '@/components/DiscoverAiRecommend'
-import AiChatAssistant from '@/components/AiChatAssistant'
 import type { DownloadRecord, Track } from '@/types'
 import { resolveDownloadCover } from '@/utils/downloadCovers'
 import { platform } from '@/platform'
@@ -190,12 +189,12 @@ export default function Discover() {
       />
 
       {/*
-        v1.4.14-pre5 对话式入口：放在页面顶部（推荐板块之上），
-        一眼可见、不用翻菜单——入口埋起来等于没有入口。
-      */}
-      <AiChatAssistant />
+        v1.4.14-pre8（用户第 4 项）：对话助手不再是页面顶部的常驻板块。
+        它改由「为你推荐」标题行右侧的按钮唤起、在抽屉中打开，
+        页面初始加载时助手不占推荐位、不抢焦点——焦点还给推荐。
 
-      {/* v1.4.12-pre3 AI 推荐板块：模式由设置决定（默认点击后推荐，不点不消耗 API） */}
+        v1.4.12-pre3 AI 推荐板块：模式由设置决定（默认点击后推荐，不点不消耗 API）
+      */}
       <DiscoverAiRecommend onPlayTrack={(t) => player.play(t)} />
 
       <LibraryCard
