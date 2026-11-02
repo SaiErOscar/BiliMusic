@@ -15,11 +15,7 @@ import { summarize, renderSummary } from '@/services/aiPortrait'
 import { loadPlayStats } from '@/utils/storage'
 import { buildCandidatePool, type AiPlaylistCandidate } from '@/services/aiPlaylist'
 import { loadProfileContext, renderExplicitFeedback, type ProfileContext } from '@/services/aiProfileContext'
-import {
-  verifyExternalCandidates,
-  type RawExternalCandidate,
-  type VerifiedCandidate,
-} from '@/services/videoVerify'
+import { pickExternalTracks, type SelectedCandidate } from '@/services/videoVerify'
 import type { AiSettings, Track } from '@/types'
 
 
@@ -70,13 +66,13 @@ export interface AiRecommendation {
   /** 生成时的时段描述，用于 UI 展示 */
   contextLabel: string
   /**
-   * v1.4.14-pre6 池外曲目：歌单/收藏/喜欢之外、且已通过验证器的条目。
-   * 未开启池外推荐、或全部未通过验证时为空数组（此时看 externalStatus）。
+   * v1.4.14-pre7 池外曲目：歌单/收藏/喜欢之外、经搜索并筛出的条目。
+   * 未开启池外推荐、或一条都没筛出时为空数组（此时看 externalStatus）。
    */
   externalTracks?: Track[]
-  /** 池外推荐的验证状态；老调用方没有该字段时按 'disabled' 处理 */
+  /** 池外推荐的状态；老调用方没有该字段时按 'disabled' 处理 */
   externalStatus?: ExternalStatus
-  /** 池外候选的验证失败条数，用于 UI 说明「校验丢弃了几条」 */
+  /** 搜到但未采用（被 AI 判为不对题或超出条数）的数量，用于 UI 说明 */
   externalRejected?: number
 }
 
@@ -93,45 +89,39 @@ export function timeContext(now = new Date()): { label: string; hour: number } {
 }
 
 /**
- * v1.4.14-pre6 池外目标条数：池内条数 × 1.5 向上取整。
+ * v1.4.14-pre7 池外目标条数：池内条数 × 1.5 向上取整。
  *
- * 多要 50% 是给验证器留损耗：模型编 BV 号、张冠李戴都是常态，
- * 按 1.5 倍申请、验证后再截断到池内条数，才可能凑满而不缩水。
+ * 多要 50% 是给筛选留余量：搜索能拿回一批候选，但 AI 只会挑其中真正对题的部分，
+ * 按 1.5 倍申请、筛选后再截断到池内条数，才可能凑满而不缩水。
  */
 export function externalTargetCount(limit: number): number {
   if (!Number.isFinite(limit) || limit <= 0) return 0
   return Math.ceil(limit * 1.5)
 }
 
-/** 池外候选的本地解析结果（尚未验证） */
-export interface RawExternalPick {
-  /** 模型声称的标题 */
-  title: string
-  bvid: string
-  reason: string
-}
-
 /**
- * 从模型回复里取出池外候选。
+ * 从模型回复里取出池外搜索关键词（v1.4.14-pre7）。
  *
- * 这里**只做结构收窄**，不判断 BV 号真假、也不判断标题对不对：
- * 那两步的唯一权威源是 verifyExternalCandidates，本地绝不做相似度兜底。
+ * 模型只负责「描述想找什么」，不负责给 ID——BV 号一律由 B 站搜索接口给出。
+ * 这是 pre6 失败的教训：让模型编 BV 号，验证再严也救不回来。
  */
-function parseExternalPicks(value: unknown): RawExternalPick[] {
+export function parseExternalKeywords(value: unknown): string[] {
   if (!Array.isArray(value)) return []
-  const out: RawExternalPick[] = []
+  const out: string[] = []
   const seen = new Set<string>()
   for (const item of value) {
-    if (!item || typeof item !== 'object') continue
-    const rec = item as { title?: unknown; bvid?: unknown; reason?: unknown }
-    const title = typeof rec.title === 'string' ? rec.title.trim() : ''
-    const bvid = typeof rec.bvid === 'string' ? rec.bvid.trim() : ''
-    // 缺标题或 BV 号的条目直接跳过：没有可核对的两端，留着只会变成一条无意义失败
-    if (!title || !bvid) continue
-    const key = bvid.toLowerCase()
+    // 容忍模型把关键词写成对象 {"q": "..."} 或直接写字符串
+    const raw = typeof item === 'string'
+      ? item
+      : item && typeof item === 'object' && typeof (item as { q?: unknown }).q === 'string'
+        ? (item as { q: string }).q
+        : ''
+    const kw = raw.trim()
+    if (!kw) continue
+    const key = kw.toLowerCase()
     if (seen.has(key)) continue
     seen.add(key)
-    out.push({ title, bvid, reason: typeof rec.reason === 'string' ? rec.reason.trim() : '' })
+    out.push(kw)
   }
   return out
 }
@@ -148,8 +138,8 @@ export function parseRecommendation(
 ): {
   greeting: string
   picked: { track: Track; reason: string }[]
-  /** v1.4.14-pre6 池外候选（未验证）；没有该字段时为空数组 */
-  external: RawExternalPick[]
+  /** v1.4.14-pre7 池外搜索关键词；没有该字段时为空数组 */
+  externalKeywords: string[]
 } {
   const fenced = reply.match(/```(?:json)?\s*([\s\S]*?)```/)
   const raw = (fenced ? fenced[1] : reply).trim()
@@ -160,12 +150,12 @@ export function parseRecommendation(
    * v1.4.14-pre5：与 aiPlaylist 同因——模型可能返回截断 JSON。
    * 原来直接 parse 会让用户看到原生 SyntaxError，现统一为可读中文。
    */
-  let obj: { greeting?: unknown; picks?: unknown; external?: unknown }
+  let obj: { greeting?: unknown; picks?: unknown; externalKeywords?: unknown }
   try {
     obj = JSON.parse(raw.slice(start, end + 1)) as {
       greeting?: unknown
       picks?: unknown
-      external?: unknown
+      externalKeywords?: unknown
     }
   } catch {
     throw new Error('模型返回的内容不是合法 JSON，请重试')
@@ -187,7 +177,7 @@ export function parseRecommendation(
       picked.push({ track, reason: typeof rec.reason === 'string' ? rec.reason.trim() : '' })
     }
   }
-  return { greeting, picked, external: parseExternalPicks(obj.external) }
+  return { greeting, picked, externalKeywords: parseExternalKeywords(obj.externalKeywords) }
 }
 
 export interface RecommendInput {
@@ -275,12 +265,19 @@ export function buildRecommendPrompt(input: RecommendPromptInput): {
    * 关键是第 8 条——必须把「编造会被校验丢弃」写成明确后果，
    * 否则模型会把 BV 号当占位符随便填，验证器全部丢弃后用户只会看到一条失败提示。
    */
+  /*
+   * v1.4.14-pre7 池外推荐规则：模型只给**搜索关键词**，不给 BV 号。
+   *
+   * pre6 让模型直接写 BV 号，实测幻觉严重：BV 号是 B 站内部标识，模型没有可靠来源，
+   * 只能编。验证再严也救不回来——大部分候选在存在性那步就死了。
+   * 现在改成模型描述「想找什么」，BV 号由搜索接口给出，模型永远碰不到 ID。
+   */
   const externalRules = wantsExternal
     ? [
-      '5. 候选清单之外，**另外**推荐 ' + externalLimit + ' 首曲库里没有的歌（可以是你觉得他会喜欢的任何歌）；',
-      '6. 每首必须给出真实存在的 B 站 BV 号（BV 加 10 位字母数字），bvid 写错等于这条作废；',
-      '7. BV 号必须是你确实见过的真实稿件：程序会逐条调用 B 站接口校验，**编造的 BV 号会被校验直接丢弃**；',
-      '8. 标题写你印象里的歌名（可带歌手）；程序会拿接口返回的真实标题核对，对不上的同样会被丢弃；',
+      '5. 候选清单之外，**另外**给 3~5 组搜索关键词，用来在 B 站上找曲库里没有的歌；',
+      '6. 关键词要能搜到具体的歌：写成「歌手 歌名」或「风格 场景」，不要写成一句话；',
+      '7. **不要给 BV 号，也不要写具体曲名清单**——你只需要描述该找什么样的歌，程序会去搜索；',
+      '8. 关键词之间不要重复，覆盖不同角度（如一首具体歌 + 一种风格 + 一个场景）；',
     ]
     : []
   // 输出格式那一条的编号跟着池外规则走，避免出现「5. …9. …5.」这种跳号
@@ -288,7 +285,7 @@ export function buildRecommendPrompt(input: RecommendPromptInput): {
 
   const jsonFormat = wantsExternal
     ? '{"greeting":"问候语（60 字内）","picks":[{"index":编号,"reason":"一句推荐理由（20 字内）"}],'
-      + '"external":[{"title":"歌名 - 歌手","bvid":"BV1xx411c7mD","reason":"一句推荐理由（20 字内）"}]}'
+      + '"externalKeywords":["搜索关键词1","搜索关键词2"]}'
     : '{"greeting":"问候语（60 字内）","picks":[{"index":编号,"reason":"一句推荐理由（20 字内）"}]}'
 
   const system = [
@@ -330,7 +327,7 @@ export function buildRecommendPrompt(input: RecommendPromptInput): {
  * 字段口径与 aiPlaylist 的候选池一致：videoUrl 留空（播放链路按 bvid 取流），
  * playCount / isLiked 置零——池外曲目本来就不在曲库里，没有这两个概念。
  */
-function toExternalTrack(candidate: VerifiedCandidate): Track {
+function toExternalTrack(candidate: SelectedCandidate): Track {
   return {
     id: 'ext-' + candidate.bvid,
     title: candidate.title,
@@ -386,11 +383,24 @@ export async function generateRecommendation(input: RecommendInput): Promise<AiR
     timeoutMs: 90000,
   })
 
-  const { greeting, picked, external: rawExternal } = parseRecommendation(reply, usablePool)
+  const { greeting, picked, externalKeywords: keywords } = parseRecommendation(reply, usablePool)
   if (!picked.length) throw new Error('模型没有选出可用曲目，稍后再试')
 
   const reasons: Record<string, string> = {}
   for (const p of picked) if (p.reason) reasons[p.track.id] = p.reason
+
+  /*
+   * 给池外筛选用的「用户此刻想要什么」。
+   *
+   * 不能只传关键词——AI 判断「搜索结果是否对题」时需要知道用户的处境
+   * （时段、自述偏好、从使用中观察到的口味），否则它只能凭标题字面猜。
+   * 这里拼成一段紧凑描述，与池内推荐用的是同一份上下文。
+   */
+  const externalIntent = [
+    ctx.label + '（' + ctx.hour + ' 点）',
+    profileContext.profile ? '自述偏好：' + profileContext.profile : '',
+    profileContext.learned ? '观察到的偏好：' + profileContext.learned : '',
+  ].filter(Boolean).join('；')
 
   /*
    * 池内结果先定稿：下面无论池外怎么失败，tracks 的数量与顺序都不受影响。
@@ -415,53 +425,55 @@ export async function generateRecommendation(input: RecommendInput): Promise<AiR
     return result
   }
 
-  const candidates: RawExternalCandidate[] = rawExternal.map((e) => ({
-    claimedTitle: e.title,
-    bvid: e.bvid,
-  }))
-  // 模型一条池外都没给：同样是「开关开着却没有结果」，必须告知，不能静默
-  if (!candidates.length) {
+  // 模型一组关键词都没给：同样是「开关开着却没有结果」，必须告知，不能静默
+  if (!keywords.length) {
     result.externalTracks = []
     result.externalRejected = 0
     result.externalStatus = 'ai-failed'
     return result
   }
 
-  let verify: Awaited<ReturnType<typeof verifyExternalCandidates>>
+  let externalPick: Awaited<ReturnType<typeof pickExternalTracks>>
   try {
-    verify = await verifyExternalCandidates(candidates, settings)
+    externalPick = await pickExternalTracks(
+      keywords,
+      { intent: externalIntent, limit: externalLimit },
+      settings,
+    )
   } catch (err) {
     /*
-     * 验证器本身抛错（例如底层依赖异常）不能让整次推荐失败：
-     * 池内结果已经拿到，用户至少还能看到它；池外如实标记为校验失败。
+     * 搜索/筛选链路本身抛错不能让整次推荐失败：
+     * 池内结果已经拿到，用户至少还能看到它；池外如实标记。
      */
     result.externalTracks = []
-    result.externalRejected = candidates.length
+    result.externalRejected = 0
     result.externalStatus = 'ai-failed'
-    if (import.meta.env?.DEV) console.warn('[aiRecommend] 池外验证失败', err)
+    if (import.meta.env?.DEV) console.warn('[aiRecommend] 池外搜索失败', err)
     return result
   }
 
-  const verified = verify.verified
-  result.externalRejected = verify.rejected.length
-  // 截断到池内条数：池外不喧宾夺主，多要的 50% 只是给验证损耗留余量
-  const kept = verified.slice(0, limit)
+  /*
+   * externalRejected 的语义统一为「搜到但没采用」：既包括被 AI 判为不对题的，
+   * 也包括超出条数被截掉的。AI 失败时 considered 是搜索到的全部候选、
+   * kept 为空，于是它自然等于 considered——表示「这些都没能用」，与 UI 文案一致。
+   */
+  const kept = externalPick.selected.slice(0, limit)
   result.externalTracks = kept.map(toExternalTrack)
+  result.externalRejected = Math.max(0, externalPick.considered - kept.length)
 
   if (!kept.length) {
-    result.externalStatus = verify.aiFailed ? 'ai-failed' : 'all-rejected'
+    result.externalStatus = externalPick.aiFailed ? 'ai-failed' : 'all-rejected'
     return result
   }
 
   result.externalStatus = 'ok'
   /*
-   * 池外理由用**模型原话**，不用验证器的 matchReason。
-   * 理由：matchReason 是「声称标题与真实标题相符」的机械说明（如「标题一致」），
-   * 对用户没有信息量；模型给的 reason 才是「为什么推荐这首」。
+   * 池外理由用 AI 筛选时给出的原话——它判断「这条是否符合用户意图」时写的理由，
+   * 比「标题一致」这类机械说明对用户有信息量。
    */
-  const reasonByBvid = new Map(rawExternal.map((e) => [e.bvid.toLowerCase(), e.reason]))
+  const reasonByBvid = new Map(externalPick.selected.map((s) => [s.bvid, s.reason]))
   for (const track of result.externalTracks) {
-    const reason = reasonByBvid.get(track.bvid.toLowerCase())
+    const reason = reasonByBvid.get(track.bvid)
     if (reason) reasons[track.id] = reason
   }
   return result

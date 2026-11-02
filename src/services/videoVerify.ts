@@ -1,398 +1,250 @@
 /**
- * v1.4.14-pre6 池外候选验证器：把模型随口给出的「标题 + BV 号」变成可信条目。
+ * 曲库外推荐：搜索 + 筛选（v1.4.14-pre7 重构）
  *
- * 背景：推荐侧允许模型提出歌单/收藏/喜欢之外的候选，但模型编 BV 号、张冠李戴是常态。
- * 因此这里做三步流水线，顺序不可颠倒：
- *   1. 本地格式筛查（只筛 BV 号形状，不发任何请求，省接口也省 AI）；
- *   2. 存在性查询（getVideoDetail 是存在性的唯一权威源，顺带拿到接口的真实标题）；
- *   3. 批量 AI 相符判断（以真实标题为基准，一次最多 10 条）。
+ * ## 为什么不再「模型给 BV 号 + 验证」
  *
- * 关键取舍：
- * - **标题是否相符只由 AI 判断**，本地绝不做字符串相似度兜底。宁可整批丢弃
- *   （verify-failed + aiFailed），也不放行一条张冠李戴的候选——错放的歌比少放的歌更伤信任。
- * - **计量不在本模块做**：aiChat 内部已经调用 recordUsage，这里再记一次就是双计。
- * - 提示词与解析都抽成导出的纯函数，单测不碰网络。
+ * pre6 让模型自由生成「标题 + BV号」，再由程序查存在性、AI 判断标题是否相符。
+ * 实测证明这条路走不通：BV 号是 B 站内部标识，模型没有可靠的记忆来源，任何模型都只能编。
+ * 验证能拦住不存在的号，却拦不住「存在但完全无关」的号；更麻烦的是模型给的候选
+ * 大多在第一步就死掉，池外推荐长期凑不够数。
+ *
+ * 联网搜索也救不了：搜到的仍是网页文本，从文本里提取的 ID 照样可能错。
+ *
+ * ## 现在的做法
+ *
+ * 模型只输出**搜索关键词**（它擅长的语义理解），BV 号与标题**全部来自 B 站搜索接口**。
+ * 模型永远碰不到 ID，幻觉从源头消失。
+ *
+ *   模型给关键词 → searchVideo 搜出真实候选 → AI 判断哪些符合用户意图
+ *
+ * ## 硬约束
+ *
+ * - 候选的 bvid / title / coverUrl / ownerName 一律来自接口返回值，不接受模型自述。
+ * - 「是否符合意图」由另起 AI 请求判断，**绝不降级为本地关键词匹配**：
+ *   AI 失败时整批丢弃并置 aiFailed，宁可全丢也不猜。
+ * - 计量不在本模块做：aiChat 内部已调用 recordUsage，这里再记一次就是双计。
  */
 
-import { getVideoDetail } from '@/services/api'
 import { aiChat, type AiChatMessage } from '@/services/ai'
+import { searchVideo } from '@/services/api'
 import type { AiSettings } from '@/types'
 
-/** 一次 AI 请求最多核对多少条：再多模型容易漏答或串行，成本也不划算 */
-export const VERIFY_BATCH_SIZE = 10
+/** 一次 AI 筛选最多送几条候选，超出分批 */
+export const FILTER_BATCH_SIZE = 10
 
-/** getVideoDetail 的并发上限：B 站接口对短时并发敏感，超过容易触发限流 */
-export const DETAIL_CONCURRENCY = 4
+/** 搜索并发上限：同时打多个搜索请求容易触发 B 站风控 */
+export const SEARCH_CONCURRENCY = 3
 
-/** BV 号形状：BV + 10 位字母数字（不做任何语义校验，只是形状筛查） */
-const BVID_PATTERN = /^BV[0-9A-Za-z]{10}$/
+/** 每个关键词取前几条搜索结果进候选池 */
+export const RESULTS_PER_KEYWORD = 8
 
-const PARSE_ERROR = 'AI 返回的内容不是可解析的格式，请重试'
+/** 关键词上限：太多会拖慢且互相重复 */
+export const MAX_KEYWORDS = 5
 
-/** 一条待验证的池外候选 */
-export interface RawExternalCandidate {
-  /** 模型声称的标题 */
-  claimedTitle: string
-  /** 模型给出的 BV 号 */
+/** 搜索接口返回的一条真实候选（字段全部来自接口） */
+export interface SearchCandidate {
   bvid: string
-}
-
-/** 单条验证结果 */
-export interface VerifiedCandidate {
-  bvid: string
-  /** 接口返回的真实标题（不是模型声称的） */
   title: string
-  /** 模型声称的标题，保留供诊断 */
-  claimedTitle: string
-  /** 接口返回的封面 */
   coverUrl: string
-  /** UP 主名 */
   ownerName: string
-  /** 时长（秒） */
   duration: number
-  /** AI 给出的相符理由（一句话） */
-  matchReason: string
+  /** 命中的关键词，供诊断参考 */
+  keyword: string
 }
 
-/** 被丢弃的条目及原因 */
-export interface RejectedCandidate {
-  bvid: string
-  claimedTitle: string
-  reason: 'bad-format' | 'not-found' | 'mismatch' | 'verify-failed'
-  /** 人类可读说明 */
-  detail: string
-}
-
-export interface VerifyResult {
-  verified: VerifiedCandidate[]
-  rejected: RejectedCandidate[]
-  /** 是否发生过 AI 判断失败（网络/解析）——UI 需要据此告知用户 */
-  aiFailed: boolean
-}
-
-/** 交给 AI 的一条核对材料：声称标题 vs 接口真实标题 */
-export interface VerifyPair {
-  bvid: string
-  claimedTitle: string
-  realTitle: string
-}
-
-/** AI 对单条的判定 */
-export interface VerifyJudgement {
-  bvid: string
-  /** 是否指向同一个视频 */
-  match: boolean
-  /** 一句话理由；模型没给时为空串 */
+/** 通过 AI 筛选的最终结果 */
+export interface SelectedCandidate extends SearchCandidate {
+  /** AI 给出的「为什么符合意图」 */
   reason: string
 }
 
-/** 只做形状筛查：去掉首尾空白后必须完全匹配 BV + 10 位字母数字 */
-export function isValidBvid(bvid: string): boolean {
-  return BVID_PATTERN.test((bvid || '').trim())
+export interface ExternalPickResult {
+  selected: SelectedCandidate[]
+  /** 参与筛选的候选总数（供 UI 说明丢弃情况） */
+  considered: number
+  /** 是否发生过 AI 筛选失败——UI 需据此给出不同文案 */
+  aiFailed: boolean
+}
+
+/** AI 对一条候选的判断 */
+export interface FilterJudgement {
+  bvid: string
+  keep: boolean
+  reason: string
+}
+
+/** 把搜索结果的时长字符串（如 "04:12"）转成秒；解析不了返回 0 */
+export function parseDurationText(text: string): number {
+  if (!text) return 0
+  const parts = text.trim().split(':').map((n) => Number(n))
+  if (parts.some((n) => !Number.isFinite(n))) return 0
+  let seconds = 0
+  for (const p of parts) seconds = seconds * 60 + p
+  return seconds > 0 ? seconds : 0
 }
 
 /**
- * 组装批量核对提示词。
+ * 用一组关键词搜索，汇总去重后的真实候选。
  *
- * 提示词必须说清「真实标题来自 B 站接口、BV 号已由程序验证存在」，
- * 否则模型会把注意力放到猜 BV 号对不对上，而不是比对标题。
- * 抽成导出函数便于单测断言这些约束确实写进去了。
+ * 去重键用 bvid：同一首歌常被多个关键词命中。
+ * 并发受限（SEARCH_CONCURRENCY），单个关键词失败不影响其它关键词。
  */
-export function buildVerifyMessages(pairs: VerifyPair[]): AiChatMessage[] {
+export async function collectSearchCandidates(keywords: string[]): Promise<SearchCandidate[]> {
+  const list = keywords.map((k) => (k || '').trim()).filter(Boolean).slice(0, MAX_KEYWORDS)
+  if (!list.length) return []
+
+  const seen = new Set<string>()
+  const out: SearchCandidate[] = []
+
+  // 固定 worker 池：按下标轮流取，避免一次性打满并发
+  let cursor = 0
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = cursor++
+      if (i >= list.length) return
+      const keyword = list[i]
+      try {
+        const res = await searchVideo(keyword, 1, RESULTS_PER_KEYWORD)
+        for (const item of res.items) {
+          if (!item.bvid || seen.has(item.bvid)) continue
+          // 标题可能带高亮标签，接口层已剥离过一次，这里再兜一层
+          const title = String(item.title || '').replace(/<[^>]+>/g, '').trim()
+          if (!title) continue
+          seen.add(item.bvid)
+          out.push({
+            bvid: item.bvid,
+            title,
+            coverUrl: item.pic || '',
+            ownerName: item.author || '',
+            duration: parseDurationText(item.duration),
+            keyword,
+          })
+        }
+      } catch {
+        /* 单个关键词失败不致命：其它关键词仍可能给出候选 */
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(SEARCH_CONCURRENCY, list.length) }, () => worker())
+  await Promise.all(workers)
+  return out
+}
+
+/** 构造筛选提示词；纯函数，便于单测 */
+export function buildFilterMessages(
+  candidates: SearchCandidate[],
+  context: { intent: string; limit: number },
+): AiChatMessage[] {
   const system = [
-    '你是视频标题核对助手。用户会给出若干条「模型声称的标题」与「B 站接口查到的真实标题」，',
-    '你要判断：模型声称的标题是否指向同一个视频。',
-    '',
-    '事实前提（重要）：',
-    '1. 下面给出的真实标题都是从 B 站接口查到的，视频确实存在；BV 号不需要你判断对错，不要去猜；',
-    '2. 只比对标题含义，不要因为 BV 号看着陌生就判不符。',
-    '',
-    '判定口径：',
-    '3. 同一个视频的不同写法算相符：带不带「官方」「MV」「4K修复」「翻唱」「Live」「纯享版」等前后缀、',
-    '   标题里多打的【】「」标签、错别字、繁简差异、标点与空格差异、副标题顺序不同，都算相符；',
-    '4. 只有当真实标题明显是另一首歌 / 另一个作品 / 完全无关时才判不符；',
-    '5. 拿不准时判不符——宁可少放一条，也不要把张冠李戴的条目放进去。',
-    '',
-    '输出要求：',
-    '6. 只输出一个 JSON 对象，不要解释文字，不要代码围栏；',
-    '7. 格式：{"results":[{"bvid":"BV1xx411c7mD","match":true,"reason":"一句话理由"}]}；',
-    '8. results 的条数必须与输入条数一致，bvid 原样抄回，reason 控制在 20 字以内。',
+    '你是音乐推荐助手。下面是从 B 站搜索到的真实视频列表（标题与 UP 主都来自接口，不是编的）。',
+    '请判断其中哪些符合用户此刻的需求，并给出简短理由。',
+    '严格要求：',
+    '1. 只能从给出的列表里挑，bvid 必须与列表中的完全一致，不得改动或编造；',
+    '2. 挑选 ' + context.limit + ' 条左右，宁少勿滥；没有合适的就返回空数组，不要硬凑；',
+    '3. 判断依据是视频标题与 UP 主体现的内容是否对题，不要臆测视频里有什么；',
+    '4. 理由要具体，不要「很适合你」这类空话；',
+    '5. 只输出一个 JSON 对象，不要任何解释文字或代码围栏：',
+    '{"picks":[{"bvid":"BV1xx411c7mD","reason":"一句理由（20 字内）"}]}',
   ].join('\n')
 
-  const userLines: string[] = ['请核对以下 ' + pairs.length + ' 条候选：', '']
-  pairs.forEach((pair, i) => {
-    userLines.push(
-      `${i + 1}. bvid: ${pair.bvid}`,
-      `   模型声称标题：${pair.claimedTitle || '（空）'}`,
-      `   接口真实标题：${pair.realTitle}`,
-    )
-  })
+  const user = [
+    '用户此刻的需求：' + (context.intent || '随便听听'),
+    '',
+    '搜索到的候选：',
+    candidates.map((c, i) => i + 1 + '. [' + c.bvid + '] ' + c.title + ' —— ' + c.ownerName).join('\n'),
+  ].join('\n')
 
   return [
     { role: 'system', content: system },
-    { role: 'user', content: userLines.join('\n') },
+    { role: 'user', content: user },
   ]
 }
 
 /**
- * 解析 AI 的批量核对回复。
+ * 解析筛选回复。
  *
- * 容忍代码围栏与前后废话（与 aiTrackInsight / aiPlaylist 同一套做法）。
- * 结构不对（不是 JSON、没有 results 数组）一律抛可读中文错误，由调用方整批丢弃；
- * 单条字段不合法（缺 bvid、match 不是布尔）只跳过该条，让调用方把它算作「AI 没判断」。
+ * 只认列表里真实存在的 bvid——模型回抄错一个字符就丢弃该条，
+ * 不会因为「看起来像」而放行。
  */
-export function parseVerifyReply(reply: string): VerifyJudgement[] {
-  const text = reply || ''
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/)
-  const raw = (fenced ? fenced[1] : text).trim()
+export function parseFilterReply(reply: string, allowed: Set<string>): FilterJudgement[] {
+  const fenced = reply.match(/```(?:json)?\s*([\s\S]*?)```/)
+  const raw = (fenced ? fenced[1] : reply).trim()
   const start = raw.indexOf('{')
   const end = raw.lastIndexOf('}')
-  if (start < 0 || end <= start) throw new Error(PARSE_ERROR)
-
-  let obj: unknown
+  if (start < 0 || end <= start) throw new Error('筛选结果不是可解析的格式')
+  let obj: { picks?: unknown }
   try {
-    obj = JSON.parse(raw.slice(start, end + 1))
+    obj = JSON.parse(raw.slice(start, end + 1)) as { picks?: unknown }
   } catch {
-    throw new Error(PARSE_ERROR)
+    throw new Error('筛选结果不是合法 JSON')
   }
-  if (!obj || typeof obj !== 'object') throw new Error(PARSE_ERROR)
-
-  const results = (obj as Record<string, unknown>).results
-  if (!Array.isArray(results)) throw new Error(PARSE_ERROR)
-
-  const out: VerifyJudgement[] = []
-  for (const item of results) {
-    if (!item || typeof item !== 'object') continue
-    const rec = item as Record<string, unknown>
-    const bvid = typeof rec.bvid === 'string' ? rec.bvid.trim() : ''
-    if (!bvid) continue
-    if (typeof rec.match !== 'boolean') continue
-    const reason = typeof rec.reason === 'string' ? rec.reason.trim().slice(0, 120) : ''
-    out.push({ bvid, match: rec.match, reason })
+  const out: FilterJudgement[] = []
+  const seen = new Set<string>()
+  if (Array.isArray(obj.picks)) {
+    for (const item of obj.picks) {
+      if (!item || typeof item !== 'object') continue
+      const rec = item as { bvid?: unknown; reason?: unknown }
+      const bvid = typeof rec.bvid === 'string' ? rec.bvid.trim() : ''
+      if (!bvid || !allowed.has(bvid) || seen.has(bvid)) continue
+      seen.add(bvid)
+      out.push({
+        bvid,
+        keep: true,
+        reason: typeof rec.reason === 'string' ? rec.reason.trim() : '',
+      })
+    }
   }
   return out
 }
 
-/** 把未知错误转成一句可读中文 */
-function errMessage(err: unknown): string {
-  if (err instanceof Error) return err.message
-  return String(err)
-}
-
 /**
- * 限并发地跑一遍异步任务，返回结果按输入顺序排列。
+ * 主流程：关键词 → 搜索 → AI 筛选。
  *
- * 用固定数量的 worker 轮流取下一个下标，而不是先切片再 Promise.all——
- * 后者会在某个任务提前失败时留下没跑完的批次。
+ * AI 筛选失败时整批丢弃并置 aiFailed=true，**不降级为本地关键词匹配**。
  */
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = []
-  let cursor = 0
-  const worker = async (): Promise<void> => {
-    for (;;) {
-      const index = cursor
-      cursor += 1
-      if (index >= items.length) return
-      results[index] = await fn(items[index])
-    }
-  }
-  const size = Math.max(1, Math.min(limit, items.length))
-  await Promise.all(Array.from({ length: size }, () => worker()))
-  return results
-}
-
-/** 单个候选在流水线里的中间态 */
-interface Resolved {
-  bvid: string
-  claimedTitle: string
-  title: string
-  coverUrl: string
-  ownerName: string
-  duration: number
-}
-
-type Slot =
-  | { kind: 'verified'; value: VerifiedCandidate }
-  | { kind: 'rejected'; value: RejectedCandidate }
-
-/**
- * 验证一批池外候选。三步顺序不可颠倒，任何一步失败都只丢弃，不猜测。
- */
-export async function verifyExternalCandidates(
-  candidates: RawExternalCandidate[],
+export async function pickExternalTracks(
+  keywords: string[],
+  context: { intent: string; limit: number },
   settings: AiSettings,
-): Promise<VerifyResult> {
-  const slots: (Slot | undefined)[] = []
-  let aiFailed = false
+): Promise<ExternalPickResult> {
+  const candidates = await collectSearchCandidates(keywords)
+  if (!candidates.length) {
+    return { selected: [], considered: 0, aiFailed: false }
+  }
 
-  // 去重：同一 bvid 只验证一次；声称标题保留首次出现的那条（后续重复不覆盖，保证结果可复现）
-  const unique: RawExternalCandidate[] = []
+  const allowed = new Set(candidates.map((c) => c.bvid))
+  const byBvid = new Map(candidates.map((c) => [c.bvid, c]))
+  const selected: SelectedCandidate[] = []
   const seen = new Set<string>()
-  for (const candidate of candidates || []) {
-    const bvid = (candidate?.bvid || '').trim()
-    const claimedTitle = (candidate?.claimedTitle || '').trim()
-    const key = bvid.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    unique.push({ bvid, claimedTitle })
-  }
 
-  // 步骤 1：本地格式筛查。不合格直接丢弃，不发任何请求
-  const formatted: { item: RawExternalCandidate; index: number }[] = []
-  unique.forEach((item, index) => {
-    if (isValidBvid(item.bvid)) {
-      formatted.push({ item, index })
-      return
-    }
-    slots[index] = {
-      kind: 'rejected',
-      value: {
-        bvid: item.bvid,
-        claimedTitle: item.claimedTitle,
-        reason: 'bad-format',
-        detail: item.bvid
-          ? `BV 号格式不合法（应为 BV 加 10 位字母数字）：${item.bvid}`
-          : 'BV 号为空',
-      },
-    }
-  })
-
-  // 步骤 2：存在性查询，并发不超过 DETAIL_CONCURRENCY
-  const lookups = await mapWithConcurrency(formatted, DETAIL_CONCURRENCY, async ({ item }) => {
+  // 分批送 AI：一次太多会降低判断准确度
+  for (let i = 0; i < candidates.length; i += FILTER_BATCH_SIZE) {
+    const batch = candidates.slice(i, i + FILTER_BATCH_SIZE)
+    let judged: FilterJudgement[]
     try {
-      const info = await getVideoDetail(item.bvid)
-      const title = (info?.title || '').trim()
-      if (!title) {
-        return { ok: false as const, detail: 'B 站接口没有返回标题，无法判断是否相符' }
-      }
-      return {
-        ok: true as const,
-        resolved: {
-          bvid: item.bvid,
-          claimedTitle: item.claimedTitle,
-          title,
-          coverUrl: info.pic || '',
-          ownerName: info.ownerName || '',
-          duration: info.duration || 0,
-        } satisfies Resolved,
-      }
-    } catch (err) {
-      return { ok: false as const, detail: `B 站接口查不到这个视频：${errMessage(err)}` }
+      const reply = await aiChat(settings, {
+        messages: buildFilterMessages(batch, context),
+        temperature: 0.3,
+        timeoutMs: 60000,
+      })
+      judged = parseFilterReply(reply, allowed)
+    } catch {
+      /*
+       * 任何一批失败都整批作废并上报。
+       * 绝不退回「本地按关键词匹配标题」——那等于用规则冒充判断，
+       * 用户会拿到一堆看似相关实则无关的歌。
+       */
+      return { selected: [], considered: candidates.length, aiFailed: true }
     }
-  })
-
-  const resolved: { item: Resolved; index: number }[] = []
-  lookups.forEach((lookup, i) => {
-    const index = formatted[i].index
-    if (!lookup.ok) {
-      const source = formatted[i].item
-      slots[index] = {
-        kind: 'rejected',
-        value: {
-          bvid: source.bvid,
-          claimedTitle: source.claimedTitle,
-          reason: 'not-found',
-          detail: lookup.detail,
-        },
-      }
-      return
-    }
-    resolved.push({ item: lookup.resolved, index })
-  })
-
-  // 步骤 3：批量 AI 相符判断，一次最多 VERIFY_BATCH_SIZE 条
-  for (let offset = 0; offset < resolved.length; offset += VERIFY_BATCH_SIZE) {
-    const batch = resolved.slice(offset, offset + VERIFY_BATCH_SIZE)
-    const pairs: VerifyPair[] = batch.map(({ item }) => ({
-      bvid: item.bvid,
-      claimedTitle: item.claimedTitle,
-      realTitle: item.title,
-    }))
-
-    let judgements: VerifyJudgement[] = []
-    let failure = ''
-    try {
-      const reply = await aiChat(settings, { messages: buildVerifyMessages(pairs), temperature: 0 })
-      judgements = parseVerifyReply(reply)
-    } catch (err) {
-      failure = errMessage(err)
-    }
-
-    // 整批 AI 失败：全部丢弃并上报。绝不降级为本地相似度判断
-    if (failure) {
-      aiFailed = true
-      for (const { item, index } of batch) {
-        slots[index] = {
-          kind: 'rejected',
-          value: {
-            bvid: item.bvid,
-            claimedTitle: item.claimedTitle,
-            reason: 'verify-failed',
-            detail: `AI 核对失败，本条已丢弃：${failure}`,
-          },
-        }
-      }
-      continue
-    }
-
-    // 模型回抄 bvid 时可能改动大小写，按小写建索引做容错匹配（不是标题相似度判断）
-    const byBvid = new Map<string, VerifyJudgement>()
-    for (const judgement of judgements) byBvid.set(judgement.bvid.toLowerCase(), judgement)
-
-    for (const { item, index } of batch) {
-      const judgement = byBvid.get(item.bvid.toLowerCase())
-      if (!judgement) {
-        aiFailed = true
-        slots[index] = {
-          kind: 'rejected',
-          value: {
-            bvid: item.bvid,
-            claimedTitle: item.claimedTitle,
-            reason: 'verify-failed',
-            detail: 'AI 没有对这一条给出判断，本条已丢弃',
-          },
-        }
-        continue
-      }
-      if (!judgement.match) {
-        slots[index] = {
-          kind: 'rejected',
-          value: {
-            bvid: item.bvid,
-            claimedTitle: item.claimedTitle,
-            reason: 'mismatch',
-            detail: judgement.reason || 'AI 判断声称的标题与接口返回的标题不是同一个视频',
-          },
-        }
-        continue
-      }
-      slots[index] = {
-        kind: 'verified',
-        value: {
-          bvid: item.bvid,
-          title: item.title,
-          claimedTitle: item.claimedTitle,
-          coverUrl: item.coverUrl,
-          ownerName: item.ownerName,
-          duration: item.duration,
-          matchReason: judgement.reason || '标题相符',
-        },
-      }
+    for (const j of judged) {
+      if (seen.has(j.bvid)) continue
+      const base = byBvid.get(j.bvid)
+      if (!base) continue
+      seen.add(j.bvid)
+      selected.push({ ...base, reason: j.reason })
     }
   }
 
-  // 按输入顺序还原成两个数组，UI 展示顺序与用户看到的候选顺序一致
-  const verified: VerifiedCandidate[] = []
-  const rejected: RejectedCandidate[] = []
-  for (const slot of slots) {
-    if (!slot) continue
-    if (slot.kind === 'verified') verified.push(slot.value)
-    else rejected.push(slot.value)
-  }
-
-  return { verified, rejected, aiFailed }
+  return { selected, considered: candidates.length, aiFailed: false }
 }

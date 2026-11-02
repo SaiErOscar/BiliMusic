@@ -2,18 +2,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 /*
- * v1.4.14-pre6 池外候选验证器：三步流水线（格式筛查 → 存在性 → 批量 AI 相符判断）。
+ * v1.4.14-pre7 池外推荐：关键词 → searchVideo → AI 筛选。
  *
- * 这里只测逻辑，不发真实请求：getVideoDetail 与 aiChat 都被 vi.mock 顶掉，
- * 断言的是「哪一步该丢弃什么原因」「AI 到底被调了几次、每次几条」「标题取自哪里」。
+ * pre6 的做法（模型给「标题 + BV 号」→ 程序验证）已被证伪：BV 号是 B 站内部标识，
+ * 模型没有可靠来源，只能编；验证再严也拦不住「存在但完全无关」。
  *
- * 特别守住的底线：AI 失败时整批丢弃，绝不降级为本地字符串相似度判断。
+ * 现在模型只输出搜索关键词，ID 与标题**全部来自 searchVideo 的返回值**。
+ * 这里守住三条底线：
+ *   1. 候选字段只能来自接口，不能来自模型；
+ *   2. 模型回抄的 bvid 只要不在候选集合里就丢弃（改一个字符也不放行）；
+ *   3. AI 筛选失败时整批丢弃并置 aiFailed，**绝不降级为本地关键词匹配**。
+ *
+ * 不发真实请求：searchVideo 与 aiChat 都被 vi.mock 顶掉。
  */
 
-const getVideoDetailMock = vi.fn()
+const searchVideoMock = vi.fn()
 vi.mock('../src/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/services/api')>()
-  return { ...actual, getVideoDetail: (...args: unknown[]) => getVideoDetailMock(...args) }
+  return { ...actual, searchVideo: (...args: unknown[]) => searchVideoMock(...args) }
 })
 
 const aiChatMock = vi.fn()
@@ -23,16 +29,19 @@ vi.mock('../src/services/ai', async (importOriginal) => {
 })
 
 const {
-  VERIFY_BATCH_SIZE,
-  DETAIL_CONCURRENCY,
-  isValidBvid,
-  buildVerifyMessages,
-  parseVerifyReply,
-  verifyExternalCandidates,
+  FILTER_BATCH_SIZE,
+  SEARCH_CONCURRENCY,
+  RESULTS_PER_KEYWORD,
+  MAX_KEYWORDS,
+  parseDurationText,
+  collectSearchCandidates,
+  buildFilterMessages,
+  parseFilterReply,
+  pickExternalTracks,
 } = await import('../src/services/videoVerify')
 
 import type { AiSettings } from '../src/types'
-import type { RawExternalCandidate, VerifyPair } from '../src/services/videoVerify'
+import type { SearchCandidate } from '../src/services/videoVerify'
 
 const baseSettings: AiSettings = {
   baseUrl: 'https://api.deepseek.com',
@@ -45,340 +54,499 @@ const baseSettings: AiSettings = {
   persona: '',
 }
 
-/** 造一个 getVideoDetail 的返回值 */
-function videoInfo(bvid: string, title: string) {
+/** 造一条 searchVideo 的返回条目（字段口径与 SearchItem 一致） */
+function searchItem(
+  bvid: string,
+  title: string,
+  extra: { author?: string; pic?: string; duration?: string } = {},
+) {
   return {
     bvid,
     aid: 1,
     title,
-    desc: '',
-    pic: 'https://example.com/cover.jpg',
-    ownerName: '某个UP',
-    ownerMid: 42,
-    duration: 215,
-    cid: 100,
-    stat: { view: 1, like: 1, favorite: 1 },
+    author: extra.author ?? 'UP-' + bvid,
+    play: 1,
+    duration: extra.duration ?? '04:12',
+    pic: extra.pic ?? 'https://example.com/' + bvid + '.jpg',
   }
 }
 
-/** 从发给模型的提示词里抠出这次问到的 bvid 列表 */
-function bvidsInCall(call: unknown[]): string[] {
-  const options = call[1] as { messages: { content: string }[] }
-  const user = options.messages.map((m) => m.content).join('\n')
-  return [...user.matchAll(/bvid: (BV[0-9A-Za-z]{10})/g)].map((m) => m[1])
+function searchResult(items: ReturnType<typeof searchItem>[]) {
+  return { items, totalPages: 1, totalResults: items.length }
 }
 
-/** 默认 AI 行为：对提示词里出现的每条都判相符 */
-function replyAllMatch() {
+/** 生成形如 BV1aa0000000 的合法 bvid（BV + 10 位） */
+function makeBvid(n: number): string {
+  return 'BV1' + String(n).padStart(2, '0') + 'abcdefg'
+}
+
+/** 从一次筛选请求里抠出送去的候选 bvid（buildFilterMessages 写成 "[BVxxx] 标题"） */
+function bvidsInFilterCall(call: unknown[]): string[] {
+  const options = call[1] as { messages: { content: string }[] }
+  const text = options.messages.map((m) => m.content).join('\n')
+  return [...text.matchAll(/\[(BV[0-9A-Za-z]{10})\]/g)].map((m) => m[1])
+}
+
+/** 让 AI 把提示词里出现的候选全部判为保留 */
+function keepEverything() {
   aiChatMock.mockImplementation((_settings: unknown, options: { messages: { content: string }[] }) => {
-    const user = options.messages.map((m) => m.content).join('\n')
-    const bvids = [...user.matchAll(/bvid: (BV[0-9A-Za-z]{10})/g)].map((m) => m[1])
+    const text = options.messages.map((m) => m.content).join('\n')
+    const bvids = [...text.matchAll(/\[(BV[0-9A-Za-z]{10})\]/g)].map((m) => m[1])
     return Promise.resolve(
-      JSON.stringify({
-        results: bvids.map((bvid) => ({ bvid, match: true, reason: '标题一致' })),
-      }),
+      JSON.stringify({ picks: bvids.map((bvid) => ({ bvid, reason: '标题对题' })) }),
     )
   })
+}
+
+function candidate(bvid: string, title: string, keyword = '关键词'): SearchCandidate {
+  return {
+    bvid,
+    title,
+    coverUrl: 'https://example.com/' + bvid + '.jpg',
+    ownerName: '某个UP',
+    duration: 252,
+    keyword,
+  }
 }
 
 beforeEach(() => {
-  getVideoDetailMock.mockReset()
+  searchVideoMock.mockReset()
   aiChatMock.mockReset()
 })
 
-describe('isValidBvid', () => {
-  it('只接受 BV + 10 位字母数字', () => {
-    expect(isValidBvid('BV1GJ411x7h7')).toBe(true)
-    expect(isValidBvid('  BV1GJ411x7h7  ')).toBe(true)
-    expect(isValidBvid('bv1GJ411x7h7')).toBe(false)
-    expect(isValidBvid('BV1GJ411x7h')).toBe(false)
-    expect(isValidBvid('BV1GJ411x7h77')).toBe(false)
-    expect(isValidBvid('BV1GJ411x7h!')).toBe(false)
-    expect(isValidBvid('')).toBe(false)
+describe('parseDurationText', () => {
+  it('mm:ss 与 hh:mm:ss 都转成秒', () => {
+    expect(parseDurationText('04:12')).toBe(252)
+    expect(parseDurationText('1:02:03')).toBe(3723)
+    expect(parseDurationText('10:00')).toBe(600)
+  })
+
+  it('解析不了的输入返回 0，不抛错', () => {
+    expect(parseDurationText('')).toBe(0)
+    expect(parseDurationText('abc')).toBe(0)
+    expect(parseDurationText('00:00')).toBe(0)
+    expect(parseDurationText('12:ab')).toBe(0)
+  })
+
+  it('两端空白不影响解析', () => {
+    expect(parseDurationText('  03:30  ')).toBe(210)
   })
 })
 
-describe('buildVerifyMessages', () => {
-  const pairs: VerifyPair[] = [
-    { bvid: 'BV1GJ411x7h7', claimedTitle: '晴天', realTitle: '周杰伦《晴天》官方MV' },
+describe('collectSearchCandidates：候选全部来自搜索接口', () => {
+  it('bvid / title / coverUrl / ownerName / duration 逐字取自 searchVideo 返回值', async () => {
+    searchVideoMock.mockResolvedValue(
+      searchResult([
+        searchItem('BV1GJ411x7h7', '周杰伦《晴天》官方MV', {
+          author: '某个UP',
+          pic: 'https://example.com/cover.jpg',
+          duration: '04:12',
+        }),
+      ]),
+    )
+
+    const out = await collectSearchCandidates(['晴天 周杰伦'])
+
+    expect(out).toHaveLength(1)
+    expect(out[0]).toEqual({
+      bvid: 'BV1GJ411x7h7',
+      title: '周杰伦《晴天》官方MV',
+      coverUrl: 'https://example.com/cover.jpg',
+      ownerName: '某个UP',
+      duration: 252,
+      keyword: '晴天 周杰伦',
+    })
+    // 标题来自接口，不是关键词本身
+    expect(out[0].title).not.toBe('晴天 周杰伦')
+  })
+
+  it('按每个关键词取 RESULTS_PER_KEYWORD 条（第一页）', async () => {
+    searchVideoMock.mockResolvedValue(searchResult([]))
+    await collectSearchCandidates(['晴天'])
+    expect(searchVideoMock).toHaveBeenCalledWith('晴天', 1, RESULTS_PER_KEYWORD)
+    expect(RESULTS_PER_KEYWORD).toBe(8)
+  })
+
+  it('多个关键词汇总，同一 bvid 只保留一次', async () => {
+    searchVideoMock.mockImplementation((keyword: string) => {
+      if (keyword === '晴天 周杰伦') {
+        return Promise.resolve(
+          searchResult([
+            searchItem('BV1GJ411x7h7', '周杰伦《晴天》官方MV'),
+            searchItem('BV1aa411x7h7', '晴天 翻唱合集'),
+          ]),
+        )
+      }
+      return Promise.resolve(
+        searchResult([
+          // 与第一个关键词重复命中的同一条
+          searchItem('BV1GJ411x7h7', '周杰伦《晴天》官方MV'),
+          searchItem('BV1bb411x7h7', '晴天 吉他弹唱'),
+        ]),
+      )
+    })
+
+    const out = await collectSearchCandidates(['晴天 周杰伦', '晴天 翻唱'])
+
+    const bvids = out.map((c) => c.bvid)
+    expect(bvids).toHaveLength(3)
+    expect(new Set(bvids).size).toBe(3)
+    expect(bvids.filter((b) => b === 'BV1GJ411x7h7')).toHaveLength(1)
+    expect(bvids).toEqual(expect.arrayContaining(['BV1GJ411x7h7', 'BV1aa411x7h7', 'BV1bb411x7h7']))
+  })
+
+  it('单个关键词失败不影响其它关键词', async () => {
+    searchVideoMock.mockImplementation((keyword: string) => {
+      if (keyword === '会失败的关键词') return Promise.reject(new Error('风控拦截'))
+      return Promise.resolve(searchResult([searchItem('BV1GJ411x7h7', '周杰伦《晴天》')]))
+    })
+
+    const out = await collectSearchCandidates(['会失败的关键词', '晴天 周杰伦'])
+
+    expect(searchVideoMock).toHaveBeenCalledTimes(2)
+    expect(out.map((c) => c.bvid)).toEqual(['BV1GJ411x7h7'])
+    expect(out[0].keyword).toBe('晴天 周杰伦')
+  })
+
+  it('关键词超过 MAX_KEYWORDS 被截断，只搜前几条', async () => {
+    searchVideoMock.mockResolvedValue(searchResult([]))
+    const many = ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'k8']
+
+    await collectSearchCandidates(many)
+
+    expect(MAX_KEYWORDS).toBe(5)
+    expect(searchVideoMock).toHaveBeenCalledTimes(MAX_KEYWORDS)
+    expect(searchVideoMock.mock.calls.map((c) => c[0])).toEqual(['k1', 'k2', 'k3', 'k4', 'k5'])
+  })
+
+  it('空白关键词被过滤，全空时一个请求都不发', async () => {
+    expect(await collectSearchCandidates([])).toEqual([])
+    expect(await collectSearchCandidates(['', '   '])).toEqual([])
+    expect(searchVideoMock).not.toHaveBeenCalled()
+  })
+
+  it('并发不超过 SEARCH_CONCURRENCY', async () => {
+    let inFlight = 0
+    let peak = 0
+    searchVideoMock.mockImplementation(async (keyword: string) => {
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      inFlight -= 1
+      return searchResult([searchItem(makeBvid(Number(keyword.slice(1))), '歌-' + keyword)])
+    })
+
+    // 关键词数取满 MAX_KEYWORDS（5 个）：超过并发上限，才能看出是否被限制住
+    const keywords = Array.from({ length: MAX_KEYWORDS }, (_, i) => 'k' + (i + 1))
+    const out = await collectSearchCandidates(keywords)
+
+    expect(SEARCH_CONCURRENCY).toBe(3)
+    expect(peak).toBeLessThanOrEqual(SEARCH_CONCURRENCY)
+    // 确实并行过，不是串行一个一个跑
+    expect(peak).toBe(SEARCH_CONCURRENCY)
+    expect(out).toHaveLength(MAX_KEYWORDS)
+  })
+
+  it('跳过没有 bvid 或标题为空的条目，标题里的高亮标签被剥掉', async () => {
+    searchVideoMock.mockResolvedValue(
+      searchResult([
+        searchItem('', '没有 bvid'),
+        searchItem('BV1cc411x7h7', ''),
+        searchItem('BV1dd411x7h7', '<em class="keyword">晴天</em>周杰伦'),
+      ]),
+    )
+
+    const out = await collectSearchCandidates(['晴天'])
+
+    expect(out).toHaveLength(1)
+    expect(out[0].bvid).toBe('BV1dd411x7h7')
+    expect(out[0].title).toBe('晴天周杰伦')
+  })
+})
+
+describe('buildFilterMessages', () => {
+  const candidates = [
+    candidate('BV1GJ411x7h7', '周杰伦《晴天》官方MV'),
+    candidate('BV1aa411x7h7', '晴天 吉他弹唱'),
   ]
+  const context = { intent: '晚上想听点安静的华语老歌', limit: 3 }
 
-  it('把接口真实标题与声称标题成对写进提示词', () => {
-    const messages = buildVerifyMessages(pairs)
-    const all = messages.map((m) => m.content).join('\n')
-    expect(all).toContain('周杰伦《晴天》官方MV')
-    expect(all).toContain('晴天')
-    expect(all).toContain('BV1GJ411x7h7')
+  it('把候选的真实标题与 bvid 写进用户消息', () => {
+    const messages = buildFilterMessages(candidates, context)
+    expect(messages.map((m) => m.role)).toEqual(['system', 'user'])
+    const user = messages[1].content
+    expect(user).toContain('周杰伦《晴天》官方MV')
+    expect(user).toContain('晴天 吉他弹唱')
+    expect(user).toContain('BV1GJ411x7h7')
+    expect(user).toContain('BV1aa411x7h7')
   })
 
-  it('明确声明真实标题来自 B 站接口，且不需要 AI 判断 BV 号对错', () => {
-    const all = buildVerifyMessages(pairs).map((m) => m.content).join('\n')
-    expect(all).toContain('B 站接口')
-    expect(all).toContain('不需要你判断对错')
-    expect(all).toMatch(/JSON/)
+  it('带上用户意图与目标条数', () => {
+    const all = buildFilterMessages(candidates, context).map((m) => m.content).join('\n')
+    expect(all).toContain('晚上想听点安静的华语老歌')
+    expect(all).toContain('3 条左右')
   })
 
-  it('空标题有占位，不会写出 undefined', () => {
-    const all = buildVerifyMessages([{ bvid: 'BV1GJ411x7h7', claimedTitle: '', realTitle: 'x' }])
-      .map((m) => m.content)
-      .join('\n')
-    expect(all).not.toContain('undefined')
-    expect(all).toContain('（空）')
+  it('要求只能从列表里挑、不得编造或改动 bvid', () => {
+    const system = buildFilterMessages(candidates, context)[0].content
+    expect(system).toContain('只能从给出的列表里挑')
+    expect(system).toContain('不得改动或编造')
+    expect(system).toMatch(/JSON/)
+  })
+
+  it('要求没有合适的就返回空数组，不要硬凑', () => {
+    const system = buildFilterMessages(candidates, context)[0].content
+    expect(system).toContain('返回空数组')
+    expect(system).toContain('不要硬凑')
   })
 })
 
-describe('parseVerifyReply', () => {
-  it('解析标准 JSON', () => {
-    const out = parseVerifyReply('{"results":[{"bvid":"BV1GJ411x7h7","match":true,"reason":"一致"}]}')
-    expect(out).toEqual([{ bvid: 'BV1GJ411x7h7', match: true, reason: '一致' }])
+describe('parseFilterReply', () => {
+  const allowed = new Set(['BV1GJ411x7h7', 'BV1aa411x7h7'])
+
+  it('解析标准 JSON 并保留理由', () => {
+    const out = parseFilterReply(
+      '{"picks":[{"bvid":"BV1GJ411x7h7","reason":"就是这首"}]}',
+      allowed,
+    )
+    expect(out).toEqual([{ bvid: 'BV1GJ411x7h7', keep: true, reason: '就是这首' }])
   })
 
   it('容忍代码围栏与前后废话', () => {
-    const reply = '好的，结果如下：\n```json\n{"results":[{"bvid":"BV1GJ411x7h7","match":false,"reason":"不是同一首"}]}\n```\n以上。'
-    const out = parseVerifyReply(reply)
+    const reply = [
+      '好的，结果如下：',
+      '```json',
+      '{"picks":[{"bvid":"BV1aa411x7h7","reason":"翻唱也行"}]}',
+      '```',
+      '以上。',
+    ].join('\n')
+    const out = parseFilterReply(reply, allowed)
     expect(out).toHaveLength(1)
-    expect(out[0].match).toBe(false)
+    expect(out[0].bvid).toBe('BV1aa411x7h7')
   })
 
-  it('跳过字段不合法的单条，保留合法的', () => {
-    const reply = JSON.stringify({
-      results: [
-        { bvid: 'BV1GJ411x7h7', match: true, reason: 'ok' },
-        { bvid: '', match: true, reason: 'no bvid' },
-        { bvid: 'BV1GJ411x7h8', match: 'yes' },
-        { match: true },
-      ],
-    })
-    const out = parseVerifyReply(reply)
-    expect(out).toEqual([{ bvid: 'BV1GJ411x7h7', match: true, reason: 'ok' }])
+  it('模型回抄的 bvid 不在 allowed 里 → 丢弃（改一个字符也不放行）', () => {
+    const out = parseFilterReply(
+      JSON.stringify({
+        picks: [
+          { bvid: 'BV1GJ411x7h7', reason: '真的存在' },
+          // 与 allowed 里的 BV1aa411x7h7 只差最后一位
+          { bvid: 'BV1aa411x7h8', reason: '编的' },
+          { bvid: 'BV1zz411x7h7', reason: '凭空捏造' },
+        ],
+      }),
+      allowed,
+    )
+    expect(out.map((j) => j.bvid)).toEqual(['BV1GJ411x7h7'])
   })
 
-  it('结构不对时抛可读中文错误', () => {
-    expect(() => parseVerifyReply('我觉得都挺像的')).toThrow('不是可解析的格式')
-    expect(() => parseVerifyReply('{"foo":1}')).toThrow('不是可解析的格式')
-    expect(() => parseVerifyReply('')).toThrow('不是可解析的格式')
+  it('重复 bvid 去重，只保留第一次', () => {
+    const out = parseFilterReply(
+      JSON.stringify({
+        picks: [
+          { bvid: 'BV1GJ411x7h7', reason: '第一次' },
+          { bvid: 'BV1GJ411x7h7', reason: '第二次' },
+          { bvid: ' BV1aa411x7h7 ', reason: '带空白' },
+        ],
+      }),
+      allowed,
+    )
+    expect(out).toHaveLength(2)
+    expect(out[0].reason).toBe('第一次')
+    expect(out[1].bvid).toBe('BV1aa411x7h7')
+  })
+
+  it('缺 bvid 或结构不完整的单条被跳过，合法的保留', () => {
+    const out = parseFilterReply(
+      JSON.stringify({
+        picks: [
+          { reason: '没有 bvid' },
+          { bvid: '', reason: '空 bvid' },
+          null,
+          42,
+          { bvid: 'BV1GJ411x7h7' },
+        ],
+      }),
+      allowed,
+    )
+    expect(out).toEqual([{ bvid: 'BV1GJ411x7h7', keep: true, reason: '' }])
+  })
+
+  it('picks 不是数组时返回空数组，而不是抛错', () => {
+    expect(parseFilterReply('{"foo":1}', allowed)).toEqual([])
+    expect(parseFilterReply('{"picks":"BV1GJ411x7h7"}', allowed)).toEqual([])
+  })
+
+  it('非 JSON / 结构错 → 抛可读中文错误', () => {
+    expect(() => parseFilterReply('我觉得都挺像的', allowed)).toThrow('不是可解析的格式')
+    expect(() => parseFilterReply('', allowed)).toThrow('不是可解析的格式')
+    expect(() => parseFilterReply('{"picks": [}', allowed)).toThrow('不是合法 JSON')
   })
 })
 
-describe('verifyExternalCandidates 三步流水线', () => {
-  it('格式非法 → bad-format，且一个请求都不发', async () => {
-    const result = await verifyExternalCandidates(
-      [
-        { claimedTitle: '晴天', bvid: 'not-a-bvid' },
-        { claimedTitle: '七里香', bvid: 'BV123' },
-        { claimedTitle: '', bvid: '' },
-      ],
-      baseSettings,
+describe('pickExternalTracks：搜索 → AI 筛选', () => {
+  it('正常流程：搜索出的候选经 AI 判定后返回，字段来自接口、理由来自 AI', async () => {
+    searchVideoMock.mockResolvedValue(
+      searchResult([
+        searchItem('BV1GJ411x7h7', '周杰伦《晴天》官方MV', { author: '某个UP' }),
+        searchItem('BV1aa411x7h7', '晴天 吉他弹唱', { author: '吉他手' }),
+        searchItem('BV1bb411x7h7', '晴天 架子鼓教学', { author: '鼓手' }),
+      ]),
     )
-
-    expect(result.verified).toEqual([])
-    expect(result.rejected.map((r) => r.reason)).toEqual(['bad-format', 'bad-format', 'bad-format'])
-    expect(result.aiFailed).toBe(false)
-    expect(getVideoDetailMock).not.toHaveBeenCalled()
-    expect(aiChatMock).not.toHaveBeenCalled()
-  })
-
-  it('接口抛错 → not-found，且不送 AI', async () => {
-    getVideoDetailMock.mockRejectedValue(new Error('稿件不可见'))
-
-    const result = await verifyExternalCandidates(
-      [{ claimedTitle: '晴天', bvid: 'BV1GJ411x7h7' }],
-      baseSettings,
-    )
-
-    expect(getVideoDetailMock).toHaveBeenCalledTimes(1)
-    expect(aiChatMock).not.toHaveBeenCalled()
-    expect(result.rejected).toHaveLength(1)
-    expect(result.rejected[0].reason).toBe('not-found')
-    expect(result.rejected[0].detail).toContain('稿件不可见')
-    expect(result.aiFailed).toBe(false)
-  })
-
-  it('AI 判为不符 → mismatch，并带上 AI 给的理由', async () => {
-    getVideoDetailMock.mockResolvedValue(videoInfo('BV1GJ411x7h7', '周杰伦《晴天》'))
     aiChatMock.mockResolvedValue(
       JSON.stringify({
-        results: [{ bvid: 'BV1GJ411x7h7', match: false, reason: '真实标题是另一首歌' }],
+        picks: [
+          { bvid: 'BV1GJ411x7h7', reason: '就是原曲' },
+          { bvid: 'BV1aa411x7h7', reason: '安静的翻唱' },
+        ],
       }),
     )
 
-    const result = await verifyExternalCandidates(
-      [{ claimedTitle: '稻香', bvid: 'BV1GJ411x7h7' }],
+    const r = await pickExternalTracks(
+      ['晴天 周杰伦'],
+      { intent: '晚上想听点安静的', limit: 3 },
       baseSettings,
     )
 
-    expect(result.verified).toEqual([])
-    expect(result.rejected[0].reason).toBe('mismatch')
-    expect(result.rejected[0].detail).toBe('真实标题是另一首歌')
-    expect(result.aiFailed).toBe(false)
+    expect(r.aiFailed).toBe(false)
+    expect(r.considered).toBe(3)
+    expect(r.selected.map((s) => s.bvid)).toEqual(['BV1GJ411x7h7', 'BV1aa411x7h7'])
+    expect(r.selected[0]).toEqual({
+      bvid: 'BV1GJ411x7h7',
+      title: '周杰伦《晴天》官方MV',
+      coverUrl: 'https://example.com/BV1GJ411x7h7.jpg',
+      ownerName: '某个UP',
+      duration: 252,
+      keyword: '晴天 周杰伦',
+      reason: '就是原曲',
+    })
   })
 
-  it('AI 判为相符 → 通过，且 title 来自接口而非模型声称', async () => {
-    getVideoDetailMock.mockResolvedValue(videoInfo('BV1GJ411x7h7', '周杰伦《晴天》官方MV'))
-    aiChatMock.mockResolvedValue(
-      JSON.stringify({ results: [{ bvid: 'BV1GJ411x7h7', match: true, reason: '同一个视频' }] }),
+  it('AI 失败 → selected 为空且 aiFailed=true，绝不降级为本地关键词匹配', async () => {
+    /*
+     * 降级陷阱：候选标题里就含着关键词「晴天」，任何本地字符串匹配都会判「相关」。
+     * 如果实现偷偷退回本地匹配，这条测试就会拿到一条结果。
+     */
+    searchVideoMock.mockResolvedValue(
+      searchResult([searchItem('BV1GJ411x7h7', '周杰伦《晴天》官方MV')]),
     )
-
-    const result = await verifyExternalCandidates(
-      [{ claimedTitle: '晴天 周杰伦', bvid: 'BV1GJ411x7h7' }],
-      baseSettings,
-    )
-
-    expect(result.rejected).toEqual([])
-    expect(result.verified).toHaveLength(1)
-    const item = result.verified[0]
-    expect(item.title).toBe('周杰伦《晴天》官方MV')
-    expect(item.title).not.toBe('晴天 周杰伦')
-    expect(item.claimedTitle).toBe('晴天 周杰伦')
-    expect(item.coverUrl).toBe('https://example.com/cover.jpg')
-    expect(item.ownerName).toBe('某个UP')
-    expect(item.duration).toBe(215)
-    expect(item.matchReason).toBe('同一个视频')
-  })
-
-  it('AI 调用失败 → 整批 verify-failed 且 aiFailed=true，绝不降级为本地判断', async () => {
-    // 标题与接口返回完全一致，本地相似度必然判「相符」——这条就是降级陷阱
-    getVideoDetailMock.mockResolvedValue(videoInfo('BV1GJ411x7h7', '晴天'))
     aiChatMock.mockRejectedValue(new Error('401 认证失败：API 密钥不正确或已失效'))
 
-    const result = await verifyExternalCandidates(
-      [{ claimedTitle: '晴天', bvid: 'BV1GJ411x7h7' }],
+    const r = await pickExternalTracks(
+      ['晴天 周杰伦'],
+      { intent: '晚上想听点安静的', limit: 3 },
       baseSettings,
     )
 
-    expect(result.verified).toEqual([])
-    expect(result.rejected).toHaveLength(1)
-    expect(result.rejected[0].reason).toBe('verify-failed')
-    expect(result.rejected[0].detail).toContain('401')
-    expect(result.aiFailed).toBe(true)
+    expect(r.selected).toEqual([])
+    expect(r.aiFailed).toBe(true)
+    expect(r.considered).toBe(1)
+    expect(aiChatMock).toHaveBeenCalledTimes(1)
   })
 
-  it('AI 回复解析不出 → 同样 verify-failed 且 aiFailed=true', async () => {
-    getVideoDetailMock.mockResolvedValue(videoInfo('BV1GJ411x7h7', '晴天'))
+  it('AI 回复解析不出 → 同样整批丢弃并置 aiFailed', async () => {
+    searchVideoMock.mockResolvedValue(
+      searchResult([searchItem('BV1GJ411x7h7', '周杰伦《晴天》官方MV')]),
+    )
     aiChatMock.mockResolvedValue('这几条看着都挺像的')
 
-    const result = await verifyExternalCandidates(
-      [{ claimedTitle: '晴天', bvid: 'BV1GJ411x7h7' }],
-      baseSettings,
-    )
+    const r = await pickExternalTracks(['晴天'], { intent: '随便', limit: 3 }, baseSettings)
 
-    expect(result.verified).toEqual([])
-    expect(result.rejected[0].reason).toBe('verify-failed')
-    expect(result.aiFailed).toBe(true)
+    expect(r.selected).toEqual([])
+    expect(r.aiFailed).toBe(true)
+    expect(r.considered).toBe(1)
   })
 
-  it('AI 漏答某条 → 该条 verify-failed 并置 aiFailed，不猜', async () => {
-    getVideoDetailMock.mockImplementation((bvid: string) =>
-      Promise.resolve(videoInfo(bvid, '标题-' + bvid)),
+  it('AI 把候选全判为不合适 → selected 为空但 aiFailed=false（不是失败）', async () => {
+    searchVideoMock.mockResolvedValue(
+      searchResult([searchItem('BV1GJ411x7h7', '晴天 架子鼓教学')]),
     )
-    aiChatMock.mockResolvedValue(
-      JSON.stringify({ results: [{ bvid: 'BV1GJ411x7h7', match: true, reason: '一致' }] }),
-    )
+    aiChatMock.mockResolvedValue(JSON.stringify({ picks: [] }))
 
-    const result = await verifyExternalCandidates(
-      [
-        { claimedTitle: 'A', bvid: 'BV1GJ411x7h7' },
-        { claimedTitle: 'B', bvid: 'BV1GJ411x7h8' },
-      ],
-      baseSettings,
-    )
+    const r = await pickExternalTracks(['晴天'], { intent: '想听原曲', limit: 3 }, baseSettings)
 
-    expect(result.verified.map((v) => v.bvid)).toEqual(['BV1GJ411x7h7'])
-    expect(result.rejected).toHaveLength(1)
-    expect(result.rejected[0].bvid).toBe('BV1GJ411x7h8')
-    expect(result.rejected[0].reason).toBe('verify-failed')
-    expect(result.aiFailed).toBe(true)
+    expect(r.selected).toEqual([])
+    expect(r.aiFailed).toBe(false)
+    expect(r.considered).toBe(1)
   })
 
-  it('超过 10 条自动分批：25 条合法候选 → 3 次 AI 请求，每批不超过 10', async () => {
-    const candidates: RawExternalCandidate[] = Array.from({ length: 25 }, (_, i) => ({
-      claimedTitle: '歌曲' + i,
-      // 生成形如 BV1aa0000000 的合法 bvid
-      bvid: 'BV1' + String(i).padStart(2, '0') + 'abcdefg'.slice(0, 7),
-    }))
-    getVideoDetailMock.mockImplementation((bvid: string) =>
-      Promise.resolve(videoInfo(bvid, '真实标题-' + bvid)),
-    )
-    replyAllMatch()
+  it('搜索无结果 → selected 空、considered=0、aiFailed=false，且不调 AI', async () => {
+    searchVideoMock.mockResolvedValue(searchResult([]))
 
-    const result = await verifyExternalCandidates(candidates, baseSettings)
+    const r = await pickExternalTracks(['不存在的东西'], { intent: '随便', limit: 3 }, baseSettings)
 
-    expect(VERIFY_BATCH_SIZE).toBe(10)
-    expect(aiChatMock).toHaveBeenCalledTimes(3)
-    const sizes = aiChatMock.mock.calls.map((call) => bvidsInCall(call).length)
-    expect(sizes).toEqual([10, 10, 5])
-    expect(result.verified).toHaveLength(25)
-    expect(result.rejected).toEqual([])
-    expect(result.aiFailed).toBe(false)
-  })
-
-  it('重复 bvid 只验证一次', async () => {
-    getVideoDetailMock.mockResolvedValue(videoInfo('BV1GJ411x7h7', '晴天'))
-    aiChatMock.mockResolvedValue(
-      JSON.stringify({ results: [{ bvid: 'BV1GJ411x7h7', match: true, reason: '一致' }] }),
-    )
-
-    const result = await verifyExternalCandidates(
-      [
-        { claimedTitle: '晴天', bvid: 'BV1GJ411x7h7' },
-        { claimedTitle: '晴天（重复）', bvid: 'BV1GJ411x7h7' },
-        { claimedTitle: '晴天（再重复）', bvid: ' BV1GJ411x7h7 ' },
-      ],
-      baseSettings,
-    )
-
-    expect(getVideoDetailMock).toHaveBeenCalledTimes(1)
-    expect(aiChatMock).toHaveBeenCalledTimes(1)
-    expect(result.verified).toHaveLength(1)
-    expect(result.rejected).toEqual([])
-  })
-
-  it('getVideoDetail 并发不超过 DETAIL_CONCURRENCY', async () => {
-    let inFlight = 0
-    let peak = 0
-    const candidates: RawExternalCandidate[] = Array.from({ length: 12 }, (_, i) => ({
-      claimedTitle: '歌曲' + i,
-      bvid: 'BV1' + String(i).padStart(2, '0') + 'abcdefg'.slice(0, 7),
-    }))
-    getVideoDetailMock.mockImplementation(async (bvid: string) => {
-      inFlight += 1
-      peak = Math.max(peak, inFlight)
-      await new Promise((resolve) => setTimeout(resolve, 5))
-      inFlight -= 1
-      return videoInfo(bvid, '真实标题-' + bvid)
-    })
-    replyAllMatch()
-
-    await verifyExternalCandidates(candidates, baseSettings)
-
-    expect(DETAIL_CONCURRENCY).toBe(4)
-    expect(peak).toBeLessThanOrEqual(4)
-  })
-
-  it('结果顺序与输入顺序一致（跨批次也不打乱）', async () => {
-    const candidates: RawExternalCandidate[] = [
-      { claimedTitle: '坏格式', bvid: 'bad' },
-      { claimedTitle: 'A', bvid: 'BV1GJ411x7h7' },
-      { claimedTitle: 'B', bvid: 'BV1GJ411x7h8' },
-    ]
-    getVideoDetailMock.mockImplementation((bvid: string) =>
-      bvid === 'BV1GJ411x7h8'
-        ? Promise.reject(new Error('稿件已删除'))
-        : Promise.resolve(videoInfo(bvid, '标题-' + bvid)),
-    )
-    replyAllMatch()
-
-    const result = await verifyExternalCandidates(candidates, baseSettings)
-
-    expect(result.verified.map((v) => v.bvid)).toEqual(['BV1GJ411x7h7'])
-    expect(result.rejected.map((r) => r.bvid)).toEqual(['bad', 'BV1GJ411x7h8'])
-    expect(result.rejected.map((r) => r.reason)).toEqual(['bad-format', 'not-found'])
-  })
-
-  it('空输入不发请求', async () => {
-    const result = await verifyExternalCandidates([], baseSettings)
-    expect(result).toEqual({ verified: [], rejected: [], aiFailed: false })
-    expect(getVideoDetailMock).not.toHaveBeenCalled()
+    expect(r).toEqual({ selected: [], considered: 0, aiFailed: false })
     expect(aiChatMock).not.toHaveBeenCalled()
+  })
+
+  it('模型给出的 bvid 不在候选里 → 该条被丢弃，不进入 selected', async () => {
+    searchVideoMock.mockResolvedValue(
+      searchResult([searchItem('BV1GJ411x7h7', '周杰伦《晴天》官方MV')]),
+    )
+    aiChatMock.mockResolvedValue(
+      JSON.stringify({
+        picks: [
+          { bvid: 'BV1GJ411x7h7', reason: '对' },
+          { bvid: 'BV1xx411c7mD', reason: '编的' },
+        ],
+      }),
+    )
+
+    const r = await pickExternalTracks(['晴天'], { intent: '随便', limit: 3 }, baseSettings)
+
+    expect(r.selected.map((s) => s.bvid)).toEqual(['BV1GJ411x7h7'])
+    expect(r.aiFailed).toBe(false)
+  })
+
+  it('候选超过 FILTER_BATCH_SIZE 时分批送 AI', async () => {
+    // 3 个关键词 × 8 条 = 24 条候选 → 10 + 10 + 4 三批
+    searchVideoMock.mockImplementation((keyword: string) => {
+      const base = Number(keyword.slice(1)) * 10
+      const items = Array.from({ length: RESULTS_PER_KEYWORD }, (_, i) =>
+        searchItem(makeBvid(base + i), '歌-' + keyword + '-' + i),
+      )
+      return Promise.resolve(searchResult(items))
+    })
+    keepEverything()
+
+    const r = await pickExternalTracks(
+      ['k1', 'k2', 'k3'],
+      { intent: '随便', limit: 5 },
+      baseSettings,
+    )
+
+    expect(FILTER_BATCH_SIZE).toBe(10)
+    expect(r.considered).toBe(24)
+    expect(aiChatMock).toHaveBeenCalledTimes(3)
+    expect(aiChatMock.mock.calls.map((call) => bvidsInFilterCall(call).length)).toEqual([10, 10, 4])
+    expect(r.selected).toHaveLength(24)
+    expect(r.aiFailed).toBe(false)
+  })
+
+  it('任一批 AI 失败 → 整批作废，已成功批次的结果也不返回', async () => {
+    searchVideoMock.mockImplementation((keyword: string) => {
+      const base = Number(keyword.slice(1)) * 10
+      return Promise.resolve(
+        searchResult(
+          Array.from({ length: RESULTS_PER_KEYWORD }, (_, i) =>
+            searchItem(makeBvid(base + i), '歌-' + keyword + '-' + i),
+          ),
+        ),
+      )
+    })
+    // 第一批成功，第二批抛错
+    let call = 0
+    aiChatMock.mockImplementation(() => {
+      call += 1
+      if (call === 2) return Promise.reject(new Error('超时'))
+      const bvids = Array.from({ length: 10 }, (_, i) => makeBvid(10 + i))
+      return Promise.resolve(JSON.stringify({ picks: bvids.map((bvid) => ({ bvid, reason: 'x' })) }))
+    })
+
+    const r = await pickExternalTracks(['k1', 'k2'], { intent: '随便', limit: 5 }, baseSettings)
+
+    expect(r.selected).toEqual([])
+    expect(r.aiFailed).toBe(true)
+    expect(r.considered).toBe(16)
   })
 })

@@ -137,20 +137,19 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
   const externalTracks = data?.externalTracks || []
   const externalStatus = data?.externalStatus || 'disabled'
   /*
-   * v1.4.14-pre6 验收修正（S2）：原来不论何种原因失败，文案一律说
-   * 「都没通过 BV 号与标题校验」。但如果候选**全部是 BV 号格式非法**，
-   * 根本没走到存在性查询与标题校验那一步，这句话在事实上是错的。
-   * 现在按实际失败环节给不同说法，用户才知道该改什么（是模型不会写 BV 号，
-   * 还是写了不存在的号，还是标题对不上）。
+   * v1.4.14-pre7：流程已从「模型给 BV 号 + 校验」改为「模型给关键词 + 搜索 + AI 筛选」，
+   * 文案必须跟着改。旧文案说「未通过 BV 号格式/存在性/标题相符校验」，
+   * 但 pre7 已经没有这三个环节了——继续显示会让用户以为在查视频真伪，
+   * 实际是「搜到的结果里没有对题的」。
    */
   const externalRejected = data?.externalRejected || 0
   const externalNotice =
     externalStatus === 'all-rejected'
       ? externalRejected > 0
-        ? '曲库外推荐暂未找到可信结果：' + externalRejected + ' 条候选未通过校验（BV 号格式、视频是否存在、标题是否相符）'
-        : '曲库外推荐暂未找到可信结果：这一批候选都没通过校验'
+        ? '曲库外推荐暂未找到合适的：搜到的 ' + externalRejected + ' 条都与当前需求不太对题'
+        : '曲库外推荐暂未找到合适的：这次搜索没有返回可用结果'
       : externalStatus === 'ai-failed'
-        ? '曲库外推荐这一批没能校验：模型没有给出可用候选，或校验过程失败'
+        ? '曲库外推荐这次没成功：模型没给出搜索关键词，或搜索与筛选过程失败'
         : ''
 
   return (

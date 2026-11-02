@@ -1,24 +1,25 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { readFileSync } from 'fs'
-import path from 'path'
 import type { AiPlaylistCandidate } from '../src/services/aiPlaylist'
-import type { VerifyResult } from '../src/services/videoVerify'
 import type { AiSettings } from '../src/types'
 
-// v1.4.14-pre6：池外推荐（曲库之外）。
-//
-// 用户给的四条硬要求在这里逐条落成断言：
-//   1. 开关默认关闭，关闭时行为与现在完全一致（不发池外请求）；
-//   2. 池内条数不减少；
-//   3. 池外目标 = ceil(池内 × 1.5) 用于生成，验证后截断到池内条数；
-//   4. 验证全失败时状态正确且 UI 有明确文案。
+/*
+ * v1.4.14-pre7 池外推荐（曲库之外）。
+ *
+ * pre6 让模型直接给「标题 + BV 号」，实测幻觉严重：BV 号是 B 站内部标识，
+ * 模型没有可靠来源只能编，验证再严也救不回来。pre7 改成：
+ *
+ *   模型只输出搜索关键词 → pickExternalTracks 去 searchVideo 搜 → AI 判是否对题
+ *
+ * 于是本文件的断言重心也变了：
+ *   1. 模型给的是**关键词**，不是 ID——Track 的 title/bvid 必须来自搜索结果；
+ *   2. 开关关闭时提示词里根本没有池外段落，模型多给字段也不进结果；
+ *   3. 池内条数与顺序不受池外影响，池外截断到池内条数；
+ *   4. 失败态必须如实上报（ai-failed / all-rejected），绝不静默。
+ */
 
-const verifyMock = vi.hoisted(() => ({
-  verifyExternalCandidates: vi.fn(),
-}))
-
-vi.mock('../src/services/videoVerify', () => verifyMock)
+const pickMock = vi.hoisted(() => ({ pickExternalTracks: vi.fn() }))
+vi.mock('../src/services/videoVerify', () => pickMock)
 
 const chatMock = vi.hoisted(() => ({ aiChat: vi.fn() }))
 vi.mock('../src/services/ai', () => chatMock)
@@ -51,8 +52,12 @@ import {
   buildRecommendPrompt,
   externalTargetCount,
   generateRecommendation,
+  parseExternalKeywords,
   parseRecommendation,
 } from '../src/services/aiRecommend'
+
+import type { SelectedCandidate } from '../src/services/videoVerify'
+import type { ExternalPickResult } from '../src/services/videoVerify'
 
 function cand(idx: number, id: string): AiPlaylistCandidate {
   return {
@@ -84,53 +89,126 @@ function settings(): AiSettings {
   }
 }
 
-/** 造一条验证通过的候选 */
-function verified(bvid: string, title: string) {
+/** 造一条「通过 AI 筛选」的搜索结果（字段口径同 SearchCandidate + reason） */
+function picked(bvid: string, title: string, extra: Partial<SelectedCandidate> = {}): SelectedCandidate {
   return {
     bvid,
     title,
-    claimedTitle: title,
-    coverUrl: '',
-    ownerName: 'UP',
-    duration: 100,
-    matchReason: '标题相符',
+    coverUrl: 'https://example.com/' + bvid + '.jpg',
+    ownerName: '搜索结果UP',
+    duration: 252,
+    keyword: '晴天 周杰伦',
+    reason: 'AI 说对题',
+    ...extra,
   }
+}
+
+/** 池外流程的返回值 */
+function pickResult(selected: SelectedCandidate[], considered: number, aiFailed = false): ExternalPickResult {
+  return { selected, considered, aiFailed }
 }
 
 const POOL = [cand(1, 'a'), cand(2, 'b'), cand(3, 'c'), cand(4, 'd'), cand(5, 'e'), cand(6, 'f')]
 
-/** 模型回复：5 首池内 + n 首池外 */
-function reply(picks: number[], external: { title: string; bvid: string }[] = []): string {
-  return JSON.stringify({
+/** 模型回复：池内编号 + 可选的池外搜索关键词 */
+function modelReply(picks: number[], keywords?: string[]): string {
+  const obj: { greeting: string; picks: { index: number; reason: string }[]; externalKeywords?: string[] } = {
     greeting: '晚上好',
     picks: picks.map((i) => ({ index: i, reason: 'r' + i })),
-    ...(external.length ? { external: external.map((e) => ({ ...e, reason: 'ext' })) } : {}),
-  })
+  }
+  if (keywords) obj.externalKeywords = keywords
+  return JSON.stringify(obj)
 }
 
+/** 固定时间，避免测试依赖真实时钟（20 点 → 晚上） */
+const NIGHT = new Date(2026, 0, 1, 20, 0, 0)
+
+const PROMPT_BASE = {
+  settings: settings(),
+  limit: 5,
+  contextLabel: '晚上',
+  hour: 20,
+  profileContext: { profile: '', learned: '', liked: [], disliked: [] },
+  portraitText: '',
+  hasHistory: false,
+  pool: POOL,
+}
+
+let warnSpy: ReturnType<typeof vi.spyOn>
+
 beforeEach(() => {
+  // 池外失败时源码会在 DEV 下 console.warn：那是预期行为，别污染测试输出
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  // 推荐去重读 sessionStorage：不清会串场，导致候选池被意外缩小
+  sessionStorage.clear()
   poolMock.buildCandidatePool.mockReturnValue(POOL)
   chatMock.aiChat.mockReset()
-  verifyMock.verifyExternalCandidates.mockReset()
-  verifyMock.verifyExternalCandidates.mockResolvedValue({
-    verified: [],
-    rejected: [],
-    aiFailed: false,
-  })
+  pickMock.pickExternalTracks.mockReset()
+  pickMock.pickExternalTracks.mockResolvedValue(pickResult([], 0))
 })
 
 afterEach(() => {
+  warnSpy.mockRestore()
   vi.clearAllMocks()
 })
 
-describe('池外目标条数 = ceil(池内 × 1.5)', () => {
-  it('5 首池内要 8 首池外（5 × 1.5 = 7.5 向上取整）', () => {
-    expect(externalTargetCount(5)).toBe(8)
+describe('parseExternalKeywords：只认关键词，不认 ID', () => {
+  it('字符串数组原样取出', () => {
+    expect(parseExternalKeywords(['晴天 周杰伦', '粤语 慢歌'])).toEqual(['晴天 周杰伦', '粤语 慢歌'])
   })
 
-  it('偶数与奇数都按向上取整', () => {
+  it('容忍对象写法 {"q":"..."}', () => {
+    expect(
+      parseExternalKeywords([{ q: '晴天 周杰伦' }, '粤语 慢歌', { q: '  夜车  ' }]),
+    ).toEqual(['晴天 周杰伦', '粤语 慢歌', '夜车'])
+  })
+
+  it('去重（大小写不敏感），保留首次出现的写法', () => {
+    expect(parseExternalKeywords(['晴天', '晴天', 'AB', 'ab', ' 晴天 '])).toEqual(['晴天', 'AB'])
+  })
+
+  it('空值与结构不对的条目被过滤', () => {
+    expect(parseExternalKeywords(['', '   ', null, undefined, 42, {}, { q: '' }, { q: 1 }])).toEqual([])
+  })
+
+  it('非数组输入返回空数组', () => {
+    expect(parseExternalKeywords(undefined)).toEqual([])
+    expect(parseExternalKeywords(null)).toEqual([])
+    expect(parseExternalKeywords('晴天')).toEqual([])
+    expect(parseExternalKeywords({ q: '晴天' })).toEqual([])
+  })
+
+  it('模型给的 BV 号不会被当成关键词之外的任何东西（关键词里含 BV 也只是一段文本）', () => {
+    // 关键词就是关键词：实现不做语义解释，也不会把它当 ID 用
+    expect(parseExternalKeywords(['BV1xx411c7mD'])).toEqual(['BV1xx411c7mD'])
+  })
+})
+
+describe('parseRecommendation 取出 externalKeywords', () => {
+  it('解析出关键词数组', () => {
+    const r = parseRecommendation(modelReply([1], ['晴天 周杰伦', '粤语 慢歌']), POOL)
+    expect(r.externalKeywords).toEqual(['晴天 周杰伦', '粤语 慢歌'])
+    expect(r.picked.map((p) => p.track.id)).toEqual(['a'])
+  })
+
+  it('没有该字段时为空数组（旧格式兼容）', () => {
+    expect(parseRecommendation(modelReply([1, 2]), POOL).externalKeywords).toEqual([])
+  })
+
+  it('字段类型不对时为空数组，不影响池内解析', () => {
+    const r = parseRecommendation(
+      JSON.stringify({ greeting: 'hi', picks: [{ index: 1 }], externalKeywords: '晴天' }),
+      POOL,
+    )
+    expect(r.externalKeywords).toEqual([])
+    expect(r.picked).toHaveLength(1)
+  })
+})
+
+describe('池外目标条数 = ceil(池内 × 1.5)', () => {
+  it('5 首池内要 8 首池外', () => {
+    expect(externalTargetCount(5)).toBe(8)
     expect(externalTargetCount(4)).toBe(6)
-    expect(externalTargetCount(6)).toBe(9)
     expect(externalTargetCount(1)).toBe(2)
   })
 
@@ -141,311 +219,290 @@ describe('池外目标条数 = ceil(池内 × 1.5)', () => {
   })
 })
 
-describe('开关关闭时行为与现在完全一致', () => {
-  it('不调用验证器（不发任何池外请求）', async () => {
-    chatMock.aiChat.mockResolvedValue(reply([1, 2, 3, 4, 5]))
-    const r = await generateRecommendation({ settings: settings(), limit: 5 })
-    expect(verifyMock.verifyExternalCandidates).not.toHaveBeenCalled()
+describe('开关关闭：行为与上线前一致', () => {
+  it('不调用 pickExternalTracks', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1, 2, 3, 4, 5]))
+
+    const r = await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT })
+
+    expect(pickMock.pickExternalTracks).not.toHaveBeenCalled()
     expect(r.externalTracks).toEqual([])
     expect(r.externalStatus).toBe('disabled')
+    expect(r.externalRejected).toBe(0)
   })
 
-  it('显式传 external: false 同样不调用验证器', async () => {
-    chatMock.aiChat.mockResolvedValue(reply([1, 2, 3, 4, 5]))
-    await generateRecommendation({ settings: settings(), limit: 5, external: false })
-    expect(verifyMock.verifyExternalCandidates).not.toHaveBeenCalled()
+  it('显式传 external: false 同样不调用', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1, 2, 3, 4, 5]))
+    await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT, external: false })
+    expect(pickMock.pickExternalTracks).not.toHaveBeenCalled()
   })
 
-  it('关闭时提示词不含任何池外段落（逐字回到旧版）', () => {
-    const input = {
-      settings: settings(),
-      limit: 5,
-      contextLabel: '晚上',
-      hour: 20,
-      profileContext: { profile: '', learned: '', liked: [], disliked: [] },
-      portraitText: '',
-      hasHistory: false,
-      pool: POOL,
-    }
-    const off = buildRecommendPrompt(input)
+  it('关闭时提示词不含任何池外段落', () => {
+    const off = buildRecommendPrompt(PROMPT_BASE)
     expect(off.system).not.toContain('候选清单之外')
-    expect(off.system).not.toContain('external')
+    expect(off.system).not.toContain('externalKeywords')
+    expect(off.system).not.toContain('搜索关键词')
     expect(off.system).not.toContain('BV')
-    // 默认值与显式 0 等价
-    expect(buildRecommendPrompt({ ...input, externalLimit: 0 })).toEqual(off)
+    // 默认值与显式 0 逐字等价
+    expect(buildRecommendPrompt({ ...PROMPT_BASE, externalLimit: 0 })).toEqual(off)
   })
 
-  it('关闭时模型即使多给了 external 字段，也不进入结果', async () => {
-    chatMock.aiChat.mockResolvedValue(
-      reply([1, 2], [{ title: 'X', bvid: 'BV1xx411c7mD' }]),
-    )
-    const r = await generateRecommendation({ settings: settings(), limit: 5 })
+  it('关闭时模型多给 externalKeywords 也不进结果', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1, 2], ['晴天 周杰伦']))
+
+    const r = await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT })
+
     expect(r.externalTracks).toEqual([])
-    expect(verifyMock.verifyExternalCandidates).not.toHaveBeenCalled()
+    expect(r.externalStatus).toBe('disabled')
+    // 有关键词也不该去搜
+    expect(pickMock.pickExternalTracks).not.toHaveBeenCalled()
+    expect(r.tracks.map((t) => t.id)).toEqual(['a', 'b'])
   })
 })
 
-describe('开关打开时提示词要求真实 BV 号', () => {
-  const base = {
-    settings: settings(),
-    limit: 5,
-    contextLabel: '晚上',
-    hour: 20,
-    profileContext: { profile: '', learned: '', liked: [], disliked: [] },
-    portraitText: '',
-    hasHistory: false,
-    pool: POOL,
-  }
+describe('开关打开：提示词要求搜索关键词，明确不要 BV 号', () => {
+  const on = () => buildRecommendPrompt({ ...PROMPT_BASE, externalLimit: 8 })
 
-  it('写明池外条数与「另外」推荐', () => {
-    const { system } = buildRecommendPrompt({ ...base, externalLimit: 8 })
-    expect(system).toContain('候选清单之外')
-    expect(system).toContain('8 首')
+  it('要求 3~5 组搜索关键词', () => {
+    expect(on().system).toContain('3~5 组搜索关键词')
   })
 
-  it('要求 BV 号真实存在，并说明编造会被校验丢弃', () => {
-    const { system } = buildRecommendPrompt({ ...base, externalLimit: 8 })
-    expect(system).toContain('BV')
-    expect(system).toContain('编造的 BV 号会被校验直接丢弃')
-    // 标题也要核对，避免「BV 真、歌不对」
-    expect(system).toContain('真实标题核对')
+  it('明确禁止给 BV 号，并说明程序会去搜索', () => {
+    const system = on().system
+    expect(system).toContain('不要给 BV 号')
+    expect(system).toContain('程序会去搜索')
   })
 
-  it('输出格式里带 external 数组与 title/bvid/reason 三字段', () => {
-    const { system } = buildRecommendPrompt({ ...base, externalLimit: 8 })
-    expect(system).toContain('"external"')
-    expect(system).toContain('"bvid"')
-    expect(system).toContain('"title"')
+  it('输出格式是 externalKeywords 数组', () => {
+    expect(on().system).toContain('"externalKeywords"')
   })
 
-  it('池内规则保持原样（条数与「只能从候选清单里挑」没被挤掉）', () => {
-    const { system } = buildRecommendPrompt({ ...base, externalLimit: 8 })
+  it('不再要求模型输出 bvid / title / external 数组（pre6 的旧格式已废弃）', () => {
+    const system = on().system
+    expect(system).not.toContain('"bvid"')
+    expect(system).not.toContain('"external"')
+    expect(system).not.toContain('编造的 BV 号会被校验直接丢弃')
+  })
+
+  it('池内规则没被挤掉，且编号连续不跳号', () => {
+    const system = on().system
     expect(system).toContain('只能从候选清单里挑')
     expect(system).toContain('推荐 5 首左右')
+    // 1..9 每条规则都该在，避免出现「5. …9. …5.」这种跳号
+    for (let i = 1; i <= 9; i += 1) {
+      expect(system).toContain('\n' + i + '. ')
+    }
+  })
+
+  it('关闭时编号只到 5，没有 6~9 的池外规则', () => {
+    const system = buildRecommendPrompt(PROMPT_BASE).system
+    expect(system).toContain('\n5. ')
+    expect(system).not.toContain('\n6. ')
+    expect(system).not.toContain('\n9. ')
   })
 })
 
-describe('池外候选解析', () => {
-  it('取出 external 的 title/bvid/reason', () => {
-    const r = parseRecommendation(
-      reply([1], [{ title: '晴天 - 周杰伦', bvid: 'BV1xx411c7mD' }]),
-      POOL,
+describe('池内不减少：开关打开后池内仍是原样', () => {
+  it('5 首且顺序不变', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1, 2, 3, 4, 5], ['晴天 周杰伦']))
+    pickMock.pickExternalTracks.mockResolvedValue(
+      pickResult([picked('BV1xx411c7mD', 'E1'), picked('BV1yy411c7mD', 'E2')], 2),
     )
-    expect(r.external).toHaveLength(1)
-    expect(r.external[0]).toMatchObject({ title: '晴天 - 周杰伦', bvid: 'BV1xx411c7mD' })
-  })
 
-  it('缺 title 或 bvid 的条目直接跳过', () => {
-    const r = parseRecommendation(
-      JSON.stringify({
-        picks: [{ index: 1 }],
-        external: [
-          { title: '有标题没 BV' },
-          { bvid: 'BV1xx411c7mD' },
-          { title: 'X', bvid: 'BV1yy411c7mD' },
-        ],
-      }),
-      POOL,
-    )
-    expect(r.external.map((e) => e.bvid)).toEqual(['BV1yy411c7mD'])
-  })
+    const r = await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT, external: true })
 
-  it('重复 BV 号去重', () => {
-    const r = parseRecommendation(
-      JSON.stringify({
-        picks: [{ index: 1 }],
-        external: [
-          { title: 'A', bvid: 'BV1xx411c7mD' },
-          { title: 'B', bvid: 'BV1xx411c7mD' },
-        ],
-      }),
-      POOL,
-    )
-    expect(r.external).toHaveLength(1)
-  })
-
-  it('没有 external 字段时为空数组（旧格式兼容）', () => {
-    const r = parseRecommendation(reply([1, 2]), POOL)
-    expect(r.external).toEqual([])
-  })
-})
-
-describe('生成流程：池内不减少、池外截断、状态正确', () => {
-  it('池内 5 首在开关打开后仍是 5 首且顺序不变', async () => {
-    chatMock.aiChat.mockResolvedValue(
-      reply([1, 2, 3, 4, 5], [
-        { title: 'E1', bvid: 'BV1xx411c7mD' },
-        { title: 'E2', bvid: 'BV1yy411c7mD' },
-      ]),
-    )
-    verifyMock.verifyExternalCandidates.mockResolvedValue({
-      verified: [verified('BV1xx411c7mD', 'E1'), verified('BV1yy411c7mD', 'E2')],
-      rejected: [],
-      aiFailed: false,
-    } as VerifyResult)
-
-    const r = await generateRecommendation({ settings: settings(), limit: 5, external: true })
     expect(r.tracks).toHaveLength(5)
     expect(r.tracks.map((t) => t.id)).toEqual(['a', 'b', 'c', 'd', 'e'])
-    expect(r.externalTracks?.map((t) => t.bvid)).toEqual(['BV1xx411c7mD', 'BV1yy411c7mD'])
     expect(r.externalStatus).toBe('ok')
   })
 
-  it('向验证器请求 ceil(5 × 1.5) = 8 条，并截断到池内 5 条', async () => {
-    const many = Array.from({ length: 8 }, (_, i) => ({
-      title: 'E' + i,
-      bvid: 'BV1xx411c7m' + i,
-    }))
-    chatMock.aiChat.mockResolvedValue(reply([1, 2, 3, 4, 5], many))
-    // 验证器把 8 条全判为通过：结果必须截断到 5 条
-    verifyMock.verifyExternalCandidates.mockResolvedValue({
-      verified: many.map((m) => verified(m.bvid, m.title)),
-      rejected: [],
-      aiFailed: false,
-    } as VerifyResult)
+  it('池外全部失败时池内也不受影响', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1, 2, 3], ['晴天 周杰伦']))
+    pickMock.pickExternalTracks.mockRejectedValue(new Error('搜索接口 500'))
 
-    const r = await generateRecommendation({ settings: settings(), limit: 5, external: true })
-    expect(r.externalTracks).toHaveLength(5)
-    expect(r.externalTracks?.map((t) => t.bvid)).toEqual(many.slice(0, 5).map((m) => m.bvid))
-  })
+    const r = await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT, external: true })
 
-  it('池外 Track 带上验证器的真实标题与 bvid', async () => {
-    chatMock.aiChat.mockResolvedValue(
-      reply([1], [{ title: '模型声称的标题', bvid: 'BV1xx411c7mD' }]),
-    )
-    verifyMock.verifyExternalCandidates.mockResolvedValue({
-      verified: [verified('BV1xx411c7mD', '接口真实标题')],
-      rejected: [],
-      aiFailed: false,
-    } as VerifyResult)
-
-    const r = await generateRecommendation({ settings: settings(), limit: 5, external: true })
-    const t = r.externalTracks?.[0]
-    expect(t?.title).toBe('接口真实标题')
-    expect(t?.bvid).toBe('BV1xx411c7mD')
-    // id 稳定且不与池内 id 撞车
-    expect(t?.id).toBe('ext-BV1xx411c7mD')
-  })
-
-  it('验证全部失败 → all-rejected，且池内结果不受影响', async () => {
-    chatMock.aiChat.mockResolvedValue(
-      reply([1, 2, 3], [{ title: 'X', bvid: 'BV1xx411c7mD' }]),
-    )
-    verifyMock.verifyExternalCandidates.mockResolvedValue({
-      verified: [],
-      rejected: [
-        { bvid: 'BV1xx411c7mD', claimedTitle: 'X', reason: 'mismatch', detail: '不是同一首' },
-      ],
-      aiFailed: false,
-    } as VerifyResult)
-
-    const r = await generateRecommendation({ settings: settings(), limit: 5, external: true })
-    expect(r.externalStatus).toBe('all-rejected')
-    expect(r.externalTracks).toEqual([])
-    expect(r.externalRejected).toBe(1)
     expect(r.tracks.map((t) => t.id)).toEqual(['a', 'b', 'c'])
-  })
-
-  it('AI 核对失败且无通过项 → ai-failed', async () => {
-    chatMock.aiChat.mockResolvedValue(
-      reply([1], [{ title: 'X', bvid: 'BV1xx411c7mD' }]),
-    )
-    verifyMock.verifyExternalCandidates.mockResolvedValue({
-      verified: [],
-      rejected: [
-        { bvid: 'BV1xx411c7mD', claimedTitle: 'X', reason: 'verify-failed', detail: 'AI 失败' },
-      ],
-      aiFailed: true,
-    } as VerifyResult)
-
-    const r = await generateRecommendation({ settings: settings(), limit: 5, external: true })
+    expect(r.reasons).toEqual({ a: 'r1', b: 'r2', c: 'r3' })
     expect(r.externalStatus).toBe('ai-failed')
     expect(r.externalTracks).toEqual([])
   })
+})
 
-  it('模型一条池外都没给 → ai-failed，不静默', async () => {
-    chatMock.aiChat.mockResolvedValue(reply([1, 2]))
-    const r = await generateRecommendation({ settings: settings(), limit: 5, external: true })
+describe('调用约定：把关键词交给搜索，把 intent 与条数交给筛选', () => {
+  it('第一个参数是模型给的关键词，不是 bvid/标题', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1], ['晴天 周杰伦', '粤语 慢歌']))
+
+    await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT, external: true })
+
+    expect(pickMock.pickExternalTracks).toHaveBeenCalledTimes(1)
+    const [keywords, context] = pickMock.pickExternalTracks.mock.calls[0] as [
+      string[],
+      { intent: string; limit: number },
+      AiSettings,
+    ]
+    expect(keywords).toEqual(['晴天 周杰伦', '粤语 慢歌'])
+    // 条数用 ceil(5 × 1.5) = 8，而不是池内 5
+    expect(context.limit).toBe(8)
+    // intent 带上时段，供 AI 判断「搜索结果是否对题」
+    expect(context.intent).toContain('晚上')
+    expect(context.intent).toContain('20 点')
+  })
+
+  it('把 settings 原样传下去', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1], ['晴天']))
+    const s = settings()
+    await generateRecommendation({ settings: s, limit: 5, now: NIGHT, external: true })
+    expect(pickMock.pickExternalTracks.mock.calls[0][2]).toBe(s)
+  })
+
+  it('模型一组关键词都没给 → 不去搜，直接 ai-failed', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1, 2]))
+
+    const r = await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT, external: true })
+
+    expect(pickMock.pickExternalTracks).not.toHaveBeenCalled()
     expect(r.externalStatus).toBe('ai-failed')
     expect(r.externalTracks).toEqual([])
-    // 没有候选就不该白跑一趟验证
-    expect(verifyMock.verifyExternalCandidates).not.toHaveBeenCalled()
     expect(r.tracks).toHaveLength(2)
   })
+})
 
-  it('验证器抛错时池内结果仍然返回', async () => {
-    chatMock.aiChat.mockResolvedValue(
-      reply([1, 2], [{ title: 'X', bvid: 'BV1xx411c7mD' }]),
+describe('Track 来源：title / bvid 来自搜索结果，不是模型', () => {
+  it('外部 Track 逐字采用搜索结果的字段', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1], ['晴天 周杰伦']))
+    pickMock.pickExternalTracks.mockResolvedValue(
+      pickResult(
+        [
+          picked('BV1GJ411x7h7', '周杰伦《晴天》官方MV', {
+            ownerName: '杰威尔音乐',
+            coverUrl: 'https://example.com/real.jpg',
+            duration: 252,
+          }),
+        ],
+        1,
+      ),
     )
-    verifyMock.verifyExternalCandidates.mockRejectedValue(new Error('boom'))
 
-    const r = await generateRecommendation({ settings: settings(), limit: 5, external: true })
+    const r = await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT, external: true })
+    const t = r.externalTracks?.[0]
+
+    expect(t?.title).toBe('周杰伦《晴天》官方MV')
+    expect(t?.bvid).toBe('BV1GJ411x7h7')
+    expect(t?.artist).toBe('杰威尔音乐')
+    expect(t?.coverUrl).toBe('https://example.com/real.jpg')
+    expect(t?.duration).toBe(252)
+    // id 稳定、不与池内撞车；池外没有播放量/收藏概念
+    expect(t?.id).toBe('ext-BV1GJ411x7h7')
+    expect(t?.playCount).toBe(0)
+    expect(t?.isLiked).toBe(false)
+    expect(t?.videoUrl).toBe('')
+  })
+
+  it('池外理由用 AI 筛选时给的原话', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1], ['晴天 周杰伦']))
+    pickMock.pickExternalTracks.mockResolvedValue(
+      pickResult([picked('BV1GJ411x7h7', '周杰伦《晴天》官方MV', { reason: '正是原曲' })], 1),
+    )
+
+    const r = await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT, external: true })
+
+    expect(r.reasons['ext-BV1GJ411x7h7']).toBe('正是原曲')
+    // 池内理由不受影响
+    expect(r.reasons.a).toBe('r1')
+  })
+})
+
+describe('截断：池外不超过池内条数', () => {
+  it('搜索 + 筛选给出 8 条时截断到 5 条', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1, 2, 3, 4, 5], ['晴天 周杰伦']))
+    const many = Array.from({ length: 8 }, (_, i) => picked('BV1xx411c7m' + i, 'E' + i))
+    pickMock.pickExternalTracks.mockResolvedValue(pickResult(many, 12))
+
+    const r = await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT, external: true })
+
+    expect(r.externalTracks).toHaveLength(5)
+    expect(r.externalTracks?.map((t) => t.bvid)).toEqual(many.slice(0, 5).map((m) => m.bvid))
+    // considered 12、保留 5 → 丢弃 7
+    expect(r.externalRejected).toBe(7)
+    expect(r.externalStatus).toBe('ok')
+  })
+
+  it('不足池内条数时全保留', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1], ['晴天']))
+    pickMock.pickExternalTracks.mockResolvedValue(
+      pickResult([picked('BV1xx411c7mD', 'E1')], 9),
+    )
+
+    const r = await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT, external: true })
+
+    expect(r.externalTracks).toHaveLength(1)
+    expect(r.externalRejected).toBe(8)
+  })
+})
+
+describe('失败态：必须如实上报，不静默', () => {
+  it('AI 筛选失败 → ai-failed', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1], ['晴天 周杰伦']))
+    pickMock.pickExternalTracks.mockResolvedValue(pickResult([], 6, true))
+
+    const r = await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT, external: true })
+
+    expect(r.externalStatus).toBe('ai-failed')
+    expect(r.externalTracks).toEqual([])
+    // 参与筛选的 6 条全部没留下：丢弃计数如实上报（considered - kept）
+    expect(r.externalRejected).toBe(6)
+    expect(r.tracks.map((t) => t.id)).toEqual(['a'])
+  })
+
+  it('有候选但全被 AI 拒 → all-rejected，并带上丢弃条数', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1], ['晴天 周杰伦']))
+    pickMock.pickExternalTracks.mockResolvedValue(pickResult([], 6, false))
+
+    const r = await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT, external: true })
+
+    expect(r.externalStatus).toBe('all-rejected')
+    expect(r.externalTracks).toEqual([])
+    expect(r.externalRejected).toBe(6)
+    expect(r.tracks.map((t) => t.id)).toEqual(['a'])
+  })
+
+  it('搜索完全无结果 → all-rejected，丢弃 0 条', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1], ['不存在的歌']))
+    pickMock.pickExternalTracks.mockResolvedValue(pickResult([], 0, false))
+
+    const r = await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT, external: true })
+
+    expect(r.externalStatus).toBe('all-rejected')
+    expect(r.externalRejected).toBe(0)
+  })
+
+  it('pickExternalTracks 抛错 → 池内仍返回，状态 ai-failed', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1, 2], ['晴天 周杰伦']))
+    pickMock.pickExternalTracks.mockRejectedValue(new Error('boom'))
+
+    const r = await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT, external: true })
+
     expect(r.tracks.map((t) => t.id)).toEqual(['a', 'b'])
     expect(r.externalStatus).toBe('ai-failed')
     expect(r.externalTracks).toEqual([])
   })
+
+  it('关闭时也填齐两个池外字段（结构恒定，UI 不必写两套分支）', async () => {
+    chatMock.aiChat.mockResolvedValue(modelReply([1]))
+    const r = await generateRecommendation({ settings: settings(), limit: 5, now: NIGHT })
+    expect(r.externalTracks).toEqual([])
+    expect(r.externalRejected).toBe(0)
+    expect(r.externalStatus).toBe('disabled')
+  })
 })
 
-describe('设置项与 UI 契约（读源码断言）', () => {
-  const typesSrc = readFileSync(path.resolve(__dirname, '../src/types/index.ts'), 'utf8')
-  const storageSrc = readFileSync(path.resolve(__dirname, '../src/utils/storage.ts'), 'utf8')
-  const sheetSrc = readFileSync(
-    path.resolve(__dirname, '../src/components/AiSettingsSheet.tsx'),
-    'utf8',
-  )
-  const componentSrc = readFileSync(
-    path.resolve(__dirname, '../src/components/DiscoverAiRecommend.tsx'),
-    'utf8',
-  )
-  const cssSrc = readFileSync(path.resolve(__dirname, '../src/styles/index.css'), 'utf8')
-
-  it('AppSettings 有 aiExternalRecommend 字段，默认 false', () => {
-    expect(typesSrc).toContain('aiExternalRecommend: boolean')
-    expect(storageSrc).toContain('aiExternalRecommend: false')
-  })
-
-  it('开关在推荐分区可见，且默认关闭（初值取 AppSettings）', () => {
-    expect(sheetSrc).toContain('曲库之外的推荐')
-    expect(sheetSrc).toContain('role="switch"')
-    // 初值直接来自 AppSettings 默认值（false），不是硬编码 true
-    expect(sheetSrc).toContain('loadAppSettings().aiExternalRecommend')
-    expect(sheetSrc).toContain('aria-checked={externalOn}')
-    expect(sheetSrc).toContain('updateAppSettings({ aiExternalRecommend:')
-    // 说明会消耗更多额度
-    expect(sheetSrc).toContain('会消耗更多额度')
-    // 抽屉会被测试以普通函数调用，任何 hook 都会炸
-    expect(sheetSrc).not.toContain('useAppSettings()')
-  })
-
-  it('发现页把开关透传给生成函数', () => {
-    expect(componentSrc).toContain('external: externalOn')
-    expect(componentSrc).toContain('appSettings.aiExternalRecommend')
-  })
-
-  it('验证全失败时 UI 有明确文案（不静默）', () => {
-    expect(componentSrc).toContain('曲库外推荐暂未找到可信结果')
-    expect(componentSrc).toContain("externalStatus === 'all-rejected'")
-    expect(componentSrc).toContain("externalStatus === 'ai-failed'")
-  })
-
-  it('池外分组有视觉区分且复用 onPlayTrack', () => {
-    expect(componentSrc).toContain('曲库之外')
-    expect(componentSrc).toContain('discover-ai__item--external')
-    expect(componentSrc).toContain('onPlayTrack(t)')
-    // 对应样式真的追加进了 index.css
-    expect(cssSrc).toContain('.discover-ai__external')
-    expect(cssSrc).toContain('.discover-ai__item--external')
-  })
-
-  it('新增 CSS 只用已存在的 token', () => {
-    const start = cssSrc.indexOf('/* ===== v1.4.14-pre6 池外推荐')
-    expect(start).toBeGreaterThan(-1)
-    const section = cssSrc.slice(start)
-    const vars = Array.from(new Set(section.match(/var\((--[\w-]+)\)/g) || []))
-    expect(vars.length).toBeGreaterThan(0)
-    for (const v of vars) {
-      const name = v.slice(4, -1)
-      expect(cssSrc).toContain(name + ':')
-    }
+describe('默认值：池外推荐默认关闭', () => {
+  it('AppSettings 的 aiExternalRecommend 默认 false', async () => {
+    // 走真实模块（本文件把 storage mock 掉了），确认出厂默认是关
+    const actual = await vi.importActual<typeof import('../src/utils/storage')>(
+      '../src/utils/storage',
+    )
+    expect(actual.loadAppSettings().aiExternalRecommend).toBe(false)
   })
 })
