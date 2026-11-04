@@ -4,6 +4,9 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import crypto from 'node:crypto'
 import { emitUpdater, ulog } from './updaterBus'
+// v1.4.14-pre9：发布渠道规则抽到共享模块，与渲染层 assistantExecutor 用同一份，
+// 避免「主进程从 A 拉、渲染层查 B」的错位。这里 import 后再重新导出给既有调用方。
+import { isPrereleaseVersion, releaseBaseFor } from '../src/utils/releaseChannel'
 
 // 渲染热补丁：从 GitHub Releases 下发 renderer-<version>.asar，校验后由 app:// 从可写沙箱加载。
 // 单文件 asar（桌面端 net.fetch 读 asar 内部已被现有打包路径证明可用），无需解压、原子可回滚。
@@ -26,16 +29,9 @@ const REPO = 'SaiErOscar/BiliMusic'
  * 清单地址与渲染包下载地址必须由同一个基址派生——否则会出现
  * 「从正式版清单读到文件名、却去预览版 release 下载」的错位。
  */
-export function isPrereleaseVersion(version: string): boolean {
-  return /-(pre|alpha|beta|rc)/.test(version)
-}
-
-export function releaseBaseFor(version: string): string {
-  const tag = 'v' + version
-  return isPrereleaseVersion(version)
-    ? `https://github.com/${REPO}/releases/download/${tag}`
-    : `https://github.com/${REPO}/releases/latest/download`
-}
+// v1.4.14-pre9：规则抽到 src/utils/releaseChannel.ts，与渲染层的版本查询共用一份，
+// 避免「主进程从 A 拉、渲染层查 B」的错位。这里重新导出，保持既有 import 不变。
+export { isPrereleaseVersion, releaseBaseFor }
 
 /** 当前外壳版本对应的下载基址；OTA 清单与渲染包都由它派生 */
 function currentReleaseBase(): string {

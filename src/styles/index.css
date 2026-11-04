@@ -6449,4 +6449,44 @@ body {
   opacity: 0.9;
 }
 
+/* ===== v1.4.14-pre9 对话助手 · 多步会话（反问选项与确认卡片）=====
+
+   只追加，不改上面任何一条既有规则。
+   反问的选项复用 .ai-chat__chip（与意图候选同一副长相），
+   这里只补两件它没覆盖的东西：选项组的纵向留白，以及危险动作的描边强调。 */
+
+.ai-chat__ask {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 确认卡片：与气泡内的其它块拉开一点，避免「确认」按钮挨着正文误触 */
+.ai-chat__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-border);
+}
+
+.ai-chat__confirm-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 危险动作（删歌单、导出 MV）用描边强调，不用实心红：
+   确认卡片的重点是「看清楚再点」，不是制造紧迫感。 */
+.ai-chat__chip--danger {
+  border-color: var(--color-destructive);
+  color: var(--color-destructive);
+  background: var(--color-card);
+}
+
+.ai-chat__chip--danger:hover {
+  border-color: var(--color-destructive);
+  background: var(--color-primary-light);
+}
+
 

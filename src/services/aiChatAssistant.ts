@@ -16,9 +16,14 @@
  *   写作业=钢琴曲这类它自己想的偏好——那会让用户觉得助手在瞎猜。
  * - **指代消解**：「像这首」「刚才那首」必须落到 currentTrack 上；
  *   currentTrack 为空时，宁可在 reply 里问一句，也不许编一个曲名出来。
+ * - **动作识别（v1.4.14-pre9）**：除六个高层意图外，还能识别 assistantActions 注册表里的
+ *   具体动作（intent:'action' + actionId + params）。actionId 必须命中注册表，参数按
+ *   ActionParam 收窄——不合法的参数丢弃而不是猜，因为猜错的值比缺参数更难收拾。
  */
 
 import { aiChat, type AiChatMessage } from '@/services/ai'
+import { getAssistantAction, renderActionsForPrompt } from '@/services/assistantActions'
+import type { ActionParam, AssistantAction } from '@/services/assistantActions'
 import type { AiSettings } from '@/types'
 
 /** 用户意图类型 */
@@ -28,6 +33,7 @@ export type AssistantIntent =
   | 'search'         // 搜索 B 站
   | 'explain'        // 解释某首歌/某个概念
   | 'control'        // 播放控制（播放/暂停/下一首）
+  | 'action'         // 识别到注册表里的具体动作（配合 actionId / params）
   | 'unknown'        // 无法判断
 
 export interface AssistantRequest {
@@ -51,17 +57,25 @@ export interface AssistantPlan {
   subject?: string
   /** control 时：具体动作 */
   action?: 'play' | 'pause' | 'next' | 'prev'
+  /** intent==='action' 时：注册表里的动作 id，如 'playlist.add-track' */
+  actionId?: string
+  /**
+   * intent==='action' 时：已按注册表 ActionParam 收窄过的参数。
+   * 类型不符或枚举越界的参数**不会出现**在这里（丢弃而非猜测）。
+   */
+  params?: Record<string, unknown>
   /** 解析置信度 0~1；低于 0.5 时 UI 应显示为「不确定」并允许用户改选 */
   confidence: number
 }
 
-/** 六个合法 intent，解析时按此白名单收窄；不在其中的一律 unknown */
+/** 七个合法 intent，解析时按此白名单收窄；不在其中的一律 unknown */
 export const ASSISTANT_INTENTS: readonly AssistantIntent[] = [
   'recommend',
   'playlist',
   'search',
   'explain',
   'control',
+  'action',
   'unknown',
 ] as const
 
@@ -136,6 +150,81 @@ export function extractJsonObject(reply: string): Record<string, unknown> | null
   return parsed as Record<string, unknown>
 }
 
+/* ---------- 动作参数收窄（v1.4.14-pre9） ---------- */
+
+/** 数值参数的合理区间；越界的数值视为模型口胡，丢弃而不是夹紧 */
+const NUMBER_RANGE: Record<string, { min: number; max: number }> = {
+  volume: { min: 0, max: 100 },
+  rate: { min: 0.5, max: 2 },
+  playbackRate: { min: 0.5, max: 2 },
+  lyricFontSize: { min: 8, max: 72 },
+  lyricFontWeight: { min: 100, max: 900 },
+}
+
+/** 字符串参数的长度上限，防止模型把一整段话塞进 query */
+const PARAM_STRING_MAX = 120
+
+/**
+ * 按注册表的 ActionParam 收窄单个参数值。
+ *
+ * 返回 `undefined` 表示「这个值不可用」，调用方直接丢弃该参数。
+ * **不做任何模糊纠正**：类型不符、枚举越界、数值越界一律丢弃。
+ * 理由：猜出来的参数会让执行器做出用户没要求的副作用（比如把音量设成 500），
+ * 而缺参数只会让会话多问一句——后者的代价小得多。
+ */
+function narrowParam(param: ActionParam, value: unknown): unknown {
+  switch (param.type) {
+    case 'number': {
+      // 只接受真正的数字；'80' 这种字符串不当成数字，避免模型把单位也写进来
+      if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+      const range = NUMBER_RANGE[param.name]
+      if (range && (value < range.min || value > range.max)) return undefined
+      return value
+    }
+    case 'boolean':
+      return typeof value === 'boolean' ? value : undefined
+    case 'enum': {
+      if (typeof value !== 'string') return undefined
+      const hit = param.options?.find(o => o.value === value)
+      return hit ? hit.value : undefined
+    }
+    case 'string':
+    case 'track':
+    case 'playlist': {
+      // track/playlist 在 plan 阶段只保证「是个非空短字符串」，
+      // 真正的 id 匹配交给 assistantSession 的 mergeAnswer / 执行器
+      const text = cleanText(value, PARAM_STRING_MAX)
+      return text || undefined
+    }
+    default:
+      return undefined
+  }
+}
+
+/**
+ * 把模型给的 params 按注册表收窄成一份干净参数表。
+ *
+ * - 注册表里没有的参数名一律丢弃（模型不许自造参数）；
+ * - 单个参数不合法只丢这一个，不影响其它合法参数；
+ * - 结果为空对象时返回 undefined，让 plan 上不出现空的 params。
+ */
+export function narrowActionParams(
+  action: AssistantAction,
+  raw: unknown,
+): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const source = raw as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+
+  for (const param of action.params) {
+    if (!Object.prototype.hasOwnProperty.call(source, param.name)) continue
+    const narrowed = narrowParam(param, source[param.name])
+    if (narrowed !== undefined) out[param.name] = narrowed
+  }
+
+  return Object.keys(out).length ? out : undefined
+}
+
 /**
  * 用户这句话里有没有「指代当前播放曲目」的意图。
  *
@@ -173,10 +262,36 @@ export function parsePlan(reply: string, request?: AssistantRequest): AssistantP
   if (!obj) return unknownPlan()
 
   const rawIntent = obj.intent
-  // intent 不在六枚举内（含缺失、拼错、大小写不符）→ unknown，不做模糊纠正
+  // intent 不在枚举内（含缺失、拼错、大小写不符）→ unknown，不做模糊纠正
   if (!isAssistantIntent(rawIntent)) return unknownPlan()
   const intent = rawIntent
   if (intent === 'unknown') return unknownPlan(cleanText(obj.reply, REPLY_MAX) || UNKNOWN_REPLY)
+
+  /*
+   * 动作识别：actionId 必须真的在注册表里。
+   *
+   * 模型可能编一个像模像样的 id（'playback.mute'、'playlist.reorder'），
+   * 这类 id 执行器查不到，硬塞进 plan 只会让 UI 拿到一个无法分发的动作。
+   * 降级成 unknown 是唯一安全的选择——同样不抛错。
+   */
+  if (intent === 'action') {
+    const rawId = obj.actionId
+    const action = typeof rawId === 'string' && rawId.trim()
+      ? getAssistantAction(rawId.trim())
+      : undefined
+    if (!action) return unknownPlan(cleanText(obj.reply, REPLY_MAX) || UNKNOWN_REPLY)
+
+    const actionPlan: AssistantPlan = {
+      intent: 'action',
+      reply: cleanText(obj.reply, REPLY_MAX),
+      actionId: action.id,
+      confidence: clampConfidence(obj.confidence),
+    }
+    const params = narrowActionParams(action, obj.params)
+    if (params) actionPlan.params = params
+    if (!actionPlan.reply) actionPlan.reply = defaultReply(actionPlan)
+    return actionPlan
+  }
 
   const current = request?.currentTrack
   const hasCurrent = !!current && !!cleanText(current.title, FIELD_MAX)
@@ -279,6 +394,10 @@ function defaultReply(plan: AssistantPlan): string {
       return plan.subject ? '我看看《' + plan.subject + '》。' : '我看看。'
     case 'control':
       return '好。'
+    case 'action': {
+      const action = plan.actionId ? getAssistantAction(plan.actionId) : undefined
+      return action ? '好，' + action.label + '。' : '好。'
+    }
     default:
       return UNKNOWN_REPLY
   }
@@ -288,9 +407,12 @@ function defaultReply(plan: AssistantPlan): string {
  * 组装意图解析提示词。抽成导出纯函数便于单测断言约束是否写进去了。
  *
  * 三类约束缺一不可：
- * 1. 输出格式（只输出 JSON、字段名固定、intent 六选一）——决定能否解析；
+ * 1. 输出格式（只输出 JSON、字段名固定、intent 七选一）——决定能否解析；
  * 2. 事实纪律（不编造偏好、不替用户补全、指代必须落到给定曲目）——决定解析对不对；
  * 3. 兜底指令（听不懂就 unknown）——决定模型不会硬猜。
+ *
+ * 另外拼上 renderActionsForPrompt()：动作清单由注册表渲染，
+ * 新增动作只要往注册表加一行，这里不用改。
  */
 export function buildPlanMessages(input: AssistantRequest): AiChatMessage[] {
   const text = (input.text || '').trim()
@@ -304,10 +426,12 @@ export function buildPlanMessages(input: AssistantRequest): AiChatMessage[] {
     '',
     '输出格式（严格遵守）：',
     '1. 只输出一个 JSON 对象，不要任何解释文字、不要代码围栏、不要前后缀；',
-    '2. intent 只能是这六个字符串之一：recommend、playlist、search、explain、control、unknown；',
+    '2. intent 只能是这七个字符串之一：recommend、playlist、search、explain、control、action、unknown；',
     '   不在其中一律输出 unknown，不要自创意图名；',
     '3. 字段：{"intent":"...","reply":"回应（60 字内）","mood":"偏好描述（可选）","query":"搜索词（可选）",'
-      + '"subject":"要解释的对象（可选）","action":"play|pause|next|prev（可选）","confidence":0.0到1.0}',
+      + '"subject":"要解释的对象（可选）","action":"play|pause|next|prev（可选）",'
+      + '"actionId":"动作 id（仅 intent 为 action 时）","params":{动作参数（仅 intent 为 action 时）},'
+      + '"confidence":0.0到1.0}',
     '4. 与 intent 无关的字段直接省略，不要填 null，也不要填「无」。',
     '',
     '事实纪律（重要）：',
@@ -322,7 +446,14 @@ export function buildPlanMessages(input: AssistantRequest): AiChatMessage[] {
     '- playlist：明确要求「做个歌单」「整理成列表」；',
     '- search：要在 B 站找具体的东西（视频、歌曲、UP 主），query 填搜索词；',
     '- explain：要解释某首歌或某个概念，subject 填对象；',
-    '- control：播放控制，只可能是 play、pause、next、prev 四选一。',
+    '- control：播放控制，只可能是 play、pause、next、prev 四选一；',
+    '- action：用户的话对应下面动作清单里的某一条具体动作，',
+    '  这时输出 {"intent":"action","actionId":"动作 id","params":{...},"reply":"...","confidence":0.0到1.0}；',
+    '  actionId 必须原样取自清单，不许自己拼；params 的键必须出现在该动作的参数列表里，',
+    '  类型要对得上（number 就给数字、boolean 就给 true/false、enum 只能取 =a|b|c 里的值）；',
+    '  拿不准的参数宁可省略，不要猜一个值填进去——缺了会再问，猜错了就做错事。',
+    '',
+    renderActionsForPrompt(),
   ].join('\n')
 
   const userLines = ['用户说：' + text]

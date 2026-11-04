@@ -6,6 +6,11 @@
 import { downloadTrack } from '@/services/api'
 import { platform } from '@/platform'
 import { cleanTitle, getLyricForTrack, formatLrc } from '@/services/lyrics'
+import {
+  cleanFilenamesForDownload,
+  loadTitleCleanAiConfig,
+  resolveTitleCleanMode,
+} from '@/services/titleClean'
 import { exportTrackMv, cancelMvExport } from '@/services/mvExport'
 import { loadAppSettings, saveDownloadRecord } from '@/utils/storage'
 import { pathDirname } from '@/utils/paths'
@@ -94,9 +99,23 @@ function setState(patch: Partial<BatchDownloadState>) {
   emit()
 }
 
-function getFilename(config: BatchConfig, track: Track, index: number): string {
+/**
+ * 文件名解析。
+ *
+ * song 模式（过滤歌名）在 v1.4.14-pre9 起改读预清洗表 cleanedTitles：
+ * 那一批按 titleCleanMode 洗过（AI 模式下整张歌单一次请求），且已过非法字符处理。
+ * 表里没有（不该发生）就退回规则清洗，再退回原标题——宁可名字脏，也不能让下载失败。
+ *
+ * video 模式保持原标题不动：它的语义是「我要 B 站原标题」，清洗会改变老用户的既有结果。
+ */
+function getFilename(
+  config: BatchConfig,
+  track: Track,
+  index: number,
+  cleanedTitles: string[],
+): string {
   if (config.nameMode === 'song') {
-    return cleanTitle(track.title) || track.title
+    return cleanedTitles[index - 1] || cleanTitle(track.title) || track.title
   }
   if (config.nameMode === 'custom' && config.customName.trim()) {
     return config.customName
@@ -105,7 +124,30 @@ function getFilename(config: BatchConfig, track: Track, index: number): string {
       .replace(/\{index\}/g, String(index).padStart(2, '0'))
       .trim()
   }
-  return track.title
+  return cleanedTitles[index - 1] || track.title
+}
+
+/**
+ * 批量清洗整张歌单的文件名（v1.4.14-pre9）。只在 song 模式下调用。
+ *
+ * 关键设计：整批一次请求，不是每首一次。10 首歌若逐首调 AI 就是 10 次往返，
+ * 慢且贵；cleanFilenamesForDownload 内部去重 + 切批（每批 TITLE_CLEAN_BATCH_SIZE 条），
+ * 一张 20 首以内的歌单只发 1 次请求。
+ *
+ * 失败不阻断：任何异常都退回规则清洗，最差就是文件名没被 AI 优化过。
+ * off/rule 模式下根本不发请求（loadTitleCleanAiConfig 只在 ai 模式读配置）。
+ */
+async function prepareFilenames(tracks: Track[]): Promise<string[]> {
+  const mode = resolveTitleCleanMode(loadAppSettings().titleCleanMode)
+  try {
+    return await cleanFilenamesForDownload(
+      tracks.map((t) => t.title),
+      { mode, aiConfig: await loadTitleCleanAiConfig(mode) },
+    )
+  } catch {
+    // 兜底再兜底：清洗链路整体崩了也照常下载，用原标题
+    return tracks.map((t) => t.title)
+  }
 }
 
 /** 开始批量下载 */
@@ -134,6 +176,8 @@ async function run() {
   const qualityPref = 'lossless'
   const isMv = config.format === 'mv'
   const appSettings = loadAppSettings()
+  // 过滤歌名才需要清洗：整批一次请求洗完（见 prepareFilenames），循环里只查表
+  const cleanedTitles = config.nameMode === 'song' ? await prepareFilenames(tracks) : []
 
   // 订阅主进程单文件下载字节进度（audio 格式有实时回调），写回当前 progress；
   // mv 格式改为消费 exportTrackMv 的分阶段进度回调（订阅在导出调用内完成）
@@ -184,7 +228,7 @@ async function run() {
           }
         }
 
-        const filename = getFilename(config, track, i + 1)
+        const filename = getFilename(config, track, i + 1, cleanedTitles)
 
         if (isMv) {
           // v1.4.6：批量导出播放界面 MV（桌面端专属；入口已在 UI 层按平台裁剪）

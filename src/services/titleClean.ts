@@ -21,7 +21,8 @@
  * 前四条必须在调用 cleanTitle **之前**处理：它会把【】整段删掉，事后就找不到前缀了。
  */
 
-import { aiChat } from '@/services/ai'
+import { aiChat, getAiConfig } from '@/services/ai'
+import { isAiConfigured } from '@/services/aiTrackInsight'
 import { cleanTitle } from '@/services/lyrics'
 import type { AiSettings, AppSettings } from '@/types'
 
@@ -181,6 +182,59 @@ export function cleanTitleByRule(raw: string): string {
   return s
 }
 
+// ===== 文件名合法性 =====
+
+/**
+ * 文件名上限（不含扩展名）。
+ *
+ * Windows 单段上限 255，这里取 120 是因为主进程同名防覆盖会追加 ` (2)` 后缀，
+ * 下载目录本身也可能很深；留足余量比顶着上限更实用。
+ */
+export const FILENAME_MAX_LENGTH = 120
+
+/*
+ * Windows 不允许出现在文件名里的字符（含 C0 控制字符）。
+ *
+ * 控制字符不用 \u0000-\u001f 区间写法：eslint 的 no-control-regex 会报错，
+ * 且区间字面量在编辑器里不可见、容易看漏。改为在清洗函数里按码点剔除。
+ */
+const ILLEGAL_FILENAME_CHAR = /[<>:"/\\|?*]/g
+
+/** 去掉 C0 控制字符（0x00-0x1f）与 DEL（0x7f）；按码点判断，避免正则区间 */
+function stripControlChars(input: string): string {
+  let out = ''
+  for (const ch of input) {
+    const code = ch.codePointAt(0) ?? 0
+    if (code > 0x1f && code !== 0x7f) out += ch
+  }
+  return out
+}
+
+/** Windows 保留设备名：带不带扩展名都不能用作文件名 */
+const RESERVED_FILENAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/iu
+
+/**
+ * 把任意标题整理成一个可落盘的文件名主体（不含扩展名）。纯函数，零成本。
+ *
+ * 清洗（rule / ai）解决的是「名字好不好看」，这里解决的是「这个名字能不能写进磁盘」，
+ * 两件事必须分开：AI 输出的任何字符都不能直接当成路径。四类处理：
+ * 1. 非法字符换成下划线；2. 收尾的点与空格去掉（Windows 会截断或直接拒绝）；
+ * 3. 超长按码点截断（不用 slice，避免劈开代理对）；4. 空串与保留设备名兜底。
+ */
+export function sanitizeFilename(raw: string, fallback = '未知曲目'): string {
+  // 先剔控制字符再换非法字符：控制字符会让路径在主进程侧被静默截断
+  let s = stripControlChars(raw || '').replace(ILLEGAL_FILENAME_CHAR, '_')
+  s = s.replace(/\s+/g, ' ').trim()
+  s = s.replace(/[. ]+$/g, '')
+  // Array.from 按码点切，emoji 不会被劈成半个代理对
+  if (s.length > FILENAME_MAX_LENGTH) s = Array.from(s).slice(0, FILENAME_MAX_LENGTH).join('')
+  s = s.replace(/[. ]+$/g, '').trim()
+  if (!s) return fallback
+  // 保留设备名加下划线即可绕开（CON -> CON_），比换一个名字更容易让人认出来
+  if (RESERVED_FILENAME.test(s)) return `${s}_`
+  return s
+}
+
 // ===== AI 模式 =====
 
 /**
@@ -288,4 +342,224 @@ export async function cleanTrackTitle(
     // 未配置 / 超时 / 401 一律退回规则结果：清洗是锦上添花，不该让播放链路报错
     return { title: ruleTitle, source: 'ai-fallback-rule' }
   }
+}
+
+// ===== 批量清洗（下载 / 歌单批量下载用） =====
+
+/**
+ * 一次 AI 请求最多洗多少条标题。
+ *
+ * 单条请求对歌单来说是灾难：20 首 = 20 次往返，慢且贵。批量清洗把整批塞进一次请求，
+ * 用带序号的 JSON 数组进出（与 aiLyrics 的分批范式同一套做法），模型一次就能对齐。
+ *
+ * 上限取 20 而不是更大：标题很短，20 条的输入约几百 token，输出也稳定；
+ * 再往上模型漏项/串号的概率明显上升，而漏项只能退回规则清洗，等于白花钱。
+ */
+export const TITLE_CLEAN_BATCH_SIZE = 20
+
+/** 批量清洗的一条输入/输出；index 用于把结果对回原顺序，绝不允许模型改号 */
+export interface TitleCleanBatchItem {
+  index: number
+  title: string
+}
+
+/**
+ * 批量清洗的 system 提示词。
+ *
+ * 与单条版的关键差别：要求返回 JSON 数组并原样带 index，这样一次请求能洗多首，
+ * 且调用方能逐条校验（校验不过的那条退回规则清洗，不影响同批其它条）。
+ */
+export const TITLE_CLEAN_BATCH_SYSTEM_PROMPT = [
+  '你是曲目标题清洗器。用户会给你一个 JSON 数组，每项形如 {"index":序号,"title":B站视频标题}。',
+  '规则：',
+  '1. 逐条清洗，只输出 JSON 数组，不要任何解释文字或代码围栏。',
+  '2. 必须原样返回同样数量的项，index 与输入一一对应，不得增删、改号或调换顺序。',
+  '3. 去掉噪声：画质标记（4K/1080P/HDR）、版本标记（MV/官方/Live/翻唱/纯享/完整版/中文字幕）、',
+  '   emoji、UP 主前缀、播放量与时长。',
+  '4. 不要改动歌手名与歌名本身的文字，不要翻译，不要补全你不确定的字。',
+  '5. 保留「歌手 - 歌名」的结构；若原标题只有歌名，就只输出歌名。',
+  '6. 输出格式：[{"index":0,"title":"清洗后的标题"}]',
+].join('\n')
+
+/** 按上限切批；空输入返回空数组 */
+export function planTitleCleanBatches<T>(items: T[], batchSize = TITLE_CLEAN_BATCH_SIZE): T[][] {
+  const size = Math.max(1, batchSize)
+  const out: T[][] = []
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
+  return out
+}
+
+/** 构造批量清洗的一轮对话；导出以便单测断言「一次请求带了多条标题」 */
+export function buildTitleCleanBatchMessages(
+  batch: TitleCleanBatchItem[],
+): { role: 'system' | 'user'; content: string }[] {
+  return [
+    { role: 'system', content: TITLE_CLEAN_BATCH_SYSTEM_PROMPT },
+    { role: 'user', content: JSON.stringify(batch) },
+  ]
+}
+
+/**
+ * 从批量回复里取出条目。纯函数，单测不需要真发请求。
+ *
+ * 解析失败一律返回空数组（调用方据此把整批退回规则清洗），绝不抛错：
+ * 清洗是下载链路上的增强，任何一步都不该让下载失败。
+ */
+export function parseCleanedTitleList(reply: string): TitleCleanBatchItem[] {
+  let s = (reply || '').trim()
+  const fenced = s.match(/\x60\x60\x60(?:[a-z]*)\s*([\s\S]*?)\x60\x60\x60/i)
+  if (fenced) s = fenced[1].trim()
+  // 容忍模型在数组前后多说一句：只取最外层的 [...] 片段
+  const start = s.indexOf('[')
+  const end = s.lastIndexOf(']')
+  if (start < 0 || end <= start) return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(s.slice(start, end + 1))
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+
+  const out: TitleCleanBatchItem[] = []
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object') continue
+    const rec = item as { index?: unknown; title?: unknown }
+    const index = typeof rec.index === 'number' ? rec.index : Number(rec.index)
+    const title = typeof rec.title === 'string' ? rec.title : ''
+    if (!Number.isInteger(index) || index < 0 || !title.trim()) continue
+    out.push({ index, title: parseCleanedTitle(title) })
+  }
+  return out
+}
+
+/** 一次请求洗一批；返回 序号 → 标题。抛错由调用方兜底 */
+async function cleanTitleBatchByAi(
+  batch: TitleCleanBatchItem[],
+  config: AiSettings,
+): Promise<Map<number, string>> {
+  const reply = await aiChat(config, {
+    messages: buildTitleCleanBatchMessages(batch),
+    temperature: 0.2,
+    // 一批比单条慢，超时放宽；失败只是退回规则清洗，不阻断下载
+    timeoutMs: 45000,
+  })
+  const allowed = new Set(batch.map((b) => b.index))
+  const result = new Map<number, string>()
+  for (const item of parseCleanedTitleList(reply)) {
+    // 只接受本批内的序号，防止模型改号或串批
+    if (allowed.has(item.index)) result.set(item.index, item.title)
+  }
+  return result
+}
+
+/**
+ * 批量清洗：与 cleanTrackTitle 同一套模式与兜底口径，但**整批共用一次请求**。
+ *
+ * 返回数组与入参一一对应、顺序一致（下载侧要按下标取文件名，错位就是给错歌改名）。
+ *
+ * 三条聚合策略：
+ * 1. 去重——同一歌单里重复标题只洗一次，回填时按原下标摊开（省 token，也避免同一条
+ *    被洗成两种写法）；
+ * 2. 切批——超过 TITLE_CLEAN_BATCH_SIZE 才拆成多个请求，绝不退化成「每条一次」；
+ * 3. 逐条校验——模型结果要过 isTrustworthyTitle 才采用，不可信或漏项的那条退回规则
+ *    清洗，同批其它条不受影响。
+ *
+ * 任何失败都不抛错：最差情况就是整批退回规则清洗，下载照常进行。
+ */
+export async function cleanTrackTitles(
+  raws: string[],
+  options: TitleCleanOptions = {},
+): Promise<TitleCleanResult[]> {
+  const sources = raws.map((r) => (r || '').trim())
+  const mode = resolveTitleCleanMode(options.mode ?? options.settings?.titleCleanMode)
+
+  if (mode === 'off') return sources.map((title) => ({ title, source: 'off' as const }))
+
+  const ruleTitles = sources.map((s) => cleanTitleByRule(s))
+  if (mode === 'rule') return ruleTitles.map((title) => ({ title, source: 'rule' as const }))
+
+  const config = options.aiConfig ?? options.settings?.ai
+  const fallback = (): TitleCleanResult[] =>
+    ruleTitles.map((title) => ({ title, source: 'ai-fallback-rule' }))
+  if (!config) return fallback()
+
+  // 去重：unique[0] 是标题文本，unique[1] 是它第一次出现的下标集合
+  const order: string[] = []
+  const positions = new Map<string, number[]>()
+  sources.forEach((s, i) => {
+    const list = positions.get(s)
+    if (list) list.push(i)
+    else {
+      positions.set(s, [i])
+      order.push(s)
+    }
+  })
+
+  const cleaned = new Map<string, string>()
+  for (const batch of planTitleCleanBatches(order.map((title, index) => ({ index, title })))) {
+    let aiTitles: Map<number, string>
+    try {
+      aiTitles = await cleanTitleBatchByAi(batch, config)
+    } catch {
+      // 单批失败只丢该批（这些条退回规则清洗），不中断其余批次
+      continue
+    }
+    for (const item of batch) {
+      const out = aiTitles.get(item.index)
+      // 漏项或不可信：这一条不写进 cleaned，回填时自然退回规则结果
+      if (out && isTrustworthyTitle(item.title, out)) cleaned.set(item.title, out)
+    }
+  }
+
+  return sources.map((source, i) => {
+    const aiTitle = cleaned.get(source)
+    return aiTitle ? { title: aiTitle, source: 'ai' as const } : { title: ruleTitles[i], source: 'ai-fallback-rule' as const }
+  })
+}
+
+/**
+ * 按模式取 AI 配置：只有 ai 模式才去主进程读。
+ *
+ * off / rule 一律返回 undefined，调用方据此根本不发请求（这是「不花钱」的硬保证：
+ * 不是靠提示词或后续判断，而是压根没有可用的 config）。
+ * 读配置失败也只当没配，退回规则清洗。
+ */
+export async function loadTitleCleanAiConfig(mode: TitleCleanMode): Promise<AiSettings | undefined> {
+  if (mode !== 'ai') return undefined
+  try {
+    const config = await getAiConfig()
+    // 未配置就别发那个注定 401/404 的请求：既慢又白花一次额度
+    return isAiConfigured(config) ? config : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 下载用文件名：清洗 + 文件名合法性处理，一步到位。单曲入口。
+ *
+ * 清洗决定「叫什么」，sanitizeFilename 决定「能不能落盘」——两件事分开做，
+ * 所以这里串起来给下载侧用，调用方不必记得再处理一次非法字符。
+ */
+export async function cleanFilenameForDownload(
+  raw: string,
+  options: TitleCleanOptions = {},
+): Promise<string> {
+  const { title } = await cleanTrackTitle(raw, options)
+  return sanitizeFilename(title || (raw || '').trim())
+}
+
+/**
+ * 下载用文件名：批量版。整批共用一次请求（见 cleanTrackTitles），返回顺序与入参一致。
+ *
+ * off 模式下 sanitizeFilename 仍然生效：用户选择「不清洗」是不要 AI/规则整理名字，
+ * 不是要一个写不进磁盘的文件名。
+ */
+export async function cleanFilenamesForDownload(
+  raws: string[],
+  options: TitleCleanOptions = {},
+): Promise<string[]> {
+  const results = await cleanTrackTitles(raws, options)
+  return results.map((r, i) => sanitizeFilename(r.title || (raws[i] || '').trim()))
 }

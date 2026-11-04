@@ -34,7 +34,12 @@ const {
   buildPlanMessages,
   planAssistantRequest,
   renderPlanHint,
+  narrowActionParams,
 } = await import('../src/services/aiChatAssistant')
+
+// 动作注册表：只读引用，用于断言提示词确实拼进了清单、以及测试里取真实动作定义
+const { renderActionsForPrompt, ASSISTANT_ACTIONS: ACTION_REGISTRY } =
+  await import('../src/services/assistantActions')
 
 import type { AiSettings } from '../src/types'
 
@@ -444,5 +449,218 @@ describe('extractJsonObject', () => {
     expect(extractJsonObject('')).toBeNull()
     expect(extractJsonObject('{坏的}')).toBeNull()
     expect(extractJsonObject('[]')).toBeNull()
+  })
+})
+
+/* ================= v1.4.14-pre9：动作识别 ================= */
+
+describe('动作识别：intent=action 与参数抽取', () => {
+  it('识别注册表里的动作，并把 actionId 与合法参数带出来', () => {
+    const plan = parsePlan(
+      modelSays({
+        intent: 'action',
+        actionId: 'playback.volume',
+        params: { volume: 60 },
+        reply: '音量调到 60。',
+        confidence: 0.9,
+      }),
+      { text: '音量调到60' },
+    )
+    expect(plan.intent).toBe('action')
+    expect(plan.actionId).toBe('playback.volume')
+    expect(plan.params).toEqual({ volume: 60 })
+    expect(plan.reply).toBe('音量调到 60。')
+    expect(plan.confidence).toBe(0.9)
+  })
+
+  it('枚举参数取值合法时原样保留', () => {
+    const plan = parsePlan(
+      modelSays({ intent: 'action', actionId: 'playback.repeat', params: { mode: 'one' }, confidence: 0.8 }),
+      { text: '单曲循环' },
+    )
+    expect(plan.intent).toBe('action')
+    expect(plan.params).toEqual({ mode: 'one' })
+  })
+
+  it('无参数动作（playback.next）也能识别，且不硬塞空 params', () => {
+    const plan = parsePlan(
+      modelSays({ intent: 'action', actionId: 'playback.next', confidence: 0.95 }),
+      { text: '下一首' },
+    )
+    expect(plan.intent).toBe('action')
+    expect(plan.actionId).toBe('playback.next')
+    expect(plan.params).toBeUndefined()
+  })
+
+  it('多参数动作：布尔参数被正确收窄', () => {
+    const plan = parsePlan(
+      modelSays({
+        intent: 'action',
+        actionId: 'export.mv-single',
+        params: { watermark: true, cleanExport: false },
+        confidence: 0.8,
+      }),
+      { text: '导出无控件MV' },
+    )
+    expect(plan.intent).toBe('action')
+    expect(plan.params).toEqual({ watermark: true, cleanExport: false })
+  })
+
+  it('模型没给 reply 时按动作名兜底一句人话', () => {
+    const plan = parsePlan(modelSays({ intent: 'action', actionId: 'playback.next', confidence: 0.9 }), { text: '下一首' })
+    expect(plan.reply).toContain('下一首')
+  })
+})
+
+describe('动作识别：actionId 不存在时降级 unknown', () => {
+  it('编造的 actionId 不进入 plan，降级为 unknown 且不抛错', () => {
+    expect(() =>
+      parsePlan(modelSays({ intent: 'action', actionId: 'playback.mute', params: {}, confidence: 0.9 })),
+    ).not.toThrow()
+    const plan = parsePlan(modelSays({ intent: 'action', actionId: 'playback.mute', confidence: 0.9 }), { text: '静音' })
+    expect(plan.intent).toBe('unknown')
+    expect(plan.actionId).toBeUndefined()
+    expect(plan.confidence).toBe(0)
+  })
+
+  it('actionId 缺失 / 非字符串 / 空白，一律 unknown', () => {
+    expect(parsePlan(modelSays({ intent: 'action', confidence: 0.9 })).intent).toBe('unknown')
+    expect(parsePlan(modelSays({ intent: 'action', actionId: 123, confidence: 0.9 })).intent).toBe('unknown')
+    expect(parsePlan(modelSays({ intent: 'action', actionId: '   ', confidence: 0.9 })).intent).toBe('unknown')
+  })
+
+  it('降级时保留模型写的回应，让用户看到一句可读的话', () => {
+    const plan = parsePlan(
+      modelSays({ intent: 'action', actionId: 'playlist.reorder', reply: '这个我还不会。', confidence: 0.9 }),
+      { text: '重新排序' },
+    )
+    expect(plan.intent).toBe('unknown')
+    expect(plan.reply).toBe('这个我还不会。')
+  })
+})
+
+describe('动作识别：参数类型不符 / 枚举越界一律丢弃而非猜测', () => {
+  it('number 参数收到字符串 → 丢弃该参数', () => {
+    const plan = parsePlan(
+      modelSays({ intent: 'action', actionId: 'playback.volume', params: { volume: '80' }, confidence: 0.9 }),
+      { text: '音量八十' },
+    )
+    expect(plan.intent).toBe('action')
+    expect(plan.params).toBeUndefined()
+  })
+
+  it('number 参数越界（音量 500）→ 丢弃，不夹紧成 100', () => {
+    const plan = parsePlan(
+      modelSays({ intent: 'action', actionId: 'playback.volume', params: { volume: 500 }, confidence: 0.9 }),
+      { text: '音量最大' },
+    )
+    expect(plan.params).toBeUndefined()
+  })
+
+  it('enum 参数取值不在候选里 → 丢弃，不回退到第一个候选', () => {
+    const plan = parsePlan(
+      modelSays({ intent: 'action', actionId: 'playback.repeat', params: { mode: 'loop' }, confidence: 0.9 }),
+      { text: '循环' },
+    )
+    expect(plan.intent).toBe('action')
+    expect(plan.params).toBeUndefined()
+  })
+
+  it('boolean 参数收到字符串 → 丢弃', () => {
+    const plan = parsePlan(
+      modelSays({
+        intent: 'action',
+        actionId: 'export.mv-single',
+        params: { watermark: 'yes', cleanExport: true },
+        confidence: 0.9,
+      }),
+      { text: '导出MV' },
+    )
+    // 只丢坏的那一个，合法的 cleanExport 必须留下
+    expect(plan.params).toEqual({ cleanExport: true })
+  })
+
+  it('注册表里没有的参数名被丢弃（模型不许自造参数）', () => {
+    const plan = parsePlan(
+      modelSays({
+        intent: 'action',
+        actionId: 'playback.volume',
+        params: { volume: 50, fade: true, device: 'speaker' },
+        confidence: 0.9,
+      }),
+      { text: '音量50' },
+    )
+    expect(plan.params).toEqual({ volume: 50 })
+  })
+
+  it('params 不是对象（数组 / 字符串 / null）时忽略，不抛错', () => {
+    for (const bad of [[1, 2], 'volume=50', null, 42]) {
+      const plan = parsePlan(
+        modelSays({ intent: 'action', actionId: 'playback.volume', params: bad, confidence: 0.9 }),
+        { text: '音量' },
+      )
+      expect(plan.intent).toBe('action')
+      expect(plan.params).toBeUndefined()
+    }
+  })
+
+  it('narrowActionParams 是纯函数，可直接按注册表定义断言', () => {
+    const action = ACTION_REGISTRY.find(a => a.id === 'playback.repeat')
+    expect(action).toBeDefined()
+    if (!action) return
+    expect(narrowActionParams(action, { mode: 'all' })).toEqual({ mode: 'all' })
+    expect(narrowActionParams(action, { mode: 'nope' })).toBeUndefined()
+    expect(narrowActionParams(action, {})).toBeUndefined()
+    expect(narrowActionParams(action, null)).toBeUndefined()
+  })
+})
+
+describe('动作识别：提示词接入注册表', () => {
+  const system = buildPlanMessages({ text: '下一首' })[0].content
+  const rendered = renderActionsForPrompt()
+
+  it('系统提示词包含 renderActionsForPrompt() 的完整输出', () => {
+    expect(rendered.length).toBeGreaterThan(0)
+    expect(system).toContain(rendered)
+  })
+
+  it('提示词要求模型在识别到动作时输出 intent=action + actionId + params', () => {
+    expect(system).toContain('"intent":"action"')
+    expect(system).toContain('actionId')
+    expect(system).toContain('params')
+  })
+
+  it('action 已进入 intent 白名单文案', () => {
+    expect(system).toContain('action')
+    expect(ASSISTANT_INTENTS).toContain('action')
+  })
+
+  it('注册表里每个动作 id 都出现在提示词中（新增动作自动可见）', () => {
+    for (const action of ACTION_REGISTRY) expect(system).toContain(action.id)
+  })
+
+  it('提示词要求参数拿不准就省略，不许猜值', () => {
+    expect(system).toContain('宁可省略')
+  })
+})
+
+describe('动作识别：永不抛错的契约不变', () => {
+  it('各种畸形 action 回复都不抛错', () => {
+    const junk = [
+      '{"intent":"action"}',
+      '{"intent":"action","actionId":null}',
+      '{"intent":"action","actionId":"playback.next","params":"x"}',
+      '{"intent":"action","actionId":["a"],"params":{}}',
+      '{"intent":"action","actionId":"playback.volume","params":{"volume":{}}}',
+      '{"intent":"action","actionId":"","confidence":"高"}',
+    ]
+    for (const reply of junk) {
+      expect(() => parsePlan(reply)).not.toThrow()
+      expect(parsePlan(reply).confidence).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('action 的 unknown 降级同样把 confidence 归零', () => {
+    expect(parsePlan(modelSays({ intent: 'action', actionId: 'nope.nope', confidence: 0.99 })).confidence).toBe(0)
   })
 })

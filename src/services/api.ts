@@ -26,6 +26,7 @@ import {
   type TrackSource,
 } from '@/services/bilibiliApi'
 import { clearBilibiliAuthCookies } from '@/services/http'
+import { sanitizeFilename } from '@/services/titleClean'
 import { platform } from '@/platform'
 
 // ===== 搜索 =====
@@ -246,7 +247,15 @@ export async function downloadTrack(
 
   const playData = await getPlayUrl(bvid, cid)
   const audioUrl = getBestAudioUrl(playData, quality)
-  const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_').trim()
+  /*
+   * 文件名合法性（v1.4.14-pre9）：标题可能来自 AI 清洗，任何字符都不能直接当路径。
+   * sanitizeFilename 除了非法字符，还处理收尾的点/空格、超长与 Windows 保留设备名——
+   * 这些原正则都不管，CON.mp3 在 Windows 上是写不进去的。
+   *
+   * 清洗（off/rule/ai）由调用方在传 title 之前完成：下载层拿不到 AppSettings，
+   * 也不该替调用方决定用哪个模式；这里只负责「这个名字能不能落盘」。
+   */
+  const safeTitle = sanitizeFilename(title, '未知曲目')
 
   if (format === 'audio') {
     const ext = audioUrl.includes('.flac') ? '.flac' : '.m4a'

@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { usePlayer } from '@/contexts/PlayerContext'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { downloadTrack } from '@/services/api'
-import { cleanTitle, getLyricForTrack, formatLrc } from '@/services/lyrics'
+import { cleanFilenameForDownload, cleanTitleByRule } from '@/services/titleClean'
+import { getLyricForTrack, formatLrc } from '@/services/lyrics'
 import { exportTrackMv, isMvExportSupported, cancelMvExport } from '@/services/mvExport'
 import { saveDownloadRecord } from '@/utils/storage'
 import { pathDirname } from '@/utils/paths'
@@ -69,15 +70,28 @@ export default function DownloadButton({
     }
   }, [customName, actualTitle])
 
-  const getFilename = useCallback((): string => {
-    if (nameMode === 'song') {
-      return cleanTitle(actualTitle) || actualTitle
-    }
+  /**
+   * 解析文件名。三种模式的区别在「用哪个标题、洗不洗」：
+   * - video ：视频标题原样用（这条路径的语义就是「我要 B 站原标题」，不该被清洗改写）
+   * - song  ：过滤歌名——按设置里的 titleCleanMode 清洗（v1.4.14-pre9 起支持 AI）
+   * - custom：用户手打的名字，原样使用
+   *
+   * 清洗落在 song 模式，因为它的语义本来就是「干净的歌名」；video 模式保持原样是刻意的，
+   * 否则老用户（默认 rule）选「视频标题」拿到的名字会突然变样。
+   *
+   * AI 请求由 cleanFilenameForDownload 按 titleCleanMode 分派：off/rule 一次都不发，
+   * ai 模式失败或不可信时静默退回规则清洗——文件名脏总比下载失败好。
+   * 返回值已过非法字符处理，调用方不必再处理一次。
+   */
+  const getFilename = useCallback(async (): Promise<string> => {
     if (nameMode === 'custom' && customName.trim()) {
       return customName.trim()
     }
+    if (nameMode === 'song') {
+      return cleanFilenameForDownload(actualTitle, { settings })
+    }
     return actualTitle
-  }, [nameMode, customName, actualTitle])
+  }, [nameMode, customName, actualTitle, settings])
 
   const doDownload = useCallback(async (format: DownloadFormat) => {
     if (!actualBvid) return
@@ -117,20 +131,22 @@ export default function DownloadButton({
         }
       }
 
+      // 只解析一次：文件名要同时用于下载、文件属性与下载记录，三处必须一致
+      const filename = await getFilename()
       const { filePath } = await downloadTrack(
         actualBvid,
         { aid: actualAid, cid: actualCid },
-        getFilename(),
+        filename,
         format,
         qualityPref,
         settings.downloadDir,
-        { artist, title: getFilename(), lyricContent },
+        { artist, title: filename, lyricContent },
       )
       // 记录真实落盘路径（主进程同名防覆盖可能带序号），供下载页定位文件
-      const actualName = filePath.split(/[\\/]/).pop() || getFilename()
+      const actualName = filePath.split(/[\\/]/).pop() || filename
       saveDownloadRecord({
         id: crypto.randomUUID ? crypto.randomUUID() : `dl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-        title: getFilename(),
+        title: filename,
         artist: artist || actualTrack?.artist || '',
         bvid: actualBvid,
         format,
@@ -339,7 +355,7 @@ export default function DownloadButton({
                 )}
                 {nameMode === 'song' && (
                   <div style={{ fontSize: 11, color: 'var(--color-muted)', padding: '2px 10px 4px', fontStyle: 'italic' }}>
-                    {cleanTitle(actualTitle) || '(无法过滤)'}
+                    {cleanTitleByRule(actualTitle) || '(无法过滤)'}
                   </div>
                 )}
               </div>

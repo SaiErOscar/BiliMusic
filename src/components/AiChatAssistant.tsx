@@ -29,12 +29,47 @@
  *
  * 关掉再打开会丢对话记录，这是刻意的——抽屉是「需要时才叫出来」的临时面板，
  * 保留跨次会话的历史会让「打开抽屉」变成「翻旧账」。
+ *
+ * ## v1.4.14-pre9（用户第 5 项）：从「单轮意图分发」升级成「多步会话 + 动作执行」
+ *
+ * 用户原话：说「添加至歌单」→ 助手反问「你想添加到哪个歌单？」并给选项 →
+ * 用户自然语言回答 → 执行 → 回报结果。
+ *
+ * 三块基座已经就绪，本组件只做「串起来」这件事：
+ * - services/assistantActions   有哪些动作（56 个，声明式）
+ * - services/assistantSession   还缺什么参数、该问什么（纯函数）
+ * - services/assistantExecutor  真正产生副作用（风险分级也在那里落地）
+ *
+ * 设计取舍：
+ * - **多步状态留在 UI 层**（useState 存 pending），服务层保持无状态纯函数。
+ *   这样「随时取消 / 随时换话题」只是一次 setState，不用回服务层改状态机。
+ * - **选项可点也可说**：choices 渲染成按钮，但按钮只是把 label 当成一句话提交，
+ *   和用户手打走同一条解析路径——两条路径不会各自漂移。
+ * - **确认走应用内卡片**：既不用浏览器原生确认框，也不走系统对话框，
+ *   与项目统一的抽屉内确认一致；执行器返回 needsConfirm 时才出卡片。
+ * - **没听懂就当新话题**：等待回答期间用户说了句不相干的话，不该被死死按在
+ *   上一个问题里——解析不出就丢掉 pending，回到正常的意图分发。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, MessageCircle, Send, Sparkles, Trash2 } from 'lucide-react'
-import { usePlayer } from '@/contexts/PlayerContext'
+import { usePlayer, usePlayerProgress } from '@/contexts/PlayerContext'
 import { getAiConfig, isAiSupported } from '@/services/ai'
+import { getAssistantAction } from '@/services/assistantActions'
+import {
+  CREATE_PLAYLIST_KEY,
+  isPendingReady,
+  mergeAnswer,
+  nextPendingAction,
+  type ActionContext,
+  type PendingAction,
+} from '@/services/assistantSession'
+import {
+  executeAssistantAction,
+  type AssistantPlayer,
+  type ExecuteResult,
+} from '@/services/assistantExecutor'
+import { loadPlaylists } from '@/utils/storage'
 import {
   planAssistantRequest,
   renderPlanHint,
@@ -51,7 +86,7 @@ import { useAppSettings } from '@/hooks/useAppSettings'
 import { platform } from '@/platform'
 import type { AiSettings, Track } from '@/types'
 
-/** 五个可执行意图（unknown 不在候选里：它不是一个「动作」） */
+/** 可执行意图（unknown 不在候选里：它不是一个「动作」） */
 type ActionableIntent = Exclude<AssistantIntent, 'unknown'>
 
 const INTENT_LABELS: Record<ActionableIntent, string> = {
@@ -60,9 +95,15 @@ const INTENT_LABELS: Record<ActionableIntent, string> = {
   search: '搜 B 站',
   explain: '解释这首歌',
   control: '播放控制',
+  /*
+   * v1.4.14-pre9：引擎新增 'action' 意图，表示「识别到注册表里的具体动作」
+   * （加歌单、收藏、下载、改设置、导出 MV 等 56 个动作）。
+   * 这里先补上类型与标签，具体执行分支由 UI 多步会话改造接入。
+   */
+  action: '执行动作',
 }
 
-const INTENT_ORDER: ActionableIntent[] = ['recommend', 'playlist', 'search', 'explain', 'control']
+const INTENT_ORDER: ActionableIntent[] = ['recommend', 'playlist', 'search', 'explain', 'control', 'action']
 
 /** 意图候选之外，给「播放控制」二次展开的四个动作 */
 const CONTROL_ACTIONS: { action: 'play' | 'pause' | 'next' | 'prev'; label: string }[] = [
@@ -87,6 +128,9 @@ type Payload =
   | { kind: 'search'; items: SearchItem[] }
   | { kind: 'explain'; insight: TrackInsight }
   | { kind: 'candidates'; actions: boolean }
+  /* v1.4.14-pre9：多步会话的两种新产物——反问的选项、危险动作的确认卡片 */
+  | { kind: 'ask'; pending: PendingAction }
+  | { kind: 'confirm'; actionId: string; params: Record<string, unknown>; notice?: string }
 
 interface Turn {
   id: number
@@ -123,6 +167,134 @@ function searchItemToTrack(item: SearchItem): Track {
   }
 }
 
+/* ============================================================
+ * v1.4.14-pre9 · 多步会话的纯逻辑（可单测，不碰 React）
+ *
+ * 把「这一轮该问什么 / 参数齐了没 / 该不该出确认卡片」从组件里拆出来，
+ * 组件只负责把结果画出来。这样状态流转可以被直接断言，
+ * 不用渲染整棵依赖 PlayerProvider 的组件树。
+ * ============================================================ */
+
+/** 一次动作推进的产物：要么继续问，要么去执行，要么直接说清楚做不到 */
+export type ActionStep =
+  | { kind: 'ask'; pending: PendingAction }
+  | { kind: 'run'; actionId: string; params: Record<string, unknown> }
+  | { kind: 'reject'; message: string }
+
+/**
+ * 从 plan 出发推进一次动作（多步会话的第一步）。
+ *
+ * - actionId 不认识 → reject（不静默，也不硬执行）
+ * - 还缺参数       → ask（带着 choices 去问）
+ * - 参数齐了       → run（交给执行器）
+ */
+export function startAssistantAction(
+  plan: Pick<AssistantPlan, 'actionId' | 'params'>,
+  context: ActionContext,
+): ActionStep {
+  const actionId = plan.actionId
+  if (!actionId) return { kind: 'reject', message: '我没认出要执行哪个动作，换个说法试试？' }
+
+  const action = getAssistantAction(actionId)
+  if (!action) return { kind: 'reject', message: `我还不认识「${actionId}」这个动作。` }
+
+  const params = plan.params ?? {}
+  const pending = nextPendingAction(action, params, context)
+  if (!pending) return { kind: 'run', actionId, params }
+
+  return { kind: 'ask', pending }
+}
+
+/**
+ * 把用户对上一个问题的回答推进一格（多步会话的后续轮）。
+ *
+ * 判定顺序很关键：
+ * 1. 参数齐了 → run（isPendingReady 是唯一判据，不自己比 missing.length）
+ * 2. 回答没被识别（question 被 mergeAnswer 加了「没听懂」前缀）→ unparsed，
+ *    交给调用方决定是「继续问」还是「当新话题处理」
+ * 3. 还缺别的参数 → ask，继续问下一个
+ */
+export function answerAssistantAction(
+  pending: PendingAction,
+  answer: string,
+  context: ActionContext,
+): ActionStep {
+  const merged = mergeAnswer(pending, answer, context)
+  if (isPendingReady(merged)) {
+    return { kind: 'run', actionId: merged.actionId, params: merged.params }
+  }
+  return { kind: 'ask', pending: merged }
+}
+
+/** mergeAnswer 没听懂时会给 question 加这个前缀，用它判断「这轮没被接住」 */
+const UNPARSED_PREFIX = '没听懂「'
+
+/** 这一轮回答有没有被解析器接住（没接住才好判断「用户其实换了话题」） */
+export function isUnparsedAnswer(pending: PendingAction): boolean {
+  return pending.question.startsWith(UNPARSED_PREFIX)
+}
+
+/**
+ * 用户是否在明确表达「中止当前这件事」。
+ *
+ * 为什么要单独判：assistantSession 的 FALSE_WORDS 含「取消」「不用」这类词，
+ * 那是为 boolean 型参数准备的（「要不要打开歌词？」答「不用」= false）。
+ * 但在多步等待中，用户说「取消」的本意往往是**中止整个动作**，不是回答 false。
+ * 两者混在一起会出现「想中止，结果把设置改成了关闭」。
+ *
+ * 只认完整短句，不做子串匹配——「取消收藏」这种是正常指令，不该被当成中止。
+ */
+const CANCEL_WORDS = new Set(['取消', '算了', '不用了', '不做了', '放弃', '停止', '取消吧', '别弄了'])
+
+export function isCancelWord(text: string): boolean {
+  const t = (text || '').trim().replace(/[。！!，,、\s]+$/g, '')
+  return CANCEL_WORDS.has(t)
+}
+
+/**
+ * 新建歌单的预告文案：让用户先看到「将新建歌单「夜跑」」，
+ * 而不是执行完才发现多了一个歌单。
+ */
+export function describeCreatePlaylist(params: Record<string, unknown>): string | null {
+  if (params[CREATE_PLAYLIST_KEY] !== true) return null
+  const name = params.playlist
+  if (typeof name !== 'string' || !name.trim()) return null
+  return `将新建歌单「${name.trim()}」`
+}
+
+/** 选项下标标注：「1. 夜跑」——用户既可以点，也可以说「第一个」 */
+export function describeChoice(index: number, label: string): string {
+  return `${index + 1}. ${label}`
+}
+
+/**
+ * 组装执行器上下文。
+ *
+ * 两个坑在这里一次性处理掉（执行器文档里点名的）：
+ * 1. setProgress 在 usePlayerProgress() 里，不在 usePlayer() 里，
+ *    必须显式并进去，否则「跳转进度」会提示不支持；
+ * 2. playbackRate 是只读字段，setter 叫 setPlaybackRate——这里不覆盖任何字段，
+ *    只做「补一个 setProgress」，player 其余成员原样透传。
+ */
+export function buildExecuteContext(
+  player: AssistantPlayer,
+  progress: { setProgress: (p: number) => void },
+  playlists: { id: string; name: string }[],
+  currentTrack?: { title: string; artist: string; bvid?: string } | null,
+): { player: AssistantPlayer; playlists: { id: string; name: string }[]; currentTrack: { title: string; artist: string; bvid?: string } | null } {
+  return {
+    player: { ...player, setProgress: progress.setProgress },
+    playlists,
+    currentTrack: currentTrack ?? null,
+  }
+}
+
+/** 执行结果 → 回合文案：失败也要说清楚原因，不吞掉 */
+export function describeExecuteResult(result: ExecuteResult): { text: string; notice?: string } {
+  if (result.ok) return { text: result.message }
+  return { text: result.message || '这个动作没做成。', notice: result.error }
+}
+
 /**
  * 对话本体：输入框 + 对话流 + 六种意图分支。
  *
@@ -131,12 +303,23 @@ function searchItemToTrack(item: SearchItem): Track {
  */
 function AiChatBody() {
   const player = usePlayer()
+  /*
+   * v1.4.14-pre9：进度控制不在 usePlayer() 里，而在 usePlayerProgress()。
+   * 两个 hook 都要拿，组装执行器上下文时把 setProgress 并进 player，
+   * 否则「跳转进度」动作会提示不支持（执行器注释里点名了这个坑）。
+   */
+  const progress = usePlayerProgress()
   const navigate = useNavigate()
   const { settings } = useAppSettings()
 
   const [input, setInput] = useState('')
   const [turns, setTurns] = useState<Turn[]>([])
   const [pending, setPending] = useState(false)
+  /**
+   * 多步会话的当前待办动作。null = 不在追问状态。
+   * 刻意放 UI 层：随时可以取消 / 换话题，服务层保持无状态纯函数。
+   */
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   /** 回合 id 自增；同时用来做 React key */
   const turnIdRef = useRef(0)
   /** 请求序号：新请求 / 取消都会自增，晚到的旧结果据此丢弃 */
@@ -162,6 +345,88 @@ function AiChatBody() {
       return null
     }
   }, [])
+
+  /** 读歌单列表：执行器与追问都要它，读失败就当没有（不阻断动作） */
+  const readPlaylists = useCallback((): { id: string; name: string }[] => {
+    try {
+      return loadPlaylists().map((p) => ({ id: p.id, name: p.name }))
+    } catch {
+      return []
+    }
+  }, [])
+
+  /**
+   * 真正调用执行器。
+   *
+   * 上下文在这里组装：player 补上 setProgress（来自 usePlayerProgress），
+   * 其余成员原样透传——特别是 setPlaybackRate，绝不覆盖成 playbackRate。
+   */
+  const runAction = useCallback(
+    async (actionId: string, params: Record<string, unknown>, seq: number, turnId: number, confirmed = false) => {
+      const playlists = readPlaylists()
+      const track = player.currentTrack
+      const ctx = buildExecuteContext(
+        player,
+        progress,
+        playlists,
+        track ? { title: track.title, artist: track.artist, bvid: track.bvid } : null,
+      )
+
+      updateTurn(turnId, { status: 'working', text: '正在执行…' })
+      const result = await executeAssistantAction(actionId, params, ctx, confirmed ? { confirmed: true } : undefined)
+      if (seq !== seqRef.current) return
+
+      /*
+       * 危险动作：执行器在 confirmed !== true 时只回话、不产生任何副作用。
+       * 这里把确认卡片挂上去，用户点「确认」才带 confirmed 再调一次。
+       */
+      if (result.needsConfirm) {
+        setPendingAction(null)
+        updateTurn(turnId, {
+          status: 'done',
+          text: result.message,
+          payload: { kind: 'confirm', actionId, params },
+        })
+        return
+      }
+
+      setPendingAction(null)
+      const { text, notice } = describeExecuteResult(result)
+      updateTurn(turnId, { status: 'done', text, notice })
+    },
+    [player, progress, readPlaylists, updateTurn],
+  )
+
+  /**
+   * 按一个 ActionStep 推进：要么继续问，要么去执行。
+   * startAssistantAction / answerAssistantAction 的产物都从这里落地。
+   */
+  const applyActionStep = useCallback(
+    (step: ActionStep, seq: number, turnId: number) => {
+      if (step.kind === 'reject') {
+        setPendingAction(null)
+        updateTurn(turnId, { status: 'done', text: step.message })
+        return
+      }
+      if (step.kind === 'ask') {
+        setPendingAction(step.pending)
+        /*
+         * 新建歌单要先说清楚「将新建」，否则用户执行完才发现多了一个歌单。
+         * 预告拼在问题后面，信息不藏在第二次点击里。
+         */
+        const createHint = describeCreatePlaylist(step.pending.params)
+        updateTurn(turnId, {
+          status: 'done',
+          text: createHint ? `${step.pending.question}（${createHint}）` : step.pending.question,
+          payload: { kind: 'ask', pending: step.pending },
+        })
+        return
+      }
+      setPendingAction(null)
+      void runAction(step.actionId, step.params, seq, turnId)
+    },
+    [runAction, updateTurn],
+  )
 
   /**
    * 按意图执行。
@@ -295,6 +560,17 @@ function AiChatBody() {
           return
         }
 
+        /*
+         * v1.4.14-pre9：识别到注册表里的具体动作。
+         * 参数齐了就直接执行，缺参数就反问并进入等待回答状态——
+         * 两条路都交给纯函数判定，组件不自己算缺什么。
+         */
+        case 'action': {
+          const step = startAssistantAction(plan, { playlists: readPlaylists() })
+          applyActionStep(step, seq, turnId)
+          return
+        }
+
         default: {
           // 服务层已保证 unknown 走不到这里；兜底仍给改选引导，不静默
           updateTurn(turnId, { status: 'done', text: UNKNOWN_REPLY, payload: { kind: 'candidates', actions: false } })
@@ -324,7 +600,7 @@ function AiChatBody() {
         return '回到上一首。'
       }
     },
-    [player, settings, updateTurn],
+    [player, settings, updateTurn, readPlaylists, applyActionStep],
   )
 
   /** 提交一句话：先「正在理解…」，再按意图分发 */
@@ -343,6 +619,29 @@ function AiChatBody() {
         { id: replyTurnId, role: 'assistant', text: '正在理解…', status: 'understanding' },
       ])
       setPending(true)
+
+      /*
+       * v1.4.14-pre9：处于「等待回答」状态时，这一句先当作上一个问题的答案。
+       * 纯本地合并（mergeAnswer 是纯函数），不发请求——用户说「第二个」
+       * 不该先等一个模型往返。没接住就按 spec 继续问，同时「取消」按钮一直在。
+       */
+      const waiting = pendingAction
+      if (waiting) {
+        setPending(false)
+        /*
+         * v1.4.14-pre9 验收修正：等待回答时用户说「取消/算了/不用了」必须中止。
+         *
+         * 不能把它当答案交给 mergeAnswer——assistantSession 的 FALSE_WORDS 含「取消」，
+         * 对 boolean 型参数（如「打开歌词显示」）会被解析成 false 并真的把设置关掉。
+         * 用户想中止，结果改了设置，这是真实的误操作路径。
+         */
+        if (isCancelWord(text)) {
+          updateTurn(replyTurnId, { status: 'done', text: '好，这件事先不做了。' })
+          return
+        }
+        applyActionStep(answerAssistantAction(waiting, text, { playlists: readPlaylists() }), seq, replyTurnId)
+        return
+      }
 
       const config = await loadConfig()
       if (seq !== seqRef.current) return
@@ -396,7 +695,7 @@ function AiChatBody() {
 
       await runPlan(plan, seq, replyTurnId, config)
     },
-    [loadConfig, player.currentTrack, runPlan, updateTurn],
+    [applyActionStep, loadConfig, pendingAction, player.currentTrack, readPlaylists, runPlan, updateTurn],
   )
 
   /** 用户改选意图：跳过模型，直接按所选意图执行（confidence 视为确定） */
@@ -472,10 +771,37 @@ function AiChatBody() {
     [updateTurn],
   )
 
+  /**
+   * 确认卡片上的两个按钮。
+   *
+   * 确认 = 带 confirmed 再调一次执行器（危险动作只在那一刻才真正动手）；
+   * 取消 = 什么都不做，只把卡片收起并说清楚「没执行」。
+   */
+  const resolveConfirm = useCallback(
+    (turnId: number, actionId: string, params: Record<string, unknown>, accepted: boolean) => {
+      if (!accepted) {
+        updateTurn(turnId, { status: 'done', text: '好，这次不动。', payload: undefined })
+        return
+      }
+      const seq = ++seqRef.current
+      setPending(true)
+      void (async () => {
+        try {
+          await runAction(actionId, params, seq, turnId, true)
+        } finally {
+          if (seq === seqRef.current) setPending(false)
+        }
+      })()
+    },
+    [runAction, updateTurn],
+  )
+
   /** 取消在途请求：自增序号即可作废，晚到的结果不会回写 */
   const cancel = useCallback(() => {
     seqRef.current += 1
     setPending(false)
+    /* 取消也要丢掉待办动作，否则下一次输入会被当成上一个问题的答案 */
+    setPendingAction(null)
     setTurns((prev) =>
       prev.map((t) =>
         t.status === 'understanding' || t.status === 'working'
@@ -488,6 +814,7 @@ function AiChatBody() {
   const clearLog = useCallback(() => {
     seqRef.current += 1
     setPending(false)
+    setPendingAction(null)
     setTurns([])
   }, [])
 
@@ -521,7 +848,7 @@ function AiChatBody() {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="比如：来点适合跑步的"
+          placeholder={pendingAction ? '回答上面的问题，比如「第二个」' : '比如：来点适合跑步的'}
           aria-label="用一句话告诉助手你想听什么"
           maxLength={200}
         />
@@ -529,7 +856,12 @@ function AiChatBody() {
           <Send size={16} aria-hidden="true" />
           发送
         </button>
-        {pending && (
+        {/*
+          v1.4.14-pre9 验收修正：等待回答时也要显示取消。
+          此前 pending 在进入等待态时已被置 false，取消按钮消失，用户只能清空整个对话。
+          取消动作统一走 cancel()：它在 pendingAction 存在时清掉待办动作，否则作废在途请求。
+        */}
+        {(pending || pendingAction) && (
           <button type="button" className="ai-chat__ghost" onClick={cancel} aria-label="取消这次请求">
             取消
           </button>
@@ -699,6 +1031,62 @@ function AiChatBody() {
                           {INTENT_LABELS[intent]}
                         </button>
                       ))}
+                </div>
+              )}
+
+              {/*
+                v1.4.14-pre9：反问 + 选项。
+                选项按钮不是另一条路径——它把 label 当成一句话交回 submit，
+                与用户手打「第二个」「我的跑步歌单」走完全相同的解析。
+              */}
+              {payload?.kind === 'ask' && (
+                <div className="ai-chat__ask">
+                  {payload.pending.choices && payload.pending.choices.length > 0 && (
+                    <div className="ai-chat__candidates">
+                      {payload.pending.choices.map((choice, index) => (
+                        <button
+                          key={choice.value}
+                          type="button"
+                          className="ai-chat__chip"
+                          onClick={() => void submit(choice.label)}
+                          aria-label={`选择 ${choice.label}`}
+                        >
+                          {describeChoice(index, choice.label)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {describeCreatePlaylist(payload.pending.params) && (
+                    <span className="ai-chat__notice">{describeCreatePlaylist(payload.pending.params)}</span>
+                  )}
+                  <span className="ai-chat__notice">也可以直接打字回答，比如「第二个」。</span>
+                </div>
+              )}
+
+              {/*
+                v1.4.14-pre9：危险动作的确认卡片。
+                应用内确认：既不弹浏览器原生框，也不弹系统对话框。
+              */}
+              {payload?.kind === 'confirm' && (
+                <div className="ai-chat__confirm" role="group" aria-label="确认执行这个动作">
+                  <div className="ai-chat__confirm-acts">
+                    <button
+                      type="button"
+                      className="ai-chat__chip ai-chat__chip--danger"
+                      onClick={() => resolveConfirm(turn.id, payload.actionId, payload.params, true)}
+                      aria-label="确认执行"
+                    >
+                      确认执行
+                    </button>
+                    <button
+                      type="button"
+                      className="ai-chat__chip"
+                      onClick={() => resolveConfirm(turn.id, payload.actionId, payload.params, false)}
+                      aria-label="取消执行"
+                    >
+                      算了
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
