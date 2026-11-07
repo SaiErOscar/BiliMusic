@@ -208,7 +208,8 @@ describe('对话 UI · 入口是「为你推荐」旁的按钮，抽屉里打开
     const btnAt = recommendSrc.indexOf('<AiChatSheetButton', actsAt)
     expect(btnAt).toBeGreaterThan(actsAt)
     // 按钮仍在标题行闭合之前（标题行之后紧跟的是「未配置」提示块），即真的在那一行里
-    expect(btnAt).toBeLessThan(recommendSrc.indexOf('{!configured && (', btnAt))
+    // v1.4.14-pre10：提示块的渲染条件加了 settingsReady 前置，锚点随之更新
+    expect(btnAt).toBeLessThan(recommendSrc.indexOf('{settingsReady && !configured && (', btnAt))
   })
 
   it('抽屉用既有的 ai-sheet__* 范式，不另起一套外壳', () => {

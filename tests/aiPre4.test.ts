@@ -408,8 +408,36 @@ describe('首页推荐识别 WorkBuddy（pre9）', () => {
     expect(src).toContain('settings.wbModel')
   })
 
-  it('未配置提示区分 WorkBuddy 与普通服务商', () => {
-    expect(src).toContain('已选择 WorkBuddy，但还没有选模型')
+  /*
+   * v1.4.14-pre10（用户第 3 项）：未配置提示合并成一句，不再按 source 切换文案。
+   *
+   * 原断言钉的是「已选择 WorkBuddy，但还没有选模型」这句原文。用户反馈该句与
+   * Provider 那句在配置读回前后交替出现，页面反复跳动——所以文案必须合并。
+   * 现在守两件事：①存在统一提示函数且两个分支都在；②提示只在配置读回后渲染。
+   */
+  it('未配置提示合并为一句，且按 source 给不同补语', () => {
+    expect(src).toContain('function unconfiguredHint')
+    expect(src).toContain("settings?.source === 'workbuddy'")
+    // 两个分支各给出可执行的指引
+    expect(src).toContain('WorkBuddy 需要先选一个模型')
+    expect(src).toContain('填入地址、模型与密钥')
+  })
+
+  it('配置未读回前不渲染未配置提示（避免先闪一句再换一句）', () => {
+    expect(src).toContain('const settingsReady = settings !== null')
+    expect(src).toContain('{settingsReady && !configured && (')
+    // 不允许再有裸的 !configured 提示块——那是加载期先闪一句的来源
+    expect(src).not.toContain('{!configured && (')
+  })
+
+  it('只渲染一处未配置提示，不按 source 分成两块', () => {
+    // 定义 + 一处调用；多一处调用就意味着提示又会随 source 切换
+    const hits = (src.match(/unconfiguredHint[(]/g) || []).length
+    expect(hits).toBe(2)
+  })
+
+  it('click 模式的按钮也等配置读回再渲染', () => {
+    expect(src).toContain("settingsReady && mode === 'click' && (")
   })
 })
 

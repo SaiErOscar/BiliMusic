@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { X, Download, Upload, Cloud, CloudDownload, ShieldCheck, Loader2, AlertTriangle } from 'lucide-react'
 import {
   collectBackup,
@@ -67,6 +67,32 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
   const [pendingSource, setPendingSource] = useState<{ kind: 'file'; path: string } | { kind: 'webdav' } | null>(null)
 
   const hasFileApi = Boolean(platform.backup?.saveBackupFile && platform.backup?.openBackupFile)
+
+  /**
+   * v1.4.14-pre10（用户第 2 项）：只有当前 AI 源是 WorkBuddy 时备份才带它的登录凭证
+   * （见 backup.ts 的 loadWorkBuddyCredentialForBackup）。隐私提示按同一口径措辞，
+   * 不能让走 OpenAI 兼容 Provider 的用户以为自己多导出了一份 WorkBuddy 令牌。
+   */
+  const [workbuddyIncluded, setWorkbuddyIncluded] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const cfg = platform.aiConfig ? await platform.aiConfig.get() : null
+        const hasCred = Boolean(platform.workbuddy?.savedCredential)
+        if (cancelled) return
+        if (!cfg || cfg.source === 'workbuddy') {
+          const cred = hasCred ? await platform.workbuddy!.savedCredential() : null
+          if (!cancelled) setWorkbuddyIncluded(Boolean(cred?.accessToken))
+          return
+        }
+        if (!cancelled) setWorkbuddyIncluded(false)
+      } catch {
+        if (!cancelled) setWorkbuddyIncluded(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   // ===== 导出 =====
   const startExport = (target: 'file' | 'webdav') => { setExportTarget(target); setPassword(''); setConfirmPw(''); setPhase({ name: 'export', step: 'privacy' }) }
@@ -253,7 +279,7 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
           <div className="bm-body">
             <div className="bm-warn">
               <AlertTriangle size={18} />
-              <p>导出的文件包含你的 B 站登录凭证（Cookie）等隐私数据。请确认会妥善保管该文件，避免泄露给他人；口令也无法找回泄露的数据。</p>
+              <p>导出的文件包含你的 B 站登录凭证（Cookie）、AI 密钥{workbuddyIncluded ? '与 WorkBuddy 登录凭证' : ''}等隐私数据。请确认会妥善保管该文件，避免泄露给他人；口令也无法找回泄露的数据。</p>
             </div>
             <div className="bm-actions">
               <button type="button" className="bm-btn ghost" onClick={cancel}>取消</button>

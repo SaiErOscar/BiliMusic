@@ -99,6 +99,22 @@ export interface BackupPayload {
   playStats?: Record<string, unknown>
   /** AI 学习信号（ai-learned.json），影响后续推荐/歌单/歌词 */
   aiLearned?: unknown
+  /**
+   * v1.4.14-pre10（用户第 2 项）：WorkBuddy 网页登录凭据。
+   *
+   * 此前只导出 aiConfig，而 WorkBuddy 的 accessToken 存在 userData/workbuddy.json、
+   * 由系统 safeStorage 加密——换机后模型与区域还在，凭证却丢了，AI 一律 401。
+   * 与 API 密钥同一处理口径：明文落在 AES-256-GCM 密文负载内，保护级别不降级。
+   */
+  workbuddyCredential?: WorkBuddyBackupCredential | null
+}
+
+/** 备份里的 WorkBuddy 凭据（与主进程 WorkBuddyCredential 同形） */
+export interface WorkBuddyBackupCredential {
+  accessToken: string
+  region: 'cn' | 'global'
+  account?: string
+  expiresAt?: number
 }
 
 // 信封（base64 文件里编码的对象）；meta 明文，密文负载在 ct
@@ -199,6 +215,33 @@ export async function collectBackup(): Promise<BackupPayload> {
     userProfileText: await loadProfileTextForBackup(),
     playStats: loadPlayStats() as unknown as Record<string, unknown>,
     aiLearned: await loadLearnedForBackup(),
+    // v1.4.14-pre10：WorkBuddy 凭证随备份一并导出（用户第 2 项）
+    workbuddyCredential: await loadWorkBuddyCredentialForBackup(),
+  }
+}
+
+/**
+ * v1.4.14-pre10：备份用的 WorkBuddy 凭证读取。
+ *
+ * 只在「当前 AI 用的是 WorkBuddy」时导出：走 OpenAI 兼容 Provider 的用户
+ * 没有这份凭证，带上只会让备份多一份与本人无关的账号令牌。
+ * 读不到一律返回 null——备份是「能导出多少算多少」。
+ */
+async function loadWorkBuddyCredentialForBackup(): Promise<WorkBuddyBackupCredential | null> {
+  try {
+    if (!platform.workbuddy?.savedCredential) return null
+    const cfg = platform.aiConfig ? await platform.aiConfig.get().catch(() => null) : null
+    if (cfg && cfg.source !== 'workbuddy') return null
+    const cred = await platform.workbuddy.savedCredential()
+    if (!cred?.accessToken) return null
+    return {
+      accessToken: cred.accessToken,
+      region: cred.region === 'global' ? 'global' : 'cn',
+      account: cred.account,
+      expiresAt: cred.expiresAt,
+    }
+  } catch {
+    return null
   }
 }
 
@@ -375,6 +418,16 @@ export function applyBackup(payload: BackupPayload): ApplyResult {
   }
   if (payload.aiLearned && platform.userProfile) {
     void platform.userProfile.setLearned?.(payload.aiLearned).catch(() => {})
+  }
+  /*
+   * v1.4.14-pre10（用户第 2 项）：WorkBuddy 凭证写回。
+   *
+   * 主进程会用系统 safeStorage 重新加密落盘（saveCredential 内），
+   * 因此备份里是明文、磁盘上仍是密文，与 AI 密钥同一口径。
+   * 与 applyBackup 其余部分一样 fire-and-forget：凭证写失败不该让整次恢复失败。
+   */
+  if (payload.workbuddyCredential?.accessToken && platform.workbuddy?.saveCredential) {
+    void platform.workbuddy.saveCredential(payload.workbuddyCredential).catch(() => {})
   }
 
   // 深浅色模式：写回存储并即时应用到 DOM（v1.4.3-pre7 修复：主题此前未纳入备份）

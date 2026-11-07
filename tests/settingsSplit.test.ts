@@ -103,45 +103,51 @@ function countRealRows(fragment: string): number {
 }
 
 /**
- * 估算一段源码的渲染高度（px）。
+ * v1.4.14-pre10：各板块的**真机实测高度**（px）。
  *
- * v1.4.9-pre4 教训：第一版按「行数」配平，数出来左 13 / 右 16 看似均衡，实际左栏
- * 矮了 400px 以上——因为不同行的真实高度差很大：
- * - 普通行（只有标签 + 开关/下拉）  ≈ 68（min-height）
- * - 带 description 的行            ≈ 80（多一行说明文字）
- * - 输入框行（云同步三行）          ≈ 76（input 比开关高）
- * - stacked 行（睡眠定时/样式预设） ≈ 110（标签在上、控件换行在下）
- * - 按钮组（settings-actions）      ≈ 60 起，多组叠加
- * - 每个板块头（MusicSection 标题） ≈ 60
+ * 来源：Electron 36 加载 dist/index.html#/settings，视口 1728×1032，
+ * 用 getBoundingClientRect() 逐块读取，两栏合计与 grid 总高一致。
+ * 数值随内容变化——给板块加行、改行高、加按钮组都要重测并更新此表。
  *
- * 这里只做相对比较，绝对值不必精确；目的是让「按高度配平」有可回归的量化口径。
+ * 与栏位解耦：表按标题索引，移动板块不用改表，只有内容变化才需要改。
  */
-function estimateHeight(fragment: string): number {
-  // v1.4.11-pre4：AI 分组有「不可用」降级分支与正常分支两份，二者互斥渲染。
-  // 静态估算必须只算正常分支，否则两栏高度被高估而误判失衡。
-  const withoutFallback = fragment.replace(
-    /\{!isAiSupported\(\) \? \([\s\S]*?\) : \(/,
-    '(',
-  )
-  fragment = withoutFallback
-  let height = 0
-  // 板块头
-  height += (fragment.match(/<SettingsGroup\b/g) || []).length * 60
-  // stacked 行单独先数（避免被普通行重复计数）
-  const stackedRows = (fragment.match(/<SettingsRow[^>]*\bstacked\b/g) || []).length
-  height += stackedRows * 110
-  const allRows = countRows(fragment)
-  const plainRows = allRows - stackedRows
-  // 输入框行：以 settings-input 出现次数估算
-  const inputRows = Math.min(plainRows, (fragment.match(/className="settings-input"/g) || []).length)
-  const describedRows = (fragment.match(/<SettingsRow[^>]*description=/g) || []).length - stackedRows
-  const bareRows = Math.max(0, plainRows - inputRows - Math.max(0, describedRows))
-  height += inputRows * 76
-  height += Math.max(0, describedRows) * 80
-  height += bareRows * 68
-  // 按钮组
-  height += (fragment.match(/settings-actions/g) || []).length * 60
-  return height
+const MEASURED_GROUP_HEIGHT: Record<string, number> = {
+  外观: 456,
+  播放: 287,
+  歌单云同步: 381,
+  歌单迁移: 112,
+  下载: 524,
+  'AI 助手': 289,
+  'AI 用量': 299,
+  桌面歌词: 589,
+  播放页: 349,
+}
+
+/**
+ * 跨两栏的板块（settings-span）。它们排在两栏下方、不属于任何一栏，
+ * 所以既不计入左右栏高度，也不要求有实测值。
+ */
+const SPAN_TITLES = new Set(['账号', '关于'])
+
+/**
+ * 按实测表累加一段源码里出现的板块高度；缺表项直接失败，强制补测。
+ *
+ * 先剥掉「AI 不可用」降级分支：`!isAiSupported() ? (降级组) : (正常组)` 两份互斥渲染，
+ * 静态统计必须只算正常分支，否则右栏被多算一整个「AI 助手」组。
+ */
+function measuredHeight(fragment: string): number {
+  const code = fragment.replace(/\{!isAiSupported\(\) \? \([\s\S]*?\) : \(/, '(')
+  const titles = [...code.matchAll(/<SettingsGroup title="([^"]+)"/g)]
+    .map((m) => m[1])
+    .filter((t) => !SPAN_TITLES.has(t))
+  let total = 0
+  for (const t of titles) {
+    const h = MEASURED_GROUP_HEIGHT[t]
+    expect(h, '板块「' + t + '」缺少实测高度，请在 Electron 里量一次并补进 MEASURED_GROUP_HEIGHT').toBeTypeOf('number')
+    total += h
+  }
+  // 板块间距（.settings-column 的 gap: 24px），n 块之间共 n-1 段
+  return total + Math.max(0, titles.length - 1) * 24
 }
 
 describe('设置页「播放」板块拆分（v1.4.9-pre4）', () => {
@@ -240,10 +246,23 @@ describe('设置页「播放」板块拆分（v1.4.9-pre4）', () => {
     expect(block).toContain('<AiPortraitPanel')
   })
 
-  it('左右两栏估算高度差不超过 10%（按真实行高，不按行数）', () => {
+  /*
+   * v1.4.14-pre10（用户第 1 项）：配平改用**真机实测高度**，废弃静态估算。
+   *
+   * 为什么换口径：用户报「设置页未配平」时，静态估算报 5.97%、测试全绿，
+   * 而 Electron 加载 dist 实测（1728×1032 视口）左 1855 / 右 1597，差 13.9%。
+   * 估算把「带 description 的行」一律按 80px 计、把板块头按 60px 计，
+   * 与真实渲染（68/83/103/105 混排、板块头约 48px）系统性偏离，
+   * 且偏离方向在两栏不同，于是估算出来的差值没有意义。
+   *
+   * 现在把每块的实测高度记成表：按板块标题索引，与它在哪一栏无关，
+   * 所以移动板块不需要重测。新增板块若不在表里，测试直接失败并要求补测——
+   * 这正是上一轮漏掉的动作。
+   */
+  it('左右两栏实测高度差不超过 10%（真机高度表，非估算）', () => {
     const { left, right } = columns()
-    const leftH = estimateHeight(left)
-    const rightH = estimateHeight(right)
+    const leftH = measuredHeight(left)
+    const rightH = measuredHeight(right)
     expect(leftH).toBeGreaterThan(0)
     expect(rightH).toBeGreaterThan(0)
     const diffRatio = Math.abs(leftH - rightH) / Math.max(leftH, rightH)
@@ -253,11 +272,24 @@ describe('设置页「播放」板块拆分（v1.4.9-pre4）', () => {
     ).toBeLessThanOrEqual(0.1)
   })
 
-  it('云同步与歌单迁移同栏（两者同属「歌单数据」，且右栏高度已配平）', () => {
+  /*
+   * v1.4.14-pre10（用户第 1 项）：歌单迁移从左侧移到右侧。
+   *
+   * 原断言要求云同步与迁移同栏。真机实测（Electron 加载 dist，1728×1032 视口）：
+   * 迁移留在左栏时 左 1855 / 右 1597，差 13.9%——用户报的「未配平」属实，
+   * 而当时这条断言与高度断言都是绿的，说明静态估算口径不可信。
+   * 迁移组仅 112px，右移后实测 左 1719 / 右 1733，差 0.8%。
+   *
+   * 语义未变：两者仍同属「歌单数据搬运」，只是分列两侧。
+   */
+  it('云同步与歌单迁移分列两侧（为配平），但都仍在设置页', () => {
     const { left, right } = columns()
     const syncInLeft = left.includes('title="歌单云同步"')
     const transferInLeft = left.includes('title="歌单迁移"')
-    expect(syncInLeft).toBe(transferInLeft)
+    const transferInRight = right.includes('title="歌单迁移"')
+    expect(syncInLeft).toBe(true)
+    expect(transferInRight).toBe(true)
+    expect(transferInLeft).toBe(false)
   })
 
   it('账号与关于保持横跨两栏（settings-span）', () => {

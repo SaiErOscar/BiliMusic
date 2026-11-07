@@ -732,28 +732,6 @@ export default function Settings() {
 
 
 
-          {/* v1.4.13-pre11：歌单迁移与云同步同栏（既有测试钉住这条约束） */}
-          <SettingsGroup title="歌单迁移" icon={<FileDown size={20} />}>
-            <div className="settings-actions settings-actions--stacked">
-              <button type="button" onClick={exportPlaylists}>
-                <FileDown size={14} />
-                导出歌单
-              </button>
-              <button type="button" onClick={() => importInputRef.current?.click()}>
-                <FileUp size={14} />
-                导入歌单
-              </button>
-              <input
-                ref={importInputRef}
-                type="file"
-                accept="application/json,.json"
-                hidden
-                onChange={(e) => importPlaylists(e.target.files?.[0])}
-              />
-              {playlistTransferMessage && <span>{playlistTransferMessage}</span>}
-            </div>
-          </SettingsGroup>
-
           {/*
             v1.4.13-pre11：「下载」从左侧移到右侧。
             AI 连接配置收进二级菜单后左栏比右栏高 15%，超过两栏平衡的 10% 上限；
@@ -838,6 +816,31 @@ export default function Settings() {
           */}
 
 
+
+          {/* v1.4.14-pre10（用户第 1 项）：歌单迁移从左侧移到右侧。
+              实测左栏 1855px / 右栏 1597px，差 13.9% 超过 10% 上限；
+              迁移组仅 112px，移过来正好补平（左 1720 / 右 1734，差 0.8%）。
+              与云同步仍同属「歌单数据搬运」，只是分列两侧——语义未变。 */}
+          <SettingsGroup title="歌单迁移" icon={<FileDown size={20} />}>
+            <div className="settings-actions settings-actions--stacked">
+              <button type="button" onClick={exportPlaylists}>
+                <FileDown size={14} />
+                导出歌单
+              </button>
+              <button type="button" onClick={() => importInputRef.current?.click()}>
+                <FileUp size={14} />
+                导入歌单
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json,.json"
+                hidden
+                onChange={(e) => importPlaylists(e.target.files?.[0])}
+              />
+              {playlistTransferMessage && <span>{playlistTransferMessage}</span>}
+            </div>
+          </SettingsGroup>
 
           {/* v1.4.11-pre3 AI 底座：Provider 配置。密钥不写注册表、经 safeStorage 加密落盘，
               并随「导出全部数据」一并导出。

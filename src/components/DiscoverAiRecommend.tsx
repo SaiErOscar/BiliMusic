@@ -36,6 +36,20 @@ interface Props {
   onPlayTrack: (track: import('@/types').Track) => void
 }
 
+/**
+ * v1.4.14-pre10（用户第 3 项）：未配置时只有一句话。
+ *
+ * 原来按 settings.source 分两句，配置尚未读回时先命中 Provider 那句、
+ * 读回后又换成 WorkBuddy 那句，同一块区域连续换文案，观感就是闪烁。
+ * 这里把「缺什么」压进同一条句式，source 只影响补语、不改变行数与高度。
+ */
+function unconfiguredHint(settings: AiSettings | null): string {
+  if (settings?.source === 'workbuddy') {
+    return '还没有可用的 AI：WorkBuddy 需要先选一个模型。到「设置 → AI 助手」选好模型即可使用。'
+  }
+  return '还没有可用的 AI：到「设置 → AI 助手」填入地址、模型与密钥，或改用 WorkBuddy 登录。'
+}
+
 export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
   const player = usePlayer()
   /*
@@ -77,6 +91,15 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
     return () => { cancelled = true }
   }, [])
 
+  /**
+   * v1.4.14-pre10（用户第 3 项）：配置还没读回来时不要下「未配置」的判断。
+   *
+   * 原来 settings 初值是 null，于是首帧 configured 恒为 false，
+   * 先渲染一句「还没有配置 AI」；等 getAiConfig 回来、source 变成 workbuddy，
+   * 文案又切成另一句 WorkBuddy 的提示——两块提示先后出现、高度不同，
+   * 页面跟着跳一下。加载期一律当作「未知」，什么都不说。
+   */
+  const settingsReady = settings !== null
   const mode = settings?.recommendMode || 'click'
   /*
    * v1.4.13-pre9 修正（用户第 2 项）：首页仍显示「未配置 AI」。
@@ -201,7 +224,11 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
         <div className="discover-ai__acts">
           {/* v1.4.14-pre8：助手入口挂在推荐标题行右侧，不再占页面顶部 */}
           <AiChatSheetButton open={assistantOpen} onOpenChange={setAssistantOpen} />
-          {mode === 'click' && (
+          {/*
+            v1.4.14-pre10：按钮等配置读回再渲染。否则 click 模式会先出现一颗禁用按钮，
+            读回后变成可用，标题行右侧宽度变化同样会造成跳动。
+          */}
+          {settingsReady && mode === 'click' && (
             <button
               type="button"
               className="discover-ai__btn"
@@ -221,11 +248,15 @@ export default function DiscoverAiRecommend({ onPlayTrack }: Props) {
         </div>
       </div>
 
-      {!configured && (
+      {/*
+        v1.4.14-pre10（用户第 3 项）：两种未配置合并成一句话。
+        原来按 source 分成两句，配置加载前后文案来回切，且两句高度不同，
+        用户看到的就是「未绑定 API / 未绑定 WorkBuddy 反复闪」。
+        现在只有一句，措辞覆盖两种情况，不再随 source 变化。
+      */}
+      {settingsReady && !configured && (
         <p className="discover-ai__hint">
-          {settings?.source === 'workbuddy'
-            ? '已选择 WorkBuddy，但还没有选模型：到「设置 → AI 助手 → 服务预设」重新选一次 WorkBuddy 并挑一个模型。'
-            : '还没有配置 AI：到「设置 → AI 助手」填入地址、模型与密钥后即可使用。'}
+          {unconfiguredHint(settings)}
         </p>
       )}
 

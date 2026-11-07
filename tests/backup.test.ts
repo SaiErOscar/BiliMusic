@@ -30,6 +30,38 @@ function samplePayload(): BackupPayload {
   }
 }
 
+
+/*
+ * v1.4.14-pre10（用户第 2 项）：WorkBuddy 凭证必须随备份往返。
+ *
+ * 此前只导出 aiConfig，而 accessToken 存在 userData/workbuddy.json 里，
+ * 换机后模型与区域还在、凭证却丢了，AI 一律 401。
+ */
+describe('WorkBuddy 凭证随备份往返（v1.4.14-pre10）', () => {
+  it('加密封装能原样带回 WorkBuddy 凭据', async () => {
+    const payload = samplePayload()
+    payload.workbuddyCredential = {
+      accessToken: 'wb-token-abc',
+      region: 'cn',
+      account: '示例账号',
+      expiresAt: 1767225600000,
+    }
+    const file = await buildBackupFile(payload, 'pw')
+    const back = await decryptBackup(file, 'pw')
+    expect(back.workbuddyCredential?.accessToken).toBe('wb-token-abc')
+    expect(back.workbuddyCredential?.region).toBe('cn')
+    expect(back.workbuddyCredential?.account).toBe('示例账号')
+  })
+
+  it('没有凭据时字段缺省，不影响其它数据', async () => {
+    const payload = samplePayload()
+    const file = await buildBackupFile(payload, 'pw')
+    const back = await decryptBackup(file, 'pw')
+    expect(back.workbuddyCredential).toBeUndefined()
+    expect(back.account?.dedeUserId).toBe('12345')
+  })
+})
+
 describe('backup 加密封装', () => {
   it('口令正确时可完整还原负载（含账号凭证）', async () => {
     const payload = samplePayload()
