@@ -1,5 +1,5 @@
 /**
- * v1.4.9-pre2 音频可视化：Web Audio 分析图的唯一持有者。
+ * v1.4.9-pre2 音频可视化 / v1.4.15-pre1 均衡器：Web Audio 图的唯一持有者。
  *
  * 为什么需要这个模块（而不是在组件里直接 new AudioContext）：
  *
@@ -10,17 +10,32 @@
  *
  * 2. 元素一旦被 createMediaElementSource 接管，其声音就改由 AudioContext 的图
  *    输出，且**没有官方推荐的方式「解除接管」**。所以本模块刻意采用「一次接管、
- *    永久复用」的策略：只在真正需要可视化时接管一次；之后即使关闭可视化，
- *    也只是把分析节点断开（零 CPU），播放链路上仍挂着这条已在工作的图。
+ *    永久复用」的策略：只在真正需要可视化或均衡器时接管一次；之后即使两者都关闭，
+ *    也只是把分析节点断开、把均衡器增益归零（零 CPU），播放链路上仍挂着这条已在
+ *    工作的图。**绝不能在关闭时把 source 的输出全断掉**——元素已被接管，信号无处
+ *    可去就是整条播放链路静音。
  *    （注：本图对音质/音量无影响——Chromium 实测 audio.volume/muted 在接管后
  *    依然生效，RMS 1.0/0.25/静音 分别为 0.43/0.11/0。）
  *
- * 3. 可视化绝不参与「能不能播」的判断：AudioContext 构造失败、resume 失败、
- *    createMediaElementSource 抛错，一律静默降级为「无可视化」，返回 null。
+ * 3. 可视化与均衡器绝不参与「能不能播」的判断：AudioContext 构造失败、resume 失败、
+ *    createMediaElementSource 抛错，一律静默降级为「无可视化 / 无均衡器」，返回 null。
+ *
+ * 4. 均衡器链的拓扑固定为 source → 十个 BiquadFilter → analyser → destination；
+ *    分析节点缺席（可视化没开或建不出来）时，**链尾直接落到 ctx.destination**。
+ *    这两条分支共用 wireChain，避免「只开均衡器」时因为链尾悬空而静音。
+ *    旁路只把十个 gain 置 0，不做 disconnect/connect——重连会在切换瞬间产生可听见的断音。
  *
  * 降级与单测：模块不假设 AudioContext 一定存在（jsdom 下没有），所有入口在
- * 缺失时都安全返回 null，因此降级路径可被 tests/audioGraph.test.ts 直接覆盖。
+ * 缺失时都安全返回 null，因此降级路径可被 tests/audioGraph.test.ts 直接覆盖；
+ * 均衡器链的拓扑与增益行为由 tests/audioEqualizer.test.ts 用假 AudioContext 覆盖。
  */
+
+import {
+  EQ_BANDS,
+  EQ_BAND_COUNT,
+  bandQ,
+  normalizeGains,
+} from '@/services/equalizer'
 
 /** 分析节点 FFT 窗口。2048 在「低频分辨率」与「每帧开销」之间取平衡。 */
 export const ANALYSER_FFT_SIZE = 2048
@@ -36,10 +51,22 @@ export const ANALYSER_SMOOTHING = 0.8
  */
 export const SPECTRUM_USABLE_RATIO = 0.72
 
+/** 均衡器旁路时写入的增益（全 0 = 直通）。模块级常量，避免每次旁路都新建数组。 */
+const BYPASS_GAINS: readonly number[] = new Array<number>(EQ_BAND_COUNT).fill(0)
+
 interface AudioGraph {
   ctx: AudioContext
   source: MediaElementAudioSourceNode
-  analyser: AnalyserNode
+  /** 分析节点；创建失败时为 null（可视化降级，播放与均衡器照常） */
+  analyser: AnalyserNode | null
+  /** 十段均衡滤波器；创建失败时为空数组（整组丢弃，退回直通链路） */
+  filters: BiquadFilterNode[]
+  /** 期望的均衡曲线（dB）。旁路时滤波器 gain 写 0，但这份曲线保留以便重新启用 */
+  eqGains: number[]
+  /** 均衡器是否启用（false = 旁路） */
+  eqEnabled: boolean
+  /** 分析节点当前是否接在活路径上 */
+  analyserActive: boolean
   /** 已接管的元素：用于识别「换了元素」，避免二次 createMediaElementSource 抛错 */
   element: HTMLAudioElement
 }
@@ -47,6 +74,15 @@ interface AudioGraph {
 let graph: AudioGraph | null = null
 /** 已判定为「本环境不支持 Web Audio」时置位，避免每次播放都重试构造 */
 let unavailable = false
+
+/** ensureAudioGraph 的可选项。 */
+export interface AudioGraphOptions {
+  /**
+   * 是否把分析节点接入活路径（即可视化是否开启）。默认 true，与既有行为一致。
+   * 传 false 时链尾直接接 destination——均衡器单独工作也必须出声。
+   */
+  analyser?: boolean
+}
 
 /** 取 AudioContext 构造器（兼容 webkit 前缀的旧内核）；不存在返回 null 而非抛错。 */
 function getAudioContextCtor(): typeof AudioContext | null {
@@ -59,27 +95,113 @@ function getAudioContextCtor(): typeof AudioContext | null {
   return g.AudioContext ?? g.webkitAudioContext ?? null
 }
 
-/** 是否已成功建立音频图（供 UI 判断有无 analyser）。 */
+/** 是否已接管音频元素（建过图）。供 UI 判断有无分析节点时请用 getAnalyser。 */
 export function isAudioGraphReady(): boolean {
   return graph !== null
 }
 
 /**
- * 建立（或复用）audio 元素的 Web Audio 分析图。
+ * 建十个 BiquadFilter（peaking，频率/Q 取自 services/equalizer 的频段定义）。
  *
- * - 同一元素重复调用：直接复用，不会二次 createMediaElementSource。
- * - 换了元素（理论上不会发生）：先释放旧图再接管新元素。
- * - 任何一步失败：返回 null 并记住「不可用」，调用方按「无可视化」继续播放。
+ * 任何一步失败就整组丢弃并返回空数组：只建出半个链会改变频响，
+ * 而「没有均衡器」是安全且听得出来的降级。
  */
-export function ensureAudioGraph(audio: HTMLAudioElement | null | undefined): AudioContext | null {
+function createEqualizerFilters(ctx: AudioContext): BiquadFilterNode[] {
+  const filters: BiquadFilterNode[] = []
+  try {
+    for (let i = 0; i < EQ_BAND_COUNT; i++) {
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'peaking'
+      filter.frequency.value = EQ_BANDS[i]
+      filter.Q.value = bandQ(i)
+      // 初值全 0 = 直通：均衡器还没被显式启用前，链路的频响必须与无均衡器一致
+      filter.gain.value = 0
+      filters.push(filter)
+    }
+  } catch (e) {
+    console.warn('[audioGraph] 创建均衡滤波器失败，均衡器已禁用：', e)
+    return []
+  }
+  return filters
+}
+
+/**
+ * 按「分析节点是否启用」把整条主链路重接一遍。
+ *
+ * 链序：source → filters[0..9] → (analyser) → destination。
+ * 只在「建图」与「可视化开/关」时调用，**增益更新绝不走这里**——
+ * 断开重连会在切换瞬间产生可听见的断音。
+ */
+function wireChain(g: AudioGraph, analyserActive: boolean): void {
+  const { ctx, source, filters, analyser } = g
+
+  // 重接前先断干净：同一条边连两次会让信号翻倍
+  try { source.disconnect() } catch { /* 已断开 */ }
+  for (const filter of filters) {
+    try { filter.disconnect() } catch { /* 已断开 */ }
+  }
+  if (analyser) {
+    try { analyser.disconnect() } catch { /* 已断开 */ }
+  }
+
+  let node: AudioNode = source
+  for (const filter of filters) {
+    node.connect(filter)
+    node = filter
+  }
+
+  if (analyser && analyserActive) {
+    node.connect(analyser)
+    analyser.connect(ctx.destination)
+    g.analyserActive = true
+    return
+  }
+
+  // 关键分支：没有可用的分析节点（或可视化没开）时，链尾必须直接落到 destination。
+  // 元素已被接管，链尾悬空 = 整条播放链路静音。
+  node.connect(ctx.destination)
+  g.analyserActive = false
+}
+
+/**
+ * 把当前曲线写进十个滤波器。
+ *
+ * 旁路不拆节点，只把 gain 全置 0（见文件头第 4 条）：节点常驻、只改 AudioParam，
+ * 所以启用/关闭、拖柱子都不会产生断音。
+ */
+function applyGains(g: AudioGraph): void {
+  const gains = g.eqEnabled ? g.eqGains : BYPASS_GAINS
+  for (let i = 0; i < g.filters.length; i++) {
+    const value = gains[i] ?? 0
+    try {
+      g.filters[i].gain.value = value
+    } catch { /* 节点已失效：忽略，不影响播放 */ }
+  }
+}
+
+/**
+ * 建立（或复用）audio 元素的 Web Audio 图。
+ *
+ * - 同一元素重复调用：直接复用，不会二次 createMediaElementSource；
+ *   仅当「分析节点是否在活路径上」与本次请求不一致时才重接线。
+ * - 换了元素（理论上不会发生）：先彻底释放旧图再接管新元素。
+ * - 任何一步失败：返回 null 并记住「不可用」，调用方按「无可视化/无均衡器」继续播放。
+ */
+export function ensureAudioGraph(
+  audio: HTMLAudioElement | null | undefined,
+  options?: AudioGraphOptions,
+): AudioContext | null {
+  const wantAnalyser = options?.analyser !== false
   if (!audio || unavailable) return graph?.ctx ?? null
   if (graph) {
     // 正常情况下元素是同一个，直接复用；仅当元素被替换时才重建
     if (graph.element === audio) {
+      const effectiveAnalyser = wantAnalyser && graph.analyser !== null
+      if (graph.analyserActive !== effectiveAnalyser) wireChain(graph, wantAnalyser)
       void resumeAudioGraph()
       return graph.ctx
     }
-    disposeAudioGraph()
+    closeAudioGraph()
   }
 
   const Ctor = getAudioContextCtor()
@@ -93,7 +215,7 @@ export function ensureAudioGraph(audio: HTMLAudioElement | null | undefined): Au
     ctx = new Ctor()
   } catch (e) {
     // 没有音频设备 / 上下文数量超限等：静默降级
-    console.warn('[audioGraph] AudioContext 创建失败，可视化已禁用：', e)
+    console.warn('[audioGraph] AudioContext 创建失败，可视化与均衡器已禁用：', e)
     unavailable = true
     return null
   }
@@ -103,31 +225,38 @@ export function ensureAudioGraph(audio: HTMLAudioElement | null | undefined): Au
     source = ctx.createMediaElementSource(audio)
   } catch (e) {
     // InvalidStateError（该元素已被其他 context 接管）等：不能影响播放
-    console.warn('[audioGraph] 接管音频元素失败，可视化已禁用：', e)
+    console.warn('[audioGraph] 接管音频元素失败，可视化与均衡器已禁用：', e)
     void ctx.close().catch(() => { /* 关闭失败无需处理 */ })
     unavailable = true
     return null
   }
 
-  let analyser: AnalyserNode
+  // 分析节点与滤波器都是可选件：建不出来只损失对应能力，播放不能受影响
+  let analyser: AnalyserNode | null = null
   try {
     analyser = ctx.createAnalyser()
     analyser.fftSize = ANALYSER_FFT_SIZE
     analyser.smoothingTimeConstant = ANALYSER_SMOOTHING
   } catch (e) {
     console.warn('[audioGraph] 创建分析节点失败，可视化已禁用：', e)
-    void ctx.close().catch(() => { /* 关闭失败无需处理 */ })
-    unavailable = true
-    return null
+    analyser = null
   }
 
-  // 源节点一旦创建就已经把元素的声音改道到本 context，因此
-  // source → analyser → destination 必须立刻接通，否则会「没声音」。
-  // analyser 是直通节点（不改变信号），不接 destination 它就拿不到数据。
-  source.connect(analyser)
-  analyser.connect(ctx.destination)
+  const next: AudioGraph = {
+    ctx,
+    source,
+    analyser,
+    filters: createEqualizerFilters(ctx),
+    eqGains: normalizeGains([]),
+    eqEnabled: false,
+    analyserActive: false,
+    element: audio,
+  }
+  graph = next
 
-  graph = { ctx, source, analyser, element: audio }
+  // 源节点一旦创建就已经把元素的声音改道到本 context，因此链路必须立刻接通，
+  // 否则会「没声音」。wireChain 保证链尾一定落在 destination（或 analyser → destination）。
+  wireChain(next, wantAnalyser)
   void resumeAudioGraph()
   return ctx
 }
@@ -144,38 +273,79 @@ export function resumeAudioGraph(): Promise<void> {
 }
 
 /**
- * 取分析节点；尚未建立音频图时返回 null（可视化组件据此渲染占位）。
+ * 取分析节点；尚未建图或可视化未开启（分析节点不在活路径上）时返回 null
+ * （可视化组件据此渲染占位）。
  * 调用方应直接编译期引用本函数（而不是包一层动态 import），
  * 以保证 Vite/Rollup 能正确做静态分析（动态引用会被拆包或报错）。
  */
 export function getAnalyser(): AnalyserNode | null {
-  return graph?.analyser ?? null
+  if (!graph || !graph.analyserActive) return null
+  return graph.analyser
 }
 
 /**
- * 释放音频图。
+ * 取均衡滤波器（返回副本，调用方拿不到内部数组）。
+ * 尚未建图或滤波器创建失败时返回空数组。供测试与调试断言「节点是否被复用」。
+ */
+export function getEqualizerFilters(): BiquadFilterNode[] {
+  return graph ? [...graph.filters] : []
+}
+
+/**
+ * 按增益数组更新十个滤波器（不重建节点）。
+ *
+ * 入参可以是任意脏数据：内部走 normalizeGains 归一成合法的十段增益
+ * （长度补齐/截断、越界钳制到 ±12dB、非有限值按 0）。均衡器处于旁路时只记下曲线，
+ * 等启用时再套用。未建图时是空操作——调用方无需先判断。
+ */
+export function setEqualizerGains(gains: unknown): void {
+  if (!graph) return
+  graph.eqGains = normalizeGains(gains)
+  applyGains(graph)
+}
+
+/**
+ * 启用/旁路均衡器。
+ *
+ * 旁路 = 把十个滤波器 gain 全置 0，**不做 disconnect/connect**：
+ * 重连期间会有可听见的断音，而改 AudioParam 是无缝的。
+ */
+export function setEqualizerEnabled(enabled: boolean): void {
+  if (!graph) return
+  graph.eqEnabled = Boolean(enabled)
+  applyGains(graph)
+}
+
+/**
+ * 释放分析分支并旁路均衡器，但**保留**已接管的主链路。
  *
  * 注意：不关闭 AudioContext、不断开 source→destination 这条主链路。
  * 原因见文件头第 2 条——元素一旦被接管就无法干净地交还给浏览器默认输出，
- * 关掉 context 只会让播放彻底没声音。这里只断开「分析」分支：
- * analyser 不再挂任何输出，rAF 停止后本图零开销。
+ * 把链路断掉只会让播放彻底没声音。这里做两件事：
+ * 1) 均衡器归零，听感回到直通；
+ * 2) 分析节点摘出活路径，链尾直接接 destination（rAF 停止后本图零开销）。
  */
 export function disposeAudioGraph(): void {
   if (!graph) return
-  try {
-    graph.source.disconnect(graph.analyser)
-  } catch { /* 已断开 */ }
-  try {
-    graph.analyser.disconnect()
-  } catch { /* 已断开 */ }
-  graph = null
+  graph.eqEnabled = false
+  applyGains(graph)
+  // 只有分析节点确实还挂在活路径上时才重接线：无谓的断开重连会在切换瞬间产生断音
+  if (graph.analyserActive) wireChain(graph, false)
 }
 
 /** 关闭 AudioContext 并彻底释放（仅在卸载播放器时调用）。 */
 export function closeAudioGraph(): void {
-  const ctx = graph?.ctx
-  disposeAudioGraph()
-  if (ctx) void ctx.close().catch(() => { /* 已关闭 */ })
+  const g = graph
+  graph = null
+  if (!g) return
+  try { g.source.disconnect() } catch { /* 已断开 */ }
+  for (const filter of g.filters) {
+    try { filter.disconnect() } catch { /* 已断开 */ }
+  }
+  if (g.analyser) {
+    try { g.analyser.disconnect() } catch { /* 已断开 */ }
+  }
+  void g.ctx.close().catch(() => { /* 已关闭 */ })
 }
 
 /**

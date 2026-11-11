@@ -41,6 +41,7 @@ import { AI_PRESETS, aiUnsupportedReason, getAiConfig, isAiSupported, saveAiConf
 import { clearUsage, estimateCostYuan, formatUsage, loadUsage } from '@/services/aiUsage'
 import { FALLBACK_MODELS, fetchModelOptions, hostOf, type ModelOption } from '@/services/aiModels'
 import AiConfigSheet, { type AiSourceTab } from '@/components/AiConfigSheet'
+import EqualizerSheet, { eqPresetLabel } from '@/components/EqualizerSheet'
 import WorkBuddyPane from '@/components/WorkBuddyPane'
 import { forgetApi, labelFromUrl, rememberApi } from '@/services/aiApiMemory'
 import type { AiSettings } from '@/types'
@@ -157,6 +158,14 @@ export default function Settings() {
    */
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false)
   const [aiSettingsTab, setAiSettingsTab] = useState<AiSettingsTab>('recommend')
+  /**
+   * v1.4.15-pre1「均衡器」设置抽屉。
+   *
+   * 十根柱子 + 九个预设 + 总开关放进抽屉，分组里只留一行入口：
+   * 抽屉内容约占 320px，直接铺进「播放」会让那一组从 4 行涨到 5 行还撑高整栏。
+   * 与 AI 配置同一范式——配置进抽屉，组里只留状态摘要与入口。
+   */
+  const [eqSheetOpen, setEqSheetOpen] = useState(false)
   /** 清除播放统计后自增，通知听歌画像面板重置已生成的结果 */
   const [playStatsResetSignal, setPlayStatsResetSignal] = useState(0)
   /** 抽屉里「清除播放统计」的反馈文案 */
@@ -579,6 +588,18 @@ export default function Settings() {
                 onChange={(playQuality) => setAppSettings({ playQuality: playQuality as AppSettings['playQuality'] })}
                 options={['标准', '高品质', '无损']}
               />
+            </SettingsRow>
+            {/*
+              v1.4.15-pre1 均衡器入口。
+              十根柱子不进分组：一组上限 7 行，而均衡器本体占 300px 以上，
+              铺开会把「播放」从 4 行撑到 5 行、左栏整体抬高并破坏两栏配平。
+              这里只留一行「当前预设 + 开关状态」，点击开抽屉——与「AI 设置」同一范式。
+            */}
+            <SettingsRow
+              label="均衡器"
+              description={'当前：' + eqPresetLabel(settings.equalizer.preset) + ' · ' + (settings.equalizer.enabled ? '已开启' : '已关闭')}
+            >
+              <ActionButton onClick={() => setEqSheetOpen(true)}>打开设置</ActionButton>
             </SettingsRow>
             <SettingsRow label="自动播放" description="播放结束时自动播放推荐">
               <ToggleSwitch checked={settings.autoPlay} onChange={() => setAppSettings({ autoPlay: !settings.autoPlay })} />
@@ -1140,6 +1161,18 @@ export default function Settings() {
           onSave={() => void persistAiConfig(aiConfig)}
           onTest={() => void runAiTest()}
           onClearUsage={() => { clearUsage(); setUsageText(formatUsage(loadUsage())) }}
+        />
+      )}
+
+      {/*
+        v1.4.15-pre1 均衡器抽屉。写入前统一过 normalizeEqualizer（见 EqualizerSheet），
+        所以这里直接落库，不需要再做一次钳制。
+      */}
+      {eqSheetOpen && (
+        <EqualizerSheet
+          value={settings.equalizer}
+          onChange={(equalizer) => setAppSettings({ equalizer })}
+          onClose={() => setEqSheetOpen(false)}
         />
       )}
 

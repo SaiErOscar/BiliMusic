@@ -113,7 +113,10 @@ function countRealRows(fragment: string): number {
  */
 const MEASURED_GROUP_HEIGHT: Record<string, number> = {
   外观: 456,
-  播放: 287,
+  // v1.4.15-pre1：均衡器入口占一行，287 + 68 = 355。
+  // 实测依据：该组五行里四行普通行各 68px、睡眠定时 103.1px，
+  // 表头 28.8px；旧值 287 = 3×68 + 83，加一行后必须同步改这里。
+  播放: 355,
   歌单云同步: 381,
   歌单迁移: 112,
   下载: 524,

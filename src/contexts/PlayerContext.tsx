@@ -4,7 +4,8 @@ import type { Track, RepeatMode } from '@/types'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { toggleFavoriteTrack, loadFavoriteTracks, addRecentTrack, recordPlayStart, recordPlayProgress } from '@/utils/storage'
 import { resolveAudioPlayableUrl, releaseAudioPlayableUrl } from '@/services/http'
-import { ensureAudioGraph, disposeAudioGraph } from '@/services/audioGraph'
+import { ensureAudioGraph, disposeAudioGraph, isAudioGraphReady, setEqualizerEnabled, setEqualizerGains } from '@/services/audioGraph'
+import { normalizeEqualizer } from '@/services/equalizer'
 import { normalizePlaybackRate } from '@/utils/playbackRate'
 import { applySleepAction, formatSleepRemaining } from '@/utils/sleepTimer'
 import {
@@ -208,9 +209,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [toast, setToast] = useState<string | null>(null)
   // v1.4.9-pre2 音频可视化：设置项来源（默认 false）。仅驱动「开关瞬间」的副作用。
   const audioVisualizerEnabled = settings.audioVisualizer
+  // v1.4.15-pre1 均衡器：整组设置归一化后使用。loadAppSettings 只做浅合并，
+  // 老数据里的 equalizer 可能是脏的（缺字段/超长数组/越界值），统一过一遍归一化。
+  const equalizer = useMemo(() => normalizeEqualizer(settings.equalizer), [settings.equalizer])
+  const equalizerEnabled = equalizer.enabled
+  // 可视化与均衡器都要接管 <audio> 元素（createMediaElementSource 对同一元素只能调一次），
+  // 因此「建立音频图」的条件是两者任一为真，而不是只看可视化。
+  const audioGraphNeeded = audioVisualizerEnabled || equalizerEnabled
   // 上一轮是否已把 audio 元素接进 Web Audio 图。用 ref 而非 state：它只影响副作用，
   // 不参与渲染；也不需要进依赖数组（否则关→开时会因为闭包旧值而重连失败）。
-  const visualizerAttachedRef = useRef(false)
+  const audioGraphAttachedRef = useRef(false)
   // v1.4.8-pre1 倍速：初值从持久化 settings 归一读取，非法值回退 1
   const [playbackRate, setPlaybackRateState] = useState<number>(() => normalizePlaybackRate(settings.playbackRate))
   const playbackRateRef = useRef(playbackRate)
@@ -296,36 +304,59 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         playableUrlRef.current = null
       }
       audio.src = ''
-      // v1.4.9-pre2：播放器卸载时释放分析分支并关闭 AudioContext
+      // v1.4.9-pre2：播放器卸载时释放分析分支；v1.4.15-pre1 起均衡器一并归零并断开，
+      // 十个滤波器节点不再挂在链路上（元素本身不交还，见 audioGraph.ts 文件头第 2 条）
       disposeAudioGraph()
-      visualizerAttachedRef.current = false
+      audioGraphAttachedRef.current = false
     }
   }, [])
 
-  // v1.4.9-pre2 音频可视化接线：
-  // - 开：接管 audio 元素建立分析图（同元素只建一次，重复调用是复用的），
-  //   随后触发一次重载，让当前曲目改从 Blob 播放（跨域直链拿不到频谱）。
-  // - 关：只断开分析分支，不重载、不中断播放——Blob 与直链对 <audio> 等价，
-  //   当前曲目继续放完；下一首起 resolveAudioPlayableUrl 会重新走直链。
+  // v1.4.9-pre2 音频可视化 / v1.4.15-pre1 均衡器接线：
+  // - 需要（可视化或均衡器任一开启）：接管 audio 元素建立音频图（同元素只建一次，
+  //   重复调用是复用的），随后触发一次重载，让当前曲目改从 Blob 播放（跨域直链拿不到频谱）。
+  //   analyser 参数由可视化单独决定——只开均衡器时分析节点不接入活路径，
+  //   但链尾仍会接到 destination（否则会静音）。
+  // - 都不需要：只断开分析分支并旁路均衡器，不重载、不中断播放——Blob 与直链对
+  //   <audio> 等价，当前曲目继续放完；下一首起 resolveAudioPlayableUrl 会重新走直链。
   // 延迟一帧是为了把 audio 元素的创建 effect 与「读设置」解耦，
   // 保证开关切换和首屏初始化都走同一条路径。
   useEffect(() => {
     const id = setTimeout(() => {
       const audio = audioRef.current
       if (!audio) return
-      if (audioVisualizerEnabled) {
+      if (audioGraphNeeded) {
         // resume 已在 ensureAudioGraph 内部触发（suspended 时），这里无需重复
-        const ctx = ensureAudioGraph(audio)
-        visualizerAttachedRef.current = ctx !== null
+        const ctx = ensureAudioGraph(audio, { analyser: audioVisualizerEnabled })
+        audioGraphAttachedRef.current = ctx !== null
         return
       }
-      if (visualizerAttachedRef.current) {
+      if (audioGraphAttachedRef.current) {
         disposeAudioGraph()
-        visualizerAttachedRef.current = false
+        audioGraphAttachedRef.current = false
       }
     }, 0)
     return () => clearTimeout(id)
-  }, [audioVisualizerEnabled])
+  }, [audioGraphNeeded, audioVisualizerEnabled])
+
+  // v1.4.15-pre1 均衡器接线：曲线或开关变化时把增益推给滤波器链。
+  // - 音频图已建立：只改 AudioParam，不重建节点也不重连，所以拖柱子/切预置都无缝；
+  // - 均衡器刚开启而图还没建：此时才接管元素建图（建图内部会把链尾接到 destination）。
+  // 建图失败时 ensureAudioGraph 返回 null 并已静默降级，播放不受影响。
+  // 延迟一帧与上一条 effect 同一口径，也保证「建图 → 写增益」的先后顺序。
+  useEffect(() => {
+    const id = setTimeout(() => {
+      const audio = audioRef.current
+      if (!audio) return
+      if (equalizerEnabled && !isAudioGraphReady()) {
+        const ctx = ensureAudioGraph(audio, { analyser: audioVisualizerEnabled })
+        audioGraphAttachedRef.current = ctx !== null
+      }
+      // 先定开关再写曲线：曲线在旁路态下也要记进图里，启用时立刻生效
+      setEqualizerEnabled(equalizerEnabled)
+      setEqualizerGains(equalizer.gains)
+    }, 0)
+    return () => clearTimeout(id)
+  }, [equalizer, equalizerEnabled, audioVisualizerEnabled])
 
   useEffect(() => {
     if (audioRef.current) {
@@ -485,7 +516,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
         // 移动端始终下载音频流转 Blob（绕过 Referer 防盗链），桌面端默认原样返回；
         // v1.4.9-pre2：桌面端开启可视化时也要 Blob（跨域直链拿不到频谱数据）
-        const playableUrl = await resolveAudioPlayableUrl(source.audioUrl, settings.audioVisualizer)
+        // 均衡器同样需要同源音频（Web Audio 图接管元素），故与可视化共用同一个条件
+        const playableUrl = await resolveAudioPlayableUrl(source.audioUrl, audioGraphNeeded)
         if (cancelled) {
           // 本次加载已被切歌/卸载取消：刚建出的 Blob URL 必须立刻释放，否则泄漏
           releaseAudioPlayableUrl(playableUrl)
@@ -528,7 +560,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [currentTrack?.bvid, currentTrack?.id, qualityPreference, settings.audioVisualizer])
+  }, [currentTrack?.bvid, currentTrack?.id, qualityPreference, audioGraphNeeded])
 
   // v1.4.8-pre1 倍速：state 变同步 audio + 持久化 settings，playbackRateRef 供 loadAndPlay 重设时使用
   useEffect(() => {

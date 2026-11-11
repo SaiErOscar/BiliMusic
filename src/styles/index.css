@@ -6490,3 +6490,208 @@ body {
 }
 
 
+
+/* ===== v1.4.15-pre1 均衡器设置抽屉 =====
+
+   只追加，不改上面任何一条规则。
+   外壳（浮层、卡片、标题栏、关闭按钮、body 滚动与浅色实心白面）直接复用
+   .ai-sheet__*，这里只补均衡器专属的四件零件：开关行、预设胶囊、十根柱子、底部操作行。
+   颜色只用项目里真实存在的 token（--color-* / --glass-*），不引用未定义变量。 */
+
+/* 抽屉比 AI 设置略宽：十根柱子横排，560px 下每根只剩 40px 可用宽度 */
+.eq-sheet {
+  width: min(680px, calc(100vw - 48px));
+}
+
+/* 柱子区自己带节奏，body 的 12px gap 在这里偏紧 */
+.eq-sheet__body {
+  gap: 14px;
+}
+
+/* ---- 总开关行 ---- */
+
+.eq-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.eq-switch-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.eq-switch-row__text strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.eq-switch-row__text span {
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+}
+
+/* 与设置页的 .settings-toggle 同一副长相，独立成 eq-* 以免改动设置页既有样式 */
+.eq-switch {
+  flex: none;
+  margin-left: auto;
+  width: 46px;
+  height: 26px;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: var(--color-muted);
+  cursor: pointer;
+  transition: background var(--duration-fast) ease, border-color var(--duration-fast) ease;
+}
+
+.eq-switch span {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-card-foreground);
+  transition: transform var(--duration-fast) ease;
+}
+
+.eq-switch--on {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+}
+
+.eq-switch--on span {
+  transform: translateX(20px);
+  background: var(--color-on-primary);
+}
+
+/* ---- 预设胶囊 ---- */
+
+.eq-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.eq-preset {
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--color-foreground);
+  font: 600 12px/1 var(--font-body);
+  cursor: pointer;
+  transition: background var(--duration-fast) ease, border-color var(--duration-fast) ease;
+}
+
+.eq-preset:hover {
+  background: var(--color-primary-light);
+}
+
+/* 选中态：描边 + 主色文字，不铺实心——九个胶囊里铺一个实心会压过柱子本身 */
+.eq-preset--on {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+/* 自定义不是可点的预设，只作状态标记 */
+span.eq-preset {
+  cursor: default;
+}
+
+/* ---- 十根柱子 ---- */
+
+/*
+ * 柱子在横排里竖起来：每格用 flex 定宽，range 旋转 -90° 后
+ * 用固定的高度/宽度换回视觉上的竖条（旋转后的盒子仍按未旋转尺寸占位，
+ * 必须显式给宽高并负向收边，否则十根会挤成一条线）。
+ */
+.eq-bands {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 10px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+}
+
+.eq-band {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.eq-band__value {
+  font: 600 11px/1 var(--font-body);
+  color: var(--color-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.eq-band__range {
+  /* 旋转后：宽 = 柱高，高 = 柱宽 */
+  width: 132px;
+  height: 22px;
+  margin: calc((132px - 22px) / -2) 0;
+  transform: rotate(-90deg);
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.eq-band__label {
+  font: 600 11px/1 var(--font-body);
+  color: var(--color-foreground);
+  opacity: 0.75;
+}
+
+/* ---- 底部操作行 ---- */
+
+.eq-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.eq-reset {
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  color: var(--color-foreground);
+  font: 600 12px/1 var(--font-body);
+  cursor: pointer;
+  transition: background var(--duration-fast) ease;
+}
+
+.eq-reset:hover {
+  background: var(--color-primary-light);
+}
+
+.eq-actions__hint {
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+}
+
+/* 浅色主题下玻璃底几乎透明，柱子区补一层实心面，避免与抽屉白底糊在一起 */
+[data-theme='light'] .eq-bands {
+  background: #f5f5f7;
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='light'] .eq-switch {
+  background: rgba(0, 0, 0, 0.14);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme='light'] .eq-switch--on {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
