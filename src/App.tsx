@@ -9,6 +9,7 @@ import { NowPlayingProvider } from '@/contexts/NowPlayingContext'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { AddToPlaylistProvider } from '@/contexts/AddToPlaylistContext'
 import LoginDialog from '@/components/LoginDialog'
+import GlobalShareSheet from '@/components/GlobalShareSheet'
 import MainLayout from '@/components/layout/MainLayout'
 import Discover from '@/pages/Discover'
 
@@ -70,6 +71,7 @@ export default function App() {
               </Route>
             </Routes>
             <GlobalLoginDialog />
+            <GlobalShareSheet />
           </AddToPlaylistProvider>
         </NowPlayingProvider>
       </PlayerProvider>

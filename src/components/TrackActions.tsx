@@ -1,7 +1,8 @@
-import { ListStart, Plus, Check } from 'lucide-react'
+import { ListStart, Plus, Check, QrCode } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import AddToPlaylistButton from '@/components/AddToPlaylistButton'
 import DownloadButton from '@/components/DownloadButton'
+import { openShare } from '@/services/shareStore'
 import type { Track } from '@/types'
 
 /**
@@ -32,6 +33,11 @@ export default function TrackActions({ track, size = 16 }: { track: Track; size?
       />
       <AddToPlaylistButton track={track} size={size} />
       <DownloadButton trackId={track.id} bvid={track.bvid || track.id} aid={track.aid} cid={track.cid} title={track.title} size={size} />
+      <ActionButton
+        title="分享二维码"
+        onClick={() => openShare({ kind: 'track', track })}
+        icon={<QrCode size={size} />}
+      />
     </div>
   )
 }

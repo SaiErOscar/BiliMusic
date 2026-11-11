@@ -13,6 +13,12 @@ export interface Track {
   isLiked: boolean
   likedAt?: string // 收藏时间，供云同步按 like/unlike 时间合并
   addedAt?: string // 加入歌单时间，供歌单内按加入时间排序
+  /**
+   * v1.4.15-pre5 本地音乐：该曲的本地文件绝对路径。
+   * 本地曲目复用 Track（bvid 留空），播放链路按此字段判断走 file:// 还是 B 站流。
+   * B 站曲目上恒为 undefined，旧记录同样没有这个字段。
+   */
+  localPath?: string
 }
 
 export interface Playlist {

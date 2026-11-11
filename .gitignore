@@ -5,6 +5,8 @@ design-system
 dist
 dist-electron
 dist-preview
+# 解包安装包做对比时产生的临时目录
+.tmp-*
 vite.preview.config.ts
 release
 node_modules

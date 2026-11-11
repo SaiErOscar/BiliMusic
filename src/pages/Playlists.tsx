@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowDownAZ, CheckSquare, ListMusic, Music, Pencil, Play, Square, Trash2, X, FolderHeart, Download, GripVertical, Clock, FileDown, FileUp } from 'lucide-react'
+import { ArrowDownAZ, CheckSquare, ListMusic, Music, Pencil, Play, QrCode, Square, Trash2, X, FolderHeart, Download, GripVertical, Clock, FileDown, FileUp } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import AddToPlaylistButton from '@/components/AddToPlaylistButton'
 import BatchDownloadDialog from '@/components/BatchDownloadDialog'
+import { openShare } from '@/services/shareStore'
 import { showBatchDialog } from '@/services/batchDownloadStore'
 import EditPlaylistDialog from '@/components/EditPlaylistDialog'
 import {
@@ -217,27 +218,48 @@ function PlaylistCard({ playlist, onMessage }: { playlist: Playlist; onMessage: 
         <h3>{playlist.name}</h3>
         <p>{playlist.tracks.length} 首歌曲</p>
         {playlist.description && <span>{playlist.description}</span>}
-        {canUseM3uFile && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8 }}>
+          {canUseM3uFile && (
+            <button
+              type="button"
+              title="导出为 M3U 播放列表"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '4px 9px', borderRadius: 999, border: '1px solid var(--glass-border)',
+                background: 'transparent', color: 'var(--color-muted)', fontSize: 11,
+                fontFamily: 'inherit', cursor: 'pointer',
+              }}
+              onClick={(e) => {
+                // 卡片整体是 Link，导出不能顺带跳进详情页
+                e.preventDefault()
+                e.stopPropagation()
+                void exportPlaylistAsM3u(playlist, onMessage)
+              }}
+            >
+              <FileDown size={13} />
+              导出 M3U
+            </button>
+          )}
           <button
             type="button"
-            title="导出为 M3U 播放列表"
+            title="分享二维码"
             style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8,
+              display: 'inline-flex', alignItems: 'center', gap: 5,
               padding: '4px 9px', borderRadius: 999, border: '1px solid var(--glass-border)',
               background: 'transparent', color: 'var(--color-muted)', fontSize: 11,
               fontFamily: 'inherit', cursor: 'pointer',
             }}
             onClick={(e) => {
-              // 卡片整体是 Link，导出不能顺带跳进详情页
+              // 同上：分享入口同样不能触发卡片跳转
               e.preventDefault()
               e.stopPropagation()
-              void exportPlaylistAsM3u(playlist, onMessage)
+              openShare({ kind: 'playlist', playlist })
             }}
           >
-            <FileDown size={13} />
-            导出 M3U
+            <QrCode size={13} />
+            分享
           </button>
-        )}
+        </div>
       </div>
     </Link>
   )
@@ -418,6 +440,10 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
                     导出 M3U
                   </button>
                 )}
+                <button className="am-action am-action--subtle" onClick={() => openShare({ kind: 'playlist', playlist })}>
+                  <QrCode size={16} />
+                  分享
+                </button>
                 <div style={{ position: 'relative' }}>
                   <button className="am-action am-action--subtle" onClick={() => setSortOpen(o => !o)}>
                     <ArrowDownAZ size={16} />

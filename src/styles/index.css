@@ -6695,3 +6695,97 @@ span.eq-preset {
   background: var(--color-primary);
   border-color: var(--color-primary);
 }
+
+/* ===== v1.4.15-pre4 分享二维码抽屉（只补 share-qr__* 零件，外壳复用 ai-sheet__*） ===== */
+
+.share-qr {
+  width: min(420px, calc(100vw - 48px));
+}
+
+.share-qr__body {
+  align-items: center;
+  gap: 14px;
+}
+
+.share-qr__notice {
+  width: 100%;
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: var(--color-primary-light);
+  color: var(--color-foreground);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.share-qr__error {
+  width: 100%;
+  margin: 0;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(229, 72, 77, 0.4);
+  color: #e5484d;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* 白底容器：二维码必须落在浅色实底上，深色主题里透明底扫不出来 */
+.share-qr__frame {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: var(--shadow-sm);
+}
+
+.share-qr__frame img {
+  display: block;
+  width: 240px;
+  height: 240px;
+  image-rendering: pixelated;
+}
+
+.share-qr__frame--loading {
+  width: 264px;
+  height: 264px;
+  color: #61666d;
+  font-size: 13px;
+}
+
+.share-qr__text {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--color-foreground);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.share-qr__actions {
+  display: flex;
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.share-qr__copy {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: #ffffff;
+  font: 600 13px/1 var(--font-body);
+  cursor: pointer;
+  transition: opacity var(--duration-fast) ease;
+}
+
+.share-qr__copy:hover {
+  opacity: 0.88;
+}

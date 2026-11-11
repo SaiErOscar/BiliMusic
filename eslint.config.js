@@ -37,6 +37,9 @@ export default [
       'prefer-const': 'error',
       'no-var': 'error',
       'no-undef': 'off',
+      // 基础版 no-redeclare 不认识 TypeScript 函数重载，会把合法的重载声明误判成重复定义
+      // （如 src/services/shareCode.ts 的 buildShare）。TS 已在编译期做同名冲突检查，这里关掉。
+      'no-redeclare': 'off',
       'preserve-caught-error': 'off',
       'no-useless-assignment': 'off',
     },
