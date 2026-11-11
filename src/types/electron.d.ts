@@ -317,6 +317,10 @@ declare global {
       saveBackupFile?: (content: string) => Promise<{ ok: boolean; canceled?: boolean; path?: string; message?: string }>
       openBackupFile?: () => Promise<{ ok: boolean; canceled?: boolean; path?: string; content?: string; message?: string }>
       deleteBackupFile?: (filePath: string) => Promise<{ ok: boolean; message?: string }>
+      /** v1.4.15 歌单 M3U：另存为对话框 + 写 UTF-8 文本；取消时 canceled=true */
+      playlistExportM3u?: (payload: { name: string; content: string }) => Promise<{ ok: boolean; canceled?: boolean; path?: string; message?: string }>
+      /** v1.4.15 歌单 M3U：打开对话框 + 读回文本，解析在渲染层 */
+      playlistImportM3u?: () => Promise<{ ok: boolean; canceled?: boolean; path?: string; content?: string; message?: string }>
       platform: string
       persistentStorage?: PersistentStorageApi
       /** v1.4.13-pre4 WorkBuddy 国内/国际版 */

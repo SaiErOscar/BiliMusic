@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowDownAZ, CheckSquare, ListMusic, Music, Pencil, Play, Square, Trash2, X, FolderHeart, Download, GripVertical, Clock } from 'lucide-react'
+import { ArrowDownAZ, CheckSquare, ListMusic, Music, Pencil, Play, Square, Trash2, X, FolderHeart, Download, GripVertical, Clock, FileDown, FileUp } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import AddToPlaylistButton from '@/components/AddToPlaylistButton'
 import BatchDownloadDialog from '@/components/BatchDownloadDialog'
@@ -16,6 +16,7 @@ import {
 } from '@/components/AppleMusicPage'
 import VirtualList from '@/components/VirtualList'
 import {
+  createPlaylist,
   deletePlaylist,
   getPlaylist,
   updatePlaylist,
@@ -26,7 +27,75 @@ import {
   reorderPlaylistTracks,
   sortPlaylistTracks,
 } from '@/utils/storage'
+import { platform } from '@/platform'
+import { buildImportedPlaylist, buildM3u, parseM3u } from '@/services/m3u'
 import type { Playlist } from '@/types'
+
+/**
+ * v1.4.15 歌单 M3U 导出/导入。
+ * 能力探测与降级沿用项目既有口径（if (platform.xxx)）：非 Electron 环境
+ * playlistFile 为 undefined，按钮自然不渲染，页面布局不受影响。
+ */
+const canUseM3uFile = Boolean(platform.playlistFile?.playlistExportM3u && platform.playlistFile?.playlistImportM3u)
+
+/** 导出：成功给出文件路径，取消不打扰用户 */
+async function exportPlaylistAsM3u(playlist: Playlist, onMessage: (text: string) => void) {
+  const cap = platform.playlistFile
+  if (!cap?.playlistExportM3u) return
+  if (playlist.tracks.length === 0) {
+    onMessage('这个歌单还没有歌曲，没有可导出的内容')
+    return
+  }
+  try {
+    const res = await cap.playlistExportM3u({ name: playlist.name, content: buildM3u(playlist) })
+    if (res?.canceled) return
+    if (res?.ok) onMessage('已导出 ' + playlist.tracks.length + ' 首到：' + (res.path || '所选位置'))
+    else onMessage('导出失败：' + (res?.message || '写入文件失败'))
+  } catch (err) {
+    onMessage('导出失败：' + (err instanceof Error ? err.message : String(err)))
+  }
+}
+
+/** 导入：成功几首、跳过几行都说清楚；成功返回 true 供调用方刷新列表 */
+async function importPlaylistFromM3u(onMessage: (text: string) => void): Promise<boolean> {
+  const cap = platform.playlistFile
+  if (!cap?.playlistImportM3u) return false
+  try {
+    const res = await cap.playlistImportM3u()
+    if (res?.canceled) return false
+    if (!res?.ok || typeof res.content !== 'string') {
+      onMessage('导入失败：' + (res?.message || '读取文件失败'))
+      return false
+    }
+    const parsed = parseM3u(res.content)
+    const fileName = res.path ? res.path.split(/[\\/]/).pop() : undefined
+    const result = buildImportedPlaylist(parsed, fileName)
+    if (result.tracks.length === 0) {
+      onMessage(parsed.skipped > 0
+        ? '文件里没有可识别的播放地址（跳过 ' + parsed.skipped + ' 行），未创建歌单'
+        : '文件里没有可识别的播放地址，未创建歌单')
+      return false
+    }
+    // 元数据（封面/时长/播放量）留空，等播放或后续补全；这里只做文件往返
+    const created = createPlaylist({ name: result.name })
+    updatePlaylist({ ...created, tracks: result.tracks })
+    /*
+     * v1.4.15-pre3：非 B 站地址（本地文件、其它站点）本轮不做解析，条目照样保留，
+     * 但播放链路只认 bvid 与 B 站地址，这类条目点开会播不了。
+     * 按项目「宁可少做也不猜」的口径，不擅自过滤掉用户文件里的内容，
+     * 而是把这件事**明确说出来**——静默留下一批播不了的条目，用户会以为是导入坏了。
+     */
+    const unbvidCount = result.tracks.filter((t) => !t.bvid).length
+    const parts: string[] = ['已导入 ' + result.imported + ' 首到歌单「' + result.name + '」']
+    if (unbvidCount > 0) parts.push(unbvidCount + ' 首不是 B 站地址，暂不能播放')
+    if (parsed.skipped > 0) parts.push('跳过 ' + parsed.skipped + ' 行无法识别的地址')
+    onMessage(parts.join('；'))
+    return true
+  } catch (err) {
+    onMessage('导入失败：' + (err instanceof Error ? err.message : String(err)))
+    return false
+  }
+}
 
 export default function Playlists() {
   const { playlistId } = useParams()
@@ -37,6 +106,19 @@ function PlaylistOverview() {
   const navigate = useNavigate()
   const [playlists, setPlaylists] = useState<Playlist[]>(() => loadPlaylists())
   const [sortOpen, setSortOpen] = useState(false)
+  const [m3uMessage, setM3uMessage] = useState('')
+  const [importing, setImporting] = useState(false)
+
+  const handleImportM3u = async () => {
+    setImporting(true)
+    try {
+      const ok = await importPlaylistFromM3u(setM3uMessage)
+      // createPlaylist/updatePlaylist 会广播 PLAYLISTS_CHANGED_EVENT，列表由订阅自动刷新
+      if (ok) setPlaylists(loadPlaylists())
+    } finally {
+      setImporting(false)
+    }
+  }
 
   useEffect(() => {
     const sync = () => setPlaylists(loadPlaylists())
@@ -59,12 +141,22 @@ function PlaylistOverview() {
         image={heroImage}
         tone="purple"
         action={(
-          <ActionButton tone="subtle" onClick={() => navigate('/bili-favorites')}>
-            <FolderHeart size={16} />
-            B站收藏夹
-          </ActionButton>
+          <>
+            {canUseM3uFile && (
+              <ActionButton tone="subtle" onClick={() => { void handleImportM3u() }}>
+                <FileUp size={16} />
+                {importing ? '导入中…' : '导入 M3U'}
+              </ActionButton>
+            )}
+            <ActionButton tone="subtle" onClick={() => navigate('/bili-favorites')}>
+              <FolderHeart size={16} />
+              B站收藏夹
+            </ActionButton>
+          </>
         )}
       />
+
+      {m3uMessage && <M3uNotice text={m3uMessage} onClose={() => setM3uMessage('')} />}
 
       {playlists.length === 0 ? (
         <EmptyLibrary icon={<ListMusic size={40} />} title="还没有歌单" subtitle="新建歌单后，会立即显示在这里和侧边栏中。" />
@@ -105,7 +197,7 @@ function PlaylistOverview() {
         >
           <div className="playlist-grid">
             {playlists.map((playlist) => (
-              <PlaylistCard key={playlist.id} playlist={playlist} />
+              <PlaylistCard key={playlist.id} playlist={playlist} onMessage={setM3uMessage} />
             ))}
           </div>
         </MusicSection>
@@ -114,7 +206,7 @@ function PlaylistOverview() {
   )
 }
 
-function PlaylistCard({ playlist }: { playlist: Playlist }) {
+function PlaylistCard({ playlist, onMessage }: { playlist: Playlist; onMessage: (text: string) => void }) {
   const cover = playlist.coverUrl || playlist.tracks[0]?.coverUrl
   return (
     <Link to={`/playlists/${playlist.id}`} className="playlist-card">
@@ -125,8 +217,54 @@ function PlaylistCard({ playlist }: { playlist: Playlist }) {
         <h3>{playlist.name}</h3>
         <p>{playlist.tracks.length} 首歌曲</p>
         {playlist.description && <span>{playlist.description}</span>}
+        {canUseM3uFile && (
+          <button
+            type="button"
+            title="导出为 M3U 播放列表"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8,
+              padding: '4px 9px', borderRadius: 999, border: '1px solid var(--glass-border)',
+              background: 'transparent', color: 'var(--color-muted)', fontSize: 11,
+              fontFamily: 'inherit', cursor: 'pointer',
+            }}
+            onClick={(e) => {
+              // 卡片整体是 Link，导出不能顺带跳进详情页
+              e.preventDefault()
+              e.stopPropagation()
+              void exportPlaylistAsM3u(playlist, onMessage)
+            }}
+          >
+            <FileDown size={13} />
+            导出 M3U
+          </button>
+        )}
       </div>
     </Link>
+  )
+}
+
+/** 导入/导出的结果条：一句话说清成功几首或失败原因，可手动关闭 */
+function M3uNotice({ text, onClose }: { text: string; onClose: () => void }) {
+  return (
+    <div
+      role="status"
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        marginBottom: 16, padding: '10px 14px', borderRadius: 12,
+        border: '1px solid var(--glass-border)', background: 'var(--glass-bg-heavy)',
+        color: 'var(--color-foreground)', fontSize: 13, lineHeight: 1.5,
+      }}
+    >
+      <span>{text}</span>
+      <button
+        type="button"
+        onClick={onClose}
+        title="关闭"
+        style={{ display: 'inline-flex', alignItems: 'center', padding: 2, border: 'none', borderRadius: 6, background: 'transparent', color: 'var(--color-muted)', cursor: 'pointer' }}
+      >
+        <X size={15} />
+      </button>
+    </div>
   )
 }
 
@@ -138,6 +276,7 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
   const [editOpen, setEditOpen] = useState(false)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [sortOpen, setSortOpen] = useState(false)
+  const [m3uMessage, setM3uMessage] = useState('')
   const player = usePlayer()
   const navigate = useNavigate()
 
@@ -273,6 +412,12 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
                   <Download size={16} />
                   下载全部
                 </button>
+                {canUseM3uFile && (
+                  <button className="am-action am-action--subtle" onClick={() => { void exportPlaylistAsM3u(playlist, setM3uMessage) }}>
+                    <FileDown size={16} />
+                    导出 M3U
+                  </button>
+                )}
                 <div style={{ position: 'relative' }}>
                   <button className="am-action am-action--subtle" onClick={() => setSortOpen(o => !o)}>
                     <ArrowDownAZ size={16} />
@@ -312,6 +457,8 @@ function PlaylistDetail({ playlistId }: { playlistId: string }) {
           </>
         )}
       />
+
+      {m3uMessage && <M3uNotice text={m3uMessage} onClose={() => setM3uMessage('')} />}
 
       {tracks.length === 0 ? (
         <EmptyLibrary icon={<Music size={40} />} title="歌单是空的" subtitle="歌单已经创建并持久化保存，后续可以把歌曲加入到这里。" />

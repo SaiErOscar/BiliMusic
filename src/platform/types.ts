@@ -236,6 +236,16 @@ export type PlatformWebdavConfig = Pick<
   'getWebdavConfig' | 'configureWebdav' | 'testWebdav'
 >
 
+/**
+ * 歌单 M3U 文件能力（桌面专属）：导出走「另存为」写 UTF-8 文本，导入走「打开」读回文本。
+ * 主进程只搬文本，M3U 的生成与解析都在渲染层（src/services/m3u.ts）。
+ * 字段可选，缺失时歌单页自然隐藏导出/导入入口。
+ */
+export type PlatformPlaylistFile = Pick<
+  Window['electronAPI'],
+  'playlistExportM3u' | 'playlistImportM3u'
+>
+
 
 /**
  * MV 导出能力（v1.4.6，桌面专属）：单首播放界面 MP4 导出、取消与进度订阅。
@@ -312,6 +322,8 @@ export interface Platform {
   updater?: PlatformUpdater
   backup?: PlatformBackup
   webdavConfig?: PlatformWebdavConfig
+  /** v1.4.15 歌单 M3U 导出/导入（系统文件对话框，桌面专属） */
+  playlistFile?: PlatformPlaylistFile
   mvExport?: PlatformMvExport
   mediaNotify?: PlatformMediaNotify
   /** v1.4.8-pre1 桌面全局媒体键 */

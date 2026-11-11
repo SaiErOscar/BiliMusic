@@ -10,6 +10,7 @@ import { registerMiniWindowHandlers, onMainWindowActivityChanged, destroyLyricWi
 import { registerSystemFontsHandlers } from './systemFonts'
 import { registerColorPickerHandlers } from './colorPicker'
 import { registerBackupHandlers } from './backup'
+import { registerPlaylistFileHandlers } from './playlistFile'
 import { registerNativeDialogHandlers } from './nativeDialog'
 import { registerAiHandlers } from './ai'
 import { registerProfileHandlers } from './profile'
@@ -846,6 +847,8 @@ app.whenReady().then(() => {
   registerSystemFontsHandlers()
   registerColorPickerHandlers()
   registerBackupHandlers()
+  // v1.4.15 歌单 M3U 导出/导入（系统文件对话框 + 文本搬运）
+  registerPlaylistFileHandlers()
   // v1.4.13-pre14 原生确认框：渲染层不再用 window.confirm，改由主进程弹系统对话框
   registerNativeDialogHandlers()
   registerMvExportHandlers()

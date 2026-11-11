@@ -201,6 +201,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveBackupFile: (content) => ipcRenderer.invoke('backup:saveFile', content),
   openBackupFile: () => ipcRenderer.invoke('backup:openFile'),
   deleteBackupFile: (filePath) => ipcRenderer.invoke('backup:deleteFile', filePath),
+  // v1.4.15 歌单 M3U 导出/导入：系统「另存为 / 打开」对话框 + 文本搬运
+  playlistExportM3u: (payload) => ipcRenderer.invoke('playlist:exportM3u', payload),
+  playlistImportM3u: () => ipcRenderer.invoke('playlist:importM3u'),
   // v1.4.8-pre1 桌面全局媒体键（globalShortcut）
   setMediaKeysEnabled: (enabled) => ipcRenderer.invoke('mediaKeys:set-enabled', enabled),
   getMediaKeysEnabled: () => ipcRenderer.invoke('mediaKeys:get-enabled'),

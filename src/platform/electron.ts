@@ -151,6 +151,13 @@ export const electronPlatform: Platform = {
       testWebdav: a.testWebdav,
     }
   },
+  /** v1.4.15：歌单 M3U 导出/导入（系统文件对话框），缺失时歌单页隐藏入口 */
+  get playlistFile() {
+    const a = api()
+    const exportM3u = a?.playlistExportM3u
+    const importM3u = a?.playlistImportM3u
+    return exportM3u && importM3u ? { playlistExportM3u: exportM3u, playlistImportM3u: importM3u } : undefined
+  },
   /** v1.4.6：MV 导出（离屏渲染 + ffmpeg 稀疏合成），桌面端专属 */
   /** v1.4.8-pre1：桌面全局媒体键（globalShortcut），仅 Electron 提供，移动端无 */
   get mediaKeys() {
