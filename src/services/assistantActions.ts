@@ -500,6 +500,20 @@ const SETTING_SPECS: SettingSpec[] = [
     param: req('audioVisualizer', 'boolean', '播放页是否显示频谱可视化'),
   },
   {
+    field: 'crossfadeEnabled',
+    label: '淡入淡出切歌',
+    aliases: ['淡入淡出', '交叉淡化', '切歌渐变'],
+    param: req('crossfadeEnabled', 'boolean', '切歌时是否淡出淡入'),
+  },
+  {
+    field: 'crossfadeSeconds',
+    label: '淡入淡出时长',
+    aliases: ['渐变时长', '切歌时长'],
+    // number 而非 enum：允许任意 1~10 秒。钳制在消费侧（normalizeCrossfadeSeconds），
+    // 这里不做枚举是为了不把「3.5 秒」这类合法输入挡在门外。
+    param: req('crossfadeSeconds', 'number', '淡入淡出总时长（秒，1~10）'),
+  },
+  {
     field: 'lyricBilingual',
     label: '歌词双语',
     aliases: ['双语歌词'],

@@ -157,6 +157,20 @@ export interface AppSettings {
    * 老用户没有该字段时由 loadAppSettings 的默认值合并兜底成 DEFAULT_EQUALIZER。
    */
   equalizer: EqualizerSettings
+  /**
+   * v1.4.15-pre2 淡入淡出切歌：切歌时当前曲淡出、新曲淡入。
+   *
+   * 默认关闭：关闭时走的是与实现本功能前**完全一致**的零延迟硬切，
+   * 升级用户听感零变化；且关闭时不接管播放链路（与 audioVisualizer / equalizer 同一口径）。
+   */
+  crossfadeEnabled: boolean
+  /**
+   * v1.4.15-pre2 淡入淡出时长（秒），合法范围 1~10，淡出与淡入各占一半。
+   *
+   * 落盘值可能是任意脏数据（非有限值 / 越界），消费侧统一走
+   * audioGraph 的 normalizeCrossfadeSeconds 钳制后再用。
+   */
+  crossfadeSeconds: number
 }
 
 /**

@@ -80,6 +80,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   aiExternalRecommend: false,
   // v1.4.15-pre1 均衡器默认关闭：关闭时不接管播放链路，升级用户听感零变化。
   equalizer: DEFAULT_EQUALIZER,
+  // v1.4.15-pre2 淡入淡出切歌默认关闭：关闭即零延迟硬切，升级用户听感零变化。
+  // 时长默认 3 秒（淡出 1.5s + 淡入 1.5s），合法范围 1~10 秒。
+  crossfadeEnabled: false,
+  crossfadeSeconds: 3,
 }
 
 function notifySettingsChanged() {

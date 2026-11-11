@@ -604,6 +604,31 @@ export default function Settings() {
             <SettingsRow label="自动播放" description="播放结束时自动播放推荐">
               <ToggleSwitch checked={settings.autoPlay} onChange={() => setAppSettings({ autoPlay: !settings.autoPlay })} />
             </SettingsRow>
+            {/*
+              v1.4.15-pre2 淡入淡出切歌。
+              两行合并成一行：开关与时长是同一件事的两个参数，拆成两行会把「播放」撑到 7 行
+              （上限即 7），失去再加播放项的余量。
+              时长用下拉而非数字输入：合法区间只有 1~10 秒的整数档，
+              下拉天然杜绝越界输入，也省掉一次校验失败的往返。
+            */}
+            <SettingsRow
+              label="淡入淡出切歌"
+              description={settings.crossfadeEnabled ? '切歌时淡出淡入，不会突然切换' : '切歌时直接切换'}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {settings.crossfadeEnabled && (
+                  <StyledSelect
+                    value={String(settings.crossfadeSeconds)}
+                    onChange={(v) => setAppSettings({ crossfadeSeconds: Number(v) })}
+                    options={['1', '2', '3', '4', '5', '6', '8', '10']}
+                  />
+                )}
+                <ToggleSwitch
+                  checked={settings.crossfadeEnabled}
+                  onChange={() => setAppSettings({ crossfadeEnabled: !settings.crossfadeEnabled })}
+                />
+              </div>
+            </SettingsRow>
             {platform.mediaKeys && (
               <SettingsRow
                 label="全局媒体键"

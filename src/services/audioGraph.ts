@@ -54,9 +54,48 @@ export const SPECTRUM_USABLE_RATIO = 0.72
 /** 均衡器旁路时写入的增益（全 0 = 直通）。模块级常量，避免每次旁路都新建数组。 */
 const BYPASS_GAINS: readonly number[] = new Array<number>(EQ_BAND_COUNT).fill(0)
 
+/** v1.4.15-pre2 输出增益的满值（1 = 不改变音量）。 */
+export const MASTER_GAIN_FULL = 1
+
+/** v1.4.15-pre2 输出增益的静音值。 */
+export const MASTER_GAIN_SILENT = 0
+
+/** 淡入淡出时长的合法范围（秒）。设置项在消费侧按此钳制。 */
+export const CROSSFADE_MIN_SECONDS = 1
+export const CROSSFADE_MAX_SECONDS = 10
+/** 无法判断时的回退时长（秒），与 DEFAULT_APP_SETTINGS.crossfadeSeconds 一致。 */
+export const DEFAULT_CROSSFADE_SECONDS = 3
+
+/**
+ * 把任意脏输入钳制成合法的淡入淡出时长（秒）。
+ *
+ * 非有限值（NaN / Infinity / undefined）回退默认 3 秒；越界钳到 1~10 秒。
+ * 设置项从 localStorage 来，可能是任意脏数据，消费侧必须过这一道。
+ */
+export function normalizeCrossfadeSeconds(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value)
+  // NaN / 非数字：完全无法判断，回退默认 3 秒
+  if (Number.isNaN(n)) return DEFAULT_CROSSFADE_SECONDS
+  // ±Infinity 是明确的「越界」，按方向钳到边界而不是回退默认值
+  if (n === Infinity) return CROSSFADE_MAX_SECONDS
+  if (n === -Infinity) return CROSSFADE_MIN_SECONDS
+  if (n <= CROSSFADE_MIN_SECONDS) return CROSSFADE_MIN_SECONDS
+  if (n >= CROSSFADE_MAX_SECONDS) return CROSSFADE_MAX_SECONDS
+  return n
+}
+
 interface AudioGraph {
   ctx: AudioContext
   source: MediaElementAudioSourceNode
+  /** v1.4.15-pre2 输出增益节点（链尾，紧接 destination）；创建失败时为 null（无淡入淡出） */
+  masterGain: GainNode | null
+  /**
+   * 输出增益的**目标值**（1 = 满值，0 = 静音）。
+   * 渐变进行中记录的是终点；之所以单独存一份，是因为 AudioParam.value 在
+   * 排定自动化之后不会立刻变成目标值（真实浏览器要等时间轴走到），
+   * 直接读它会让「已经是目标值就别再写」这个判断失效。
+   */
+  masterGainValue: number
   /** 分析节点；创建失败时为 null（可视化降级，播放与均衡器照常） */
   analyser: AnalyserNode | null
   /** 十段均衡滤波器；创建失败时为空数组（整组丢弃，退回直通链路） */
@@ -106,6 +145,22 @@ export function isAudioGraphReady(): boolean {
  * 任何一步失败就整组丢弃并返回空数组：只建出半个链会改变频响，
  * 而「没有均衡器」是安全且听得出来的降级。
  */
+/**
+ * 建输出增益节点（淡入淡出用），失败返回 null。
+ *
+ * 增益初值必须是 1：节点常驻链路，初值不是 1 就等于凭空改了音量。
+ */
+function createMasterGain(ctx: AudioContext): GainNode | null {
+  try {
+    const gain = ctx.createGain()
+    gain.gain.value = MASTER_GAIN_FULL
+    return gain
+  } catch (e) {
+    console.warn('[audioGraph] 创建输出增益节点失败，淡入淡出已禁用：', e)
+    return null
+  }
+}
+
 function createEqualizerFilters(ctx: AudioContext): BiquadFilterNode[] {
   const filters: BiquadFilterNode[] = []
   try {
@@ -133,7 +188,7 @@ function createEqualizerFilters(ctx: AudioContext): BiquadFilterNode[] {
  * 断开重连会在切换瞬间产生可听见的断音。
  */
 function wireChain(g: AudioGraph, analyserActive: boolean): void {
-  const { ctx, source, filters, analyser } = g
+  const { ctx, source, filters, analyser, masterGain } = g
 
   // 重接前先断干净：同一条边连两次会让信号翻倍
   try { source.disconnect() } catch { /* 已断开 */ }
@@ -143,6 +198,9 @@ function wireChain(g: AudioGraph, analyserActive: boolean): void {
   if (analyser) {
     try { analyser.disconnect() } catch { /* 已断开 */ }
   }
+  if (masterGain) {
+    try { masterGain.disconnect() } catch { /* 已断开 */ }
+  }
 
   let node: AudioNode = source
   for (const filter of filters) {
@@ -150,17 +208,25 @@ function wireChain(g: AudioGraph, analyserActive: boolean): void {
     node = filter
   }
 
-  if (analyser && analyserActive) {
+  const useAnalyser = analyser !== null && analyserActive
+  if (useAnalyser) {
     node.connect(analyser)
-    analyser.connect(ctx.destination)
-    g.analyserActive = true
+    node = analyser
+  }
+
+  // 链尾统一落到 masterGain → destination。
+  // 淡入淡出只靠这个节点，而「分析节点是否在活路径上」是两条不同分支，
+  // 任何一条绕过 masterGain 都会让兜底路径失去淡入淡出能力（甚至静音）。
+  // 建不出增益节点时才退回直连 destination——元素已被接管，链尾悬空 = 整条链路静音。
+  if (masterGain) {
+    node.connect(masterGain)
+    masterGain.connect(ctx.destination)
+    g.analyserActive = useAnalyser
     return
   }
 
-  // 关键分支：没有可用的分析节点（或可视化没开）时，链尾必须直接落到 destination。
-  // 元素已被接管，链尾悬空 = 整条播放链路静音。
   node.connect(ctx.destination)
-  g.analyserActive = false
+  g.analyserActive = useAnalyser
 }
 
 /**
@@ -246,6 +312,8 @@ export function ensureAudioGraph(
     ctx,
     source,
     analyser,
+    masterGain: createMasterGain(ctx),
+    masterGainValue: MASTER_GAIN_FULL,
     filters: createEqualizerFilters(ctx),
     eqGains: normalizeGains([]),
     eqEnabled: false,
@@ -316,6 +384,179 @@ export function setEqualizerEnabled(enabled: boolean): void {
   applyGains(graph)
 }
 
+// ===== v1.4.15-pre2 淡入淡出切歌 =====
+//
+// 只改 masterGain.gain 这个 AudioParam，不重连任何节点：重连会在切换瞬间断音。
+// 渐变一律用 setValueAtTime(当前值) + linearRampToValueAtTime(目标值)：
+// - 先写当前值，是从「渐变中途」再次发起时曲线连续的保证（不会从旧起点跳变）；
+// - 用 linear 而非 exponential：exponential 的终点不能是 0，而淡出必须能到 0。
+
+/** 把 AudioParam 的当前值钳到合法范围，供渐变起点使用。 */
+function currentGainValue(param: AudioParam): number {
+  const v = param.value
+  return Number.isFinite(v) ? v : MASTER_GAIN_FULL
+}
+
+/** 取消该参数上已排定的自动化事件（作废旧渐变）。 */
+function cancelScheduled(param: AudioParam, when: number): void {
+  try {
+    param.cancelScheduledValues(when)
+  } catch { /* 老实现没有该方法：忽略，后面的 setValueAtTime 仍会覆盖 */ }
+}
+
+/**
+ * 立刻把输出增益设为指定值（不做渐变）。
+ *
+ * 已是目标值时**完全不碰 AudioParam**：淡入淡出关闭的路径走这里，
+ * 必须保证「关闭时一次自动化调用都不产生」，否则就不再是零延迟硬切。
+ */
+function setMasterGainValue(g: AudioGraph, value: number): void {
+  const node = g.masterGain
+  if (!node) return
+  try {
+    const param = node.gain
+    // 目标值一致就完全不碰 AudioParam（关闭淡入淡出的路径必须零自动化调用）
+    if (g.masterGainValue === value && param.value === value) return
+    const now = g.ctx.currentTime
+    const safeNow = Number.isFinite(now) ? now : 0
+    cancelScheduled(param, safeNow)
+    param.setValueAtTime(value, safeNow)
+    param.value = value
+    g.masterGainValue = value
+  } catch { /* 节点已失效：忽略，不影响播放 */ }
+}
+
+/** 复位输出增益到满值（切歌取消、释放、降级时用）。 */
+function resetMasterGain(g: AudioGraph): void {
+  setMasterGainValue(g, MASTER_GAIN_FULL)
+}
+
+/**
+ * 在 seconds 秒内把输出增益从**当前值**线性渐变到 target。
+ *
+ * 返回 false 表示没有可用的增益节点（未建图 / 建节点失败），调用方应直接硬切。
+ * 任何一步抛错都被吞掉：淡入淡出是锦上添花，绝不能让它把播放搞挂。
+ */
+export function fadeMasterGain(target: number, seconds: number): boolean {
+  const g = graph
+  if (!g || !g.masterGain) return false
+  const dur = normalizeCrossfadeSeconds(seconds)
+  try {
+    const param = g.masterGain.gain
+    const now = g.ctx.currentTime
+    const safeNow = Number.isFinite(now) ? now : 0
+    cancelScheduled(param, safeNow)
+    // 起点写当前值：从渐变中途再次发起时曲线保持连续
+    param.setValueAtTime(currentGainValue(param), safeNow)
+    param.linearRampToValueAtTime(target, safeNow + dur)
+    g.masterGainValue = target
+    return true
+  } catch (e) {
+    console.warn('[audioGraph] 输出增益渐变失败，本次改用硬切：', e)
+    return false
+  }
+}
+
+/** 切歌编排的结果。 */
+export type CrossfadeOutcome =
+  /** 完成了淡出 → 切换 → 淡入 */
+  | 'crossfaded'
+  /** 未启用淡入淡出（或无可用音频图）：零延迟硬切，没有产生任何渐变 */
+  | 'immediate'
+  /** 期间又切了别的歌：本次作废，不执行切换 */
+  | 'superseded'
+  /** 渐变过程中出错：已退回硬切，播放不受影响 */
+  | 'degraded'
+
+/** 本次切歌的序号。每次 runCrossfade 递增，旧任务据此发现自己已过期。 */
+let crossfadeSeq = 0
+
+/** runCrossfade 的参数。 */
+export interface CrossfadeOptions {
+  /** 是否启用淡入淡出。false 时同步立刻执行 swap，行为与未实现本功能时完全一致 */
+  enabled: boolean
+  /** 总时长（秒），淡出与淡入各占一半；越界由 normalizeCrossfadeSeconds 钳制 */
+  seconds: number
+  /** 真正的换曲动作（换 src + 起播） */
+  swap: () => void | Promise<void>
+}
+
+function delay(ms: number): Promise<void> {
+  const wait = Number.isFinite(ms) && ms > 0 ? ms : 0
+  if (wait === 0) return Promise.resolve()
+  return new Promise<void>((resolve) => { setTimeout(resolve, wait) })
+}
+
+/**
+ * 淡入淡出切歌：先淡出（总时长的一半）→ 执行 swap 换新曲 → 淡入（另一半）。
+ *
+ * 关键约束：
+ * - 关闭 / 无音频图 / 建不出增益节点 → 直接 swap，**不做任何渐变调用**，零延迟；
+ * - 期间又发起了一次切歌（seq 变化）→ 本次立刻作废，不执行 swap、不淡入，
+ *   增益交给最新那次接管（新一次从当前值起渐变，不会跳变）；
+ * - swap 抛错或渐变抛错 → 复位增益并确保 swap 至少执行一次，返回 degraded。
+ *
+ * 本函数不抛错。
+ */
+export async function runCrossfade(options: CrossfadeOptions): Promise<CrossfadeOutcome> {
+  const seq = ++crossfadeSeq
+  const { enabled, seconds, swap } = options
+  const g = graph
+
+  // 关闭或没有可用音频图：与既有行为完全一致——零延迟硬切。
+  // 这里刻意不调用任何渐变 API（连 setValueAtTime 都只在增益不等于满值时才写）。
+  if (!enabled || !g || !g.masterGain) {
+    resetMasterGainIfAny(g)
+    await swap()
+    return 'immediate'
+  }
+
+  const half = normalizeCrossfadeSeconds(seconds) / 2
+  let swapped = false
+
+  try {
+    if (!fadeMasterGain(MASTER_GAIN_SILENT, half)) {
+      // 渐变起不来（参数异常）：退回硬切
+      await swap()
+      return 'degraded'
+    }
+    await delay(half * 1000)
+    if (seq !== crossfadeSeq) return 'superseded'
+
+    await swap()
+    swapped = true
+    if (seq !== crossfadeSeq) return 'superseded'
+
+    fadeMasterGain(MASTER_GAIN_FULL, half)
+    return 'crossfaded'
+  } catch (e) {
+    console.warn('[audioGraph] 淡入淡出切歌失败，已退回普通播放：', e)
+    if (seq === crossfadeSeq) {
+      resetMasterGainIfAny(graph)
+      if (!swapped) {
+        try { await swap() } catch { /* 已尽力，交给上层处理 */ }
+      }
+    }
+    return 'degraded'
+  }
+}
+
+/** 取当前输出增益值；无图时返回满值。供调试与测试断言。 */
+export function getMasterGainValue(): number {
+  return graph ? graph.masterGainValue : MASTER_GAIN_FULL
+}
+
+/** 放弃进行中的渐变并把增益复位到满值（不换曲）。 */
+export function cancelCrossfade(): void {
+  crossfadeSeq += 1
+  resetMasterGainIfAny(graph)
+}
+
+/** 内部小工具：graph 可能为 null，统一在这里兜住。 */
+function resetMasterGainIfAny(g: AudioGraph | null): void {
+  if (g) resetMasterGain(g)
+}
+
 /**
  * 释放分析分支并旁路均衡器，但**保留**已接管的主链路。
  *
@@ -329,6 +570,8 @@ export function disposeAudioGraph(): void {
   if (!graph) return
   graph.eqEnabled = false
   applyGains(graph)
+  // 输出增益必须复位：若恰好停在淡出中途（增益 0），保留链路就等于永久静音
+  resetMasterGain(graph)
   // 只有分析节点确实还挂在活路径上时才重接线：无谓的断开重连会在切换瞬间产生断音
   if (graph.analyserActive) wireChain(graph, false)
 }
@@ -344,6 +587,9 @@ export function closeAudioGraph(): void {
   }
   if (g.analyser) {
     try { g.analyser.disconnect() } catch { /* 已断开 */ }
+  }
+  if (g.masterGain) {
+    try { g.masterGain.disconnect() } catch { /* 已断开 */ }
   }
   void g.ctx.close().catch(() => { /* 已关闭 */ })
 }

@@ -4,7 +4,15 @@ import type { Track, RepeatMode } from '@/types'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { toggleFavoriteTrack, loadFavoriteTracks, addRecentTrack, recordPlayStart, recordPlayProgress } from '@/utils/storage'
 import { resolveAudioPlayableUrl, releaseAudioPlayableUrl } from '@/services/http'
-import { ensureAudioGraph, disposeAudioGraph, isAudioGraphReady, setEqualizerEnabled, setEqualizerGains } from '@/services/audioGraph'
+import {
+  ensureAudioGraph,
+  disposeAudioGraph,
+  isAudioGraphReady,
+  setEqualizerEnabled,
+  setEqualizerGains,
+  runCrossfade,
+  normalizeCrossfadeSeconds,
+} from '@/services/audioGraph'
 import { normalizeEqualizer } from '@/services/equalizer'
 import { normalizePlaybackRate } from '@/utils/playbackRate'
 import { applySleepAction, formatSleepRemaining } from '@/utils/sleepTimer'
@@ -213,9 +221,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // 老数据里的 equalizer 可能是脏的（缺字段/超长数组/越界值），统一过一遍归一化。
   const equalizer = useMemo(() => normalizeEqualizer(settings.equalizer), [settings.equalizer])
   const equalizerEnabled = equalizer.enabled
-  // 可视化与均衡器都要接管 <audio> 元素（createMediaElementSource 对同一元素只能调一次），
-  // 因此「建立音频图」的条件是两者任一为真，而不是只看可视化。
-  const audioGraphNeeded = audioVisualizerEnabled || equalizerEnabled
+  // v1.4.15-pre2 淡入淡出：时长经统一钳制（1~10 秒），脏数据在消费侧就地兜住。
+  const crossfadeEnabled = settings.crossfadeEnabled === true
+  const crossfadeSeconds = normalizeCrossfadeSeconds(settings.crossfadeSeconds)
+  // 可视化、均衡器、淡入淡出都要接管 <audio> 元素（createMediaElementSource 对同一元素只能调一次），
+  // 因此「建立音频图」的条件是三者任一为真，而不是只看可视化。
+  const audioGraphNeeded = audioVisualizerEnabled || equalizerEnabled || crossfadeEnabled
   // 上一轮是否已把 audio 元素接进 Web Audio 图。用 ref 而非 state：它只影响副作用，
   // 不参与渲染；也不需要进依赖数组（否则关→开时会因为闭包旧值而重连失败）。
   const audioGraphAttachedRef = useRef(false)
@@ -233,6 +244,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // effect 内要用最新 setAppSettings，但不把它放进依赖（每次渲染都是新函数，会导致重复 IPC）
   const setAppSettingsRef = useRef(setAppSettings)
   setAppSettingsRef.current = setAppSettings
+  // v1.4.15-pre2 淡入淡出：加载 effect 只在换曲时跑，改设置不该触发重新加载音频，
+  // 因此设置值经 ref 读取（与 setAppSettingsRef 同一口径，渲染期赋值即可）。
+  const crossfadeEnabledRef = useRef(crossfadeEnabled)
+  crossfadeEnabledRef.current = crossfadeEnabled
+  const crossfadeSecondsRef = useRef(crossfadeSeconds)
+  crossfadeSecondsRef.current = crossfadeSeconds
   // 同一失败签名只提示一次，避免设置页反复进入时刷屏
   const mediaKeysNoticeRef = useRef('')
 
@@ -527,17 +544,40 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (playableUrlRef.current && playableUrlRef.current !== playableUrl) {
           releaseAudioPlayableUrl(playableUrlRef.current)
         }
-        playableUrlRef.current = playableUrl
-        audio.src = playableUrl
-        audio.load()
-        // 换 src 会重置 playbackRate，必须在 play 前重设当前倍速
-        audio.playbackRate = playbackRateRef.current
 
-        if (shouldAutoplayRef.current) {
-          await audio.play().catch((e) => {
-            console.warn('[player] autoplay failed:', e)
-          })
-          if (!cancelled) setIsPlaying(true)
+        // v1.4.15-pre2 淡入淡出切歌：swap 就是「换 src + 起播」这一步硬切。
+        // runCrossfade 负责把它包成 淡出 → swap → 淡入；关闭时它同步硬切，
+        // 不做任何渐变调用（与实现本功能前的行为完全一致）。
+        // 新的切歌会递增内部序号，正在进行的淡出立刻作废、不执行 swap。
+        // swapped 标记「换曲是否真的落地」：没落地时必须由本函数释放刚解析出的 URL
+        let swapped = false
+        const outcome = await runCrossfade({
+          enabled: crossfadeEnabledRef.current,
+          seconds: crossfadeSecondsRef.current,
+          swap: async () => {
+            swapped = true
+            playableUrlRef.current = playableUrl
+            audio.src = playableUrl
+            audio.load()
+            // 换 src 会重置 playbackRate，必须在 play 前重设当前倍速
+            audio.playbackRate = playbackRateRef.current
+
+            if (shouldAutoplayRef.current) {
+              await audio.play().catch((e) => {
+                console.warn('[player] autoplay failed:', e)
+              })
+              if (!cancelled) setIsPlaying(true)
+            }
+          },
+        })
+        // 被更新的切歌取代 / 组件已卸载：本次不再起播。
+        // 换曲没落地时，刚解析出的 Blob URL 没有任何持有者（新一次切歌会写自己的），
+        // 必须在这里释放，否则每次抢切都泄漏一个 Blob。
+        if (outcome === 'superseded' || cancelled) {
+          if (!swapped && playableUrlRef.current !== playableUrl) {
+            releaseAudioPlayableUrl(playableUrl)
+          }
+          return
         }
       } catch (e) {
         if (!cancelled) {
