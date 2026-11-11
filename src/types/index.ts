@@ -149,6 +149,48 @@ export interface AppSettings {
    * 老用户没有该字段时由 loadAppSettings 的默认值合并兜底成 false。
    */
   aiExternalRecommend: boolean
+  /**
+   * v1.4.15-pre1 均衡器：整组设置。
+   *
+   * 默认关闭，且关闭时**不接管**播放链路（与 audioVisualizer 同一口径）：
+   * 开启后才在 Web Audio 图里插入 BiquadFilter 链，关闭时完全不碰 <audio>。
+   * 老用户没有该字段时由 loadAppSettings 的默认值合并兜底成 DEFAULT_EQUALIZER。
+   */
+  equalizer: EqualizerSettings
+}
+
+/**
+ * v1.4.15-pre1 均衡器：十个固定频段的取值（单位 dB）。
+ * 顺序固定为 [31, 62, 125, 250, 500, 1k, 2k, 4k, 8k, 16k] Hz，
+ * 下标与 EQ_BANDS 一一对应——不要用对象存，对象键序在序列化后不保证。
+ */
+export type EqualizerGains = number[]
+
+/** v1.4.15-pre1 均衡器：可选预设名。custom 表示用户手调过、不对应任何预设。 */
+export type EqualizerPresetId =
+  | 'flat'
+  | 'pop'
+  | 'rock'
+  | 'jazz'
+  | 'classical'
+  | 'electronic'
+  | 'vocal'
+  | 'bass'
+  | 'treble'
+  | 'custom'
+
+/**
+ * v1.4.15-pre1 均衡器设置。
+ *
+ * 只存「开关 + 预设名 + 十段增益」三项：
+ * 预置曲线本身是代码常量（见 src/services/equalizer.ts），不落盘——
+ * 落盘一份曲线副本会让「改了预置定义但老用户还留着旧曲线」变成隐性不一致。
+ */
+export interface EqualizerSettings {
+  enabled: boolean
+  preset: EqualizerPresetId
+  /** 长度恒为 10 的 dB 数组；越界值在 normalizeEqualizer 里钳制 */
+  gains: EqualizerGains
 }
 
 /**

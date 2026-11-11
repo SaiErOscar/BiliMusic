@@ -105,7 +105,13 @@ describe('动作注册表 · 设置项一一对应', () => {
   })
 
   it('可写设置项都有必填参数，只读设置项 params 为空且标注只读', () => {
-    const readOnly = ['autoLyricTextColor', 'autoLyricControlColor', 'themeSeedOverride', 'lyricPresets']
+    const readOnly = [
+    'autoLyricTextColor',
+    'autoLyricControlColor',
+    'themeSeedOverride',
+    'lyricPresets',
+    'equalizer',
+  ]
     for (const field of SETTINGS_FIELDS) {
       const action = getAssistantAction(`settings.set-${field}`)
       expect(action, field).toBeDefined()

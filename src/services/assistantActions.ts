@@ -306,14 +306,16 @@ interface SettingSpec {
 }
 
 /**
- * 33 个 AppSettings 字段，一一对应。
+ * 34 个 AppSettings 字段，一一对应。
  *
- * 其中 4 个**只读**（params 为空、label 标注「只读」）：
+ * 其中 5 个**只读**（params 为空、label 标注「只读」）：
  * - autoLyricTextColor / autoLyricControlColor：由封面/背景采样算出的派生色，
  *   写它等于伪造一次自动取色结果，下次采样就会被覆盖，让用户「设置」它没有意义。
  * - themeSeedOverride：Partial<ThemeSeed> 结构体（primary/secondary/accent 三项），
  *   自然语言没法安全表达「只覆盖次要色」这种操作，交给设置页的主题面板。
  * - lyricPresets：LyricStylePreset[] 数组，同样是结构体。
+ * - equalizer：EqualizerSettings 结构体（开关 + 预设名 + 十段增益三者必须自洽），
+ *   「低频多一点」这类说法无法安全映射成十段 dB 值，写它容易写出界面显示与曲线对不上的状态。
  * 保留它们（而不是删掉）是为了让「每个字段都有动作」成为一条可断言的不变式——
  * 将来给 AppSettings 加字段，测试会立刻红掉并提醒补动作。
  */
@@ -488,6 +490,9 @@ const SETTING_SPECS: SettingSpec[] = [
   { field: 'themeSeedOverride', label: '（只读）主题基色覆盖项，结构体，请在设置页主题面板修改', aliases: ['主题覆盖色'] },
   // 只读：LyricStylePreset[] 结构体
   { field: 'lyricPresets', label: '（只读）歌词窗样式预设库，结构体，请在设置页管理', aliases: ['歌词预设'] },
+  // 只读：EqualizerSettings 结构体（enabled / preset / 十段增益三项联动），
+  // 自然语言说「低频多一点」没法安全映射成十段 dB 值，交给设置页的均衡器面板。
+  { field: 'equalizer', label: '（只读）均衡器设置，结构体，请在设置页均衡器面板调整', aliases: ['均衡器', 'EQ'] },
   {
     field: 'audioVisualizer',
     label: '音频可视化',

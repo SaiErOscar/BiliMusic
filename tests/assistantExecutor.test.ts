@@ -101,11 +101,11 @@ beforeEach(() => {
   localStorage.clear()
 })
 
-/* ================= 1. 全覆盖：56 个动作都有执行分支 ================= */
+/* ================= 1. 全覆盖：57 个动作都有执行分支 ================= */
 
 describe('动作覆盖：注册表里每个动作都能被执行', () => {
-  it('注册表确实是 56 条，confirm 恰好 2 条', () => {
-    expect(ASSISTANT_ACTIONS.length).toBe(56)
+  it('注册表确实是 57 条，confirm 恰好 2 条', () => {
+    expect(ASSISTANT_ACTIONS.length).toBe(57)
     const confirmIds = ASSISTANT_ACTIONS.filter(a => a.risk === 'confirm').map(a => a.id)
     expect(confirmIds.sort()).toEqual(['export.mv-single', 'playlist.delete'])
   })
@@ -162,9 +162,9 @@ describe('动作覆盖：注册表里每个动作都能被执行', () => {
     }
   })
 
-  it('settings 的 33 个字段全部命中：可设置的 29 条成功，4 条只读字段给出可读拒绝', async () => {
+  it('settings 的 34 个字段全部命中：可设置的 29 条成功，5 条只读字段给出可读拒绝', async () => {
     const settingsActions = ASSISTANT_ACTIONS.filter(a => a.group === 'settings')
-    expect(settingsActions.length).toBe(33)
+    expect(settingsActions.length).toBe(34)
 
     const base = ctx(makePlayer())
     const writable: string[] = []
@@ -187,6 +187,7 @@ describe('动作覆盖：注册表里每个动作都能被执行', () => {
     expect(readonly.sort()).toEqual([
       'settings.set-autoLyricControlColor',
       'settings.set-autoLyricTextColor',
+      'settings.set-equalizer',
       'settings.set-lyricPresets',
       'settings.set-themeSeedOverride',
     ])

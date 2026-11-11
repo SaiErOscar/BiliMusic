@@ -1,4 +1,4 @@
-import type { AppSettings, DownloadRecord, Playlist, Tombstone, Track } from '@/types'
+import type { AppSettings, DownloadRecord, EqualizerSettings, Playlist, Tombstone, Track } from '@/types'
 import { readStoredItemSync, writeStoredItem } from '@/utils/persistentStorage'
 import { safeSetItem } from '@/utils/safeStorage'
 
@@ -14,6 +14,18 @@ export const SETTINGS_CHANGED_EVENT = 'bilimusic:settings-changed'
 export const DOWNLOADS_CHANGED_EVENT = 'bilimusic:downloads-changed'
 
 const DOWNLOADS_KEY = 'bilimusic_downloads'
+
+/**
+ * v1.4.15-pre1 均衡器默认值：关闭 + flat 全零。
+ *
+ * 与 src/services/equalizer.ts 的 EQ_PRESETS.flat.gains 必须一致；
+ * 那边有测试断言两者相等，改一处漏另一处会直接变红。
+ */
+export const DEFAULT_EQUALIZER: EqualizerSettings = {
+  enabled: false,
+  preset: 'flat',
+  gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+}
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   sidebarState: 'auto',
@@ -66,6 +78,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   // v1.4.14-pre6 池外推荐默认关闭：它会在池内推荐之外多发一次请求，
   // 还要逐条查接口 + 一次 AI 核对，额度消耗明显更高，必须由用户显式打开。
   aiExternalRecommend: false,
+  // v1.4.15-pre1 均衡器默认关闭：关闭时不接管播放链路，升级用户听感零变化。
+  equalizer: DEFAULT_EQUALIZER,
 }
 
 function notifySettingsChanged() {
