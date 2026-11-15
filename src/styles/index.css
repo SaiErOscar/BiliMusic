@@ -6789,3 +6789,111 @@ span.eq-preset {
 .share-qr__copy:hover {
   opacity: 0.88;
 }
+
+/* ===== v1.4.15-pre5 本地音乐页 ===== */
+
+.local-scan-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-heavy);
+  color: var(--color-foreground);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.local-scan-bar__path {
+  margin-left: auto;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.55;
+  font-size: 12px;
+}
+
+.local-scan-bar__spin {
+  animation: local-scan-spin 1.1s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes local-scan-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.local-scan-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-heavy);
+  color: var(--color-foreground);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.local-scan-notice button {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-muted);
+  cursor: pointer;
+}
+
+.local-scan-notice button:hover { opacity: 0.75; }
+
+.local-dir-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.local-dir-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  font-size: 12.5px;
+}
+
+.local-dir-item > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-muted);
+}
+
+.local-dir-item button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--color-muted);
+  font-size: 11.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.local-dir-item button:hover:not(:disabled) { opacity: 0.8; }
+.local-dir-item button:disabled { opacity: 0.4; cursor: default; }

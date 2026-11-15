@@ -158,6 +158,23 @@ export const electronPlatform: Platform = {
     const importM3u = a?.playlistImportM3u
     return exportM3u && importM3u ? { playlistExportM3u: exportM3u, playlistImportM3u: importM3u } : undefined
   },
+  /** v1.4.15-pre5：本地音乐（扫描/读标签/失效检查），缺失时本地音乐入口整块隐藏 */
+  get localMusic() {
+    const a = api()
+    const scan = a?.localMusicScan
+    const pickDir = a?.localMusicPickDir
+    return scan && pickDir
+      ? {
+          localMusicPickDir: pickDir,
+          localMusicScan: scan,
+          localMusicCancel: a.localMusicCancel,
+          localMusicReadTags: a.localMusicReadTags,
+          localMusicReadTagsFallback: a.localMusicReadTagsFallback,
+          localMusicCheckExists: a.localMusicCheckExists,
+          localMusicOnProgress: a.localMusicOnProgress,
+        }
+      : undefined
+  },
   /** v1.4.6：MV 导出（离屏渲染 + ffmpeg 稀疏合成），桌面端专属 */
   /** v1.4.8-pre1：桌面全局媒体键（globalShortcut），仅 Electron 提供，移动端无 */
   get mediaKeys() {

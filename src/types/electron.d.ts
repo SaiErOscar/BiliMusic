@@ -69,6 +69,34 @@ export interface NativeDialogApi {
   confirm: (options: { message: string; detail?: string }) => Promise<boolean>
 }
 
+/** v1.4.15-pre5 本地音乐：扫描到的一个音频文件 */
+export interface LocalScannedFile {
+  filePath: string
+  size: number
+  /** 最后修改时间（ISO） */
+  mtime: string
+}
+
+/** v1.4.15-pre5 本地音乐：扫描进度 */
+export interface LocalScanProgress {
+  scanned: number
+  found: number
+  current: string
+  skipped: number
+}
+
+/** v1.4.15-pre5 本地音乐：扫描结果 */
+export interface LocalScanResult {
+  ok: boolean
+  canceled?: boolean
+  message?: string
+  files?: LocalScannedFile[]
+  /** 是否因为触到上限而提前停止 */
+  truncated?: boolean
+  truncatedReason?: string
+  skipped?: number
+}
+
 export interface BiliApi {
   downloadAudio: (audioUrl: string, filename: string, customDir?: string, options?: DownloadOptions) => Promise<{
     filePath: string
@@ -321,6 +349,20 @@ declare global {
       playlistExportM3u?: (payload: { name: string; content: string }) => Promise<{ ok: boolean; canceled?: boolean; path?: string; message?: string }>
       /** v1.4.15 歌单 M3U：打开对话框 + 读回文本，解析在渲染层 */
       playlistImportM3u?: () => Promise<{ ok: boolean; canceled?: boolean; path?: string; content?: string; message?: string }>
+      /** v1.4.15-pre5 本地音乐：选目录 */
+      localMusicPickDir?: () => Promise<{ ok: boolean; canceled?: boolean; path?: string }>
+      /** v1.4.15-pre5 本地音乐：递归扫描音频文件，进度经 localMusicOnProgress 回报 */
+      localMusicScan?: (dirPath: string) => Promise<LocalScanResult>
+      /** v1.4.15-pre5 本地音乐：取消正在进行的扫描 */
+      localMusicCancel?: () => Promise<{ ok: boolean }>
+      /** v1.4.15-pre5 本地音乐：读文件头尾字节，解析在渲染层 audioTags.ts */
+      localMusicReadTags?: (filePath: string) => Promise<{ ok: boolean; head?: number[]; tail?: number[]; size?: number; message?: string }>
+      /** v1.4.15-pre5 本地音乐：ffmpeg 兜底读标签 */
+      localMusicReadTagsFallback?: (filePath: string) => Promise<{ ok: boolean; tags?: { title?: string; artist?: string; album?: string; duration?: number }; message?: string }>
+      /** v1.4.15-pre5 本地音乐：检查文件是否还存在，返回缺失列表 */
+      localMusicCheckExists?: (paths: string[]) => Promise<{ ok: boolean; missing: string[] }>
+      /** v1.4.15-pre5 本地音乐：订阅扫描进度，返回退订函数 */
+      localMusicOnProgress?: (cb: (p: LocalScanProgress) => void) => () => void
       platform: string
       persistentStorage?: PersistentStorageApi
       /** v1.4.13-pre4 WorkBuddy 国内/国际版 */

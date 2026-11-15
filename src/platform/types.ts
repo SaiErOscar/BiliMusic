@@ -248,6 +248,24 @@ export type PlatformPlaylistFile = Pick<
 
 
 /**
+ * 本地音乐能力（v1.4.15-pre5，桌面专属）：选目录、递归扫描（进度经 onProgress 回报、可取消）、
+ * 读文件头尾字节（解析在渲染层 src/services/audioTags.ts）、ffmpeg 兜底读标签、失效检查。
+ * 手机端没有 fs 与系统目录对话框，缺失时调用方以 `if (platform.localMusic)` 探测后整块隐藏。
+ * 签名 Pick 自 Window['electronAPI']（这组方法不在 BiliApi 下，是独立通道），
+ * 内部各方法沿用其可选性，与 PlatformFonts / PlatformPlaylistFile 一致。
+ */
+export type PlatformLocalMusic = Pick<
+  Window['electronAPI'],
+  | 'localMusicPickDir'
+  | 'localMusicScan'
+  | 'localMusicCancel'
+  | 'localMusicReadTags'
+  | 'localMusicReadTagsFallback'
+  | 'localMusicCheckExists'
+  | 'localMusicOnProgress'
+>
+
+/**
  * MV 导出能力（v1.4.6，桌面专属）：单首播放界面 MP4 导出、取消与进度订阅。
  * 手机端无 ffmpeg/离屏渲染链路，缺失时调用方隐藏「导出 MV」入口。
  */
@@ -324,6 +342,8 @@ export interface Platform {
   webdavConfig?: PlatformWebdavConfig
   /** v1.4.15 歌单 M3U 导出/导入（系统文件对话框，桌面专属） */
   playlistFile?: PlatformPlaylistFile
+  /** v1.4.15-pre5 本地音乐（递归扫描/读标签/失效检查，桌面专属；缺失即整块隐藏） */
+  localMusic?: PlatformLocalMusic
   mvExport?: PlatformMvExport
   mediaNotify?: PlatformMediaNotify
   /** v1.4.8-pre1 桌面全局媒体键 */

@@ -12,6 +12,7 @@ import LoginDialog from '@/components/LoginDialog'
 import GlobalShareSheet from '@/components/GlobalShareSheet'
 import MainLayout from '@/components/layout/MainLayout'
 import Discover from '@/pages/Discover'
+import LocalMusic from '@/pages/LocalMusic'
 
 // 路由级代码分割：只有首屏默认路由 Discover 静态打入入口包，其余页面按需拉取。
 // 此前全部页面静态导入，入口 chunk 近 700KB，冷启动要为「可能永远不会打开的页面」
@@ -66,6 +67,7 @@ export default function App() {
                 <Route path="/playlists" element={<Playlists />} />
                 <Route path="/playlists/:playlistId" element={<Playlists />} />
                 <Route path="/downloads" element={<Downloads />} />
+                <Route path="/local" element={<LocalMusic />} />
                 <Route path="/bili-favorites" element={<BiliFavorites />} />
                 <Route path="/settings" element={<Settings />} />
               </Route>

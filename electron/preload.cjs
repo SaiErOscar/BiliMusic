@@ -204,6 +204,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // v1.4.15 歌单 M3U 导出/导入：系统「另存为 / 打开」对话框 + 文本搬运
   playlistExportM3u: (payload) => ipcRenderer.invoke('playlist:exportM3u', payload),
   playlistImportM3u: () => ipcRenderer.invoke('playlist:importM3u'),
+  localMusicPickDir: () => ipcRenderer.invoke('localMusic:pickDir'),
+  localMusicScan: (dirPath) => ipcRenderer.invoke('localMusic:scan', dirPath),
+  localMusicCancel: () => ipcRenderer.invoke('localMusic:cancel'),
+  localMusicReadTags: (filePath) => ipcRenderer.invoke('localMusic:readTags', filePath),
+  localMusicReadTagsFallback: (filePath) => ipcRenderer.invoke('localMusic:readTagsFallback', filePath),
+  localMusicCheckExists: (paths) => ipcRenderer.invoke('localMusic:checkExists', paths),
+  localMusicOnProgress: (cb) => {
+    const listener = (_e, p) => cb(p)
+    ipcRenderer.on('localMusic:scanProgress', listener)
+    return () => ipcRenderer.removeListener('localMusic:scanProgress', listener)
+  },
   // v1.4.8-pre1 桌面全局媒体键（globalShortcut）
   setMediaKeysEnabled: (enabled) => ipcRenderer.invoke('mediaKeys:set-enabled', enabled),
   getMediaKeysEnabled: () => ipcRenderer.invoke('mediaKeys:get-enabled'),

@@ -603,6 +603,47 @@ export function sortPlaylistTracks(playlistId: string, order: 'name' | 'addedAt'
   return updatedPlaylist
 }
 
+// ===== v1.4.15-pre5 本地音乐索引 =====
+// 单独一个键，不进 AppSettings：曲库体积随文件数增长，塞进设置会让每次读写设置
+// 都拖着几千条记录走，也会让云同步把整库曲目当设置上传。
+const LOCAL_TRACKS_KEY = 'bilimusic_local_tracks'
+const LOCAL_DIRS_KEY = 'bilimusic_local_dirs'
+
+/** 读取本地曲库；损坏或结构不对时返回空数组而不是抛错 */
+export function loadLocalTracks(): Track[] {
+  try {
+    const raw = readStoredItemSync(LOCAL_TRACKS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    // 只认真正带 localPath 的条目：没有路径的本地曲目无法播放，留着只会制造死条目
+    return parsed.filter((t: Track) => t && typeof t.id === 'string' && typeof t.localPath === 'string' && t.localPath)
+  } catch {
+    return []
+  }
+}
+
+export function saveLocalTracks(tracks: Track[]): void {
+  safeSetItem(LOCAL_TRACKS_KEY, JSON.stringify(tracks))
+}
+
+/** 已导入过的目录列表，供界面回显与「重新扫描」 */
+export function loadLocalDirs(): string[] {
+  try {
+    const raw = readStoredItemSync(LOCAL_DIRS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((d: unknown) => typeof d === 'string' && d)
+  } catch {
+    return []
+  }
+}
+
+export function saveLocalDirs(dirs: string[]): void {
+  safeSetItem(LOCAL_DIRS_KEY, JSON.stringify(dirs))
+}
+
 export function removeTracksFromPlaylist(playlistId: string, trackIds: string[]): Playlist | null {
   const ids = new Set(trackIds)
   if (ids.size === 0) return getPlaylist(playlistId)

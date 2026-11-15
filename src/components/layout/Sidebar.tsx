@@ -8,6 +8,7 @@ import {
   FolderHeart,
   ListMusic,
   Download,
+  HardDriveDownload,
   Settings,
   Search,
   User,
@@ -44,6 +45,7 @@ const menuGroups: Array<{ title: string; items: NavItem[] }> = [
       { icon: Clock, label: '最近播放', path: '/recent' },
       { icon: Heart, label: '我喜欢', path: '/favorites' },
       { icon: Download, label: '本地下载', path: '/downloads' },
+      { icon: HardDriveDownload, label: '本地音乐', path: '/local' },
     ],
   },
   {
