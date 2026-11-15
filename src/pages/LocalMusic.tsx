@@ -39,7 +39,9 @@ export default function LocalMusic() {
   const [scanning, setScanning] = useState(false)
   const [progress, setProgress] = useState<LocalScanProgress | null>(null)
   const [notice, setNotice] = useState('')
-  const [missingCount, setMissingCount] = useState(0)
+  /** 已确认丢失的文件路径集合（小写）；只用于界面标记，不参与删除判断 */
+  const [missingPaths, setMissingPaths] = useState<Set<string>>(() => new Set())
+  const missingCount = missingPaths.size
   /** 卸载后不再 setState：扫描可能比页面存活更久 */
   const aliveRef = useRef(true)
   /** 供 effect 读取最新曲目而不必把它放进依赖（否则每加一首就重跑一轮 IO） */
@@ -71,8 +73,7 @@ export default function LocalMusic() {
     void cap.localMusicCheckExists(current.map(t => t.localPath || '')).then((res) => {
       if (canceled || !aliveRef.current || !res?.ok) return
       const missing = new Set((res.missing || []).map(p => p.toLowerCase()))
-      const count = current.filter(t => t.localPath && missing.has(t.localPath.toLowerCase())).length
-      setMissingCount(count)
+      setMissingPaths(missing)
     })
     return () => {
       canceled = true
@@ -162,7 +163,7 @@ export default function LocalMusic() {
     const removed = tracks.length - kept.length
     saveLocalTracks(kept)
     setTracks(kept)
-    setMissingCount(0)
+    setMissingPaths(new Set())
     setNotice('已清理 ' + removed + ' 条失效条目')
   }, [tracks])
 
@@ -272,6 +273,11 @@ export default function LocalMusic() {
                 isCurrent={player.currentTrack?.id === track.id}
                 isPlaying={player.isPlaying}
                 onPlay={() => player.playNow(track)}
+                extra={
+                  track.localPath && missingPaths.has(track.localPath.toLowerCase())
+                    ? <span className="local-track-missing" title="文件已丢失，可能被移动或删除">已丢失</span>
+                    : undefined
+                }
               />
             )}
           />

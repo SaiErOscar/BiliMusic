@@ -4,6 +4,7 @@ import type { Track, RepeatMode } from '@/types'
 import { useAppSettings } from '@/hooks/useAppSettings'
 import { toggleFavoriteTrack, loadFavoriteTracks, addRecentTrack, recordPlayStart, recordPlayProgress } from '@/utils/storage'
 import { resolveAudioPlayableUrl, releaseAudioPlayableUrl } from '@/services/http'
+import { toLocalAudioUrl } from '@/services/localMusic'
 import {
   ensureAudioGraph,
   disposeAudioGraph,
@@ -303,6 +304,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const onError = () => {
       setLoadingAudio(false)
       setIsPlaying(false)
+      // v1.4.15-pre6 本地音乐：文件被移走/删除时给明确原因。
+      // 按用户拍板的口径：只提示、不自动跳下一首——自动跳歌会让用户不知道发生了什么。
+      const t = currentTrackRef.current
+      if (t?.localPath) {
+        showToast('文件已丢失，可能被移动或删除：' + t.title)
+      }
     }
 
     audio.addEventListener('timeupdate', onTimeUpdate)
@@ -511,16 +518,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const loadAndPlay = async () => {
       try {
-        const { extractAudioFromVideo, getCachedAudioSource, cacheAudioSource } = await import('@/services/bilibiliApi')
-
-        let source = getCachedAudioSource(currentTrack.bvid || currentTrack.id)
-        if (!source) {
-          source = await extractAudioFromVideo(
-            currentTrack.bvid || currentTrack.id,
-            { aid: currentTrack.aid, cid: currentTrack.cid },
-            qualityPreference,
-          )
-          cacheAudioSource(currentTrack.bvid || currentTrack.id, source)
+        // v1.4.15-pre6 本地音乐：localPath 有值即本地曲目，不走 B 站取流。
+        // 播放地址由主进程 lm:// 协议提供（file:// 会被 Chromium 拒绝，实测结论见 localMusic.ts）。
+        const isLocal = !!currentTrack.localPath
+        let source: { audioUrl: string }
+        if (isLocal) {
+          source = { audioUrl: toLocalAudioUrl(currentTrack.localPath as string) }
+        } else {
+          const { extractAudioFromVideo, getCachedAudioSource, cacheAudioSource } = await import('@/services/bilibiliApi')
+          let remote = getCachedAudioSource(currentTrack.bvid || currentTrack.id)
+          if (!remote) {
+            remote = await extractAudioFromVideo(
+              currentTrack.bvid || currentTrack.id,
+              { aid: currentTrack.aid, cid: currentTrack.cid },
+              qualityPreference,
+            )
+            cacheAudioSource(currentTrack.bvid || currentTrack.id, remote)
+          }
+          source = remote
         }
 
         if (cancelled) return

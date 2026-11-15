@@ -6897,3 +6897,17 @@ span.eq-preset {
 
 .local-dir-item button:hover:not(:disabled) { opacity: 0.8; }
 .local-dir-item button:disabled { opacity: 0.4; cursor: default; }
+
+/* v1.4.15-pre6 本地曲目：文件已丢失的标记（只提示，不自动删除） */
+.local-track-missing {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-destructive);
+  color: var(--color-destructive);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  opacity: 0.9;
+}

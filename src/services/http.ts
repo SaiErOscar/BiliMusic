@@ -17,6 +17,7 @@
  */
 
 import { Capacitor, CapacitorHttp, CapacitorCookies } from '@capacitor/core'
+import { isLocalAudioUrl } from '@/services/localMusic'
 
 function isCapacitorNative(): boolean {
   try {
@@ -195,6 +196,11 @@ async function fetchDesktopAudioBlobUrl(url: string): Promise<string> {
  *   `forceBlob`（即用户开启了音频可视化）时才转 Blob，并在失败时回退直链。
  */
 export async function resolveAudioPlayableUrl(url: string, forceBlob = false): Promise<string> {
+  // v1.4.15-pre6 本地音乐：lm:// 已是主进程提供的可播放流，原样返回。
+  // 不转 Blob——本地文件不需要绕过 Referer，转 Blob 只会让整首歌先读进内存。
+  // 均衡器与可视化在这条协议上实测可用（见 src/services/localMusic.ts 的说明）。
+  if (isLocalAudioUrl(url)) return url
+
   // 非原生平台的默认路径：主进程已注入 Referer，直接返回原 URL
   if (!isCapacitorNative() && !forceBlob) return url
 

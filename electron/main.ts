@@ -11,7 +11,7 @@ import { registerSystemFontsHandlers } from './systemFonts'
 import { registerColorPickerHandlers } from './colorPicker'
 import { registerBackupHandlers } from './backup'
 import { registerPlaylistFileHandlers } from './playlistFile'
-import { registerLocalMusicHandlers } from './localMusic'
+import { registerLocalAudioProtocol, registerLocalMusicHandlers } from './localMusic'
 import { registerNativeDialogHandlers } from './nativeDialog'
 import { registerAiHandlers } from './ai'
 import { registerProfileHandlers } from './profile'
@@ -28,6 +28,11 @@ const isHarmonyOS = (process.platform as string) === 'openharmony'
 // 提供合法 origin，模块脚本与相对资源即可正常加载。须在 app ready 之前注册。
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  // v1.4.15-pre6 本地音乐播放：lm:// 提供本地音频文件流。
+  // 必须 standard + secure 才有合法 origin（否则 Web Audio 图退化、拿不到频谱），
+  // supportFetchAPI 让 net.fetch 生效，stream 支持流式读取。
+  // 不用 file:// 的原因见 electron/localMusic.ts 的 registerLocalAudioProtocol 注释（实测结论）。
+  { scheme: 'lm', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ])
 
 // Chrome MCP 远程调试（仅开发环境启用，生产环境关闭以防远程代码执行攻击）
@@ -851,6 +856,8 @@ app.whenReady().then(() => {
   // v1.4.15 歌单 M3U 导出/导入（系统文件对话框 + 文本搬运）
   registerPlaylistFileHandlers()
   registerLocalMusicHandlers()
+  // 本地音频流协议（须在 app ready 之后、窗口加载之前）
+  registerLocalAudioProtocol()
   // v1.4.13-pre14 原生确认框：渲染层不再用 window.confirm，改由主进程弹系统对话框
   registerNativeDialogHandlers()
   registerMvExportHandlers()

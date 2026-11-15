@@ -9,7 +9,7 @@
 // 2. 路径平台相关：只处理 Electron 桌面端，其余平台在 platform 层就返回 undefined，
 //    入口整块隐藏。
 // 3. 文件会消失：本模块不删任何索引，只回报「这次扫到了什么」，失效清理是渲染层的显式动作。
-import { BrowserWindow, dialog, ipcMain } from 'electron'
+import { BrowserWindow, dialog, ipcMain, protocol } from 'electron'
 import { execFile } from 'child_process'
 import fs from 'fs'
 import path from 'path'
@@ -200,6 +200,140 @@ function readTagsWithFfmpeg(filePath: string): Promise<{ title?: string; artist?
         }
       },
     )
+  })
+}
+
+/**
+ * v1.4.15-pre6 本地音乐播放：自定义协议 lm:// 提供本地音频文件流。
+ *
+ * **为什么不用 file://（实测结论，不是推测）**：
+ * 渲染层跑在自定义 app:// 标准安全源上，Chromium 直接拒绝 file:// 资源
+ * （控制台报 "Not allowed to load local resource"），audio 连元数据都加载不出来。
+ * 实测对比：file:// → load FAIL；lm:// → load OK、时长正确、可 seek、
+ * createMediaElementSource 成功且 analyser 能拿到真实频谱（均衡器与可视化照常工作）。
+ *
+ * 协议需注册为 standard + secure + supportFetchAPI + stream（见 main.ts 的
+ * registerSchemesAsPrivileged），否则拿不到合法 origin，Web Audio 图会退化。
+ */
+export const LOCAL_AUDIO_SCHEME = 'lm'
+
+/** 把本地绝对路径转成渲染层可用的 lm:// URL */
+export function toLocalAudioUrl(filePath: string): string {
+  return LOCAL_AUDIO_SCHEME + '://local/' + encodeURIComponent(filePath)
+}
+
+/** 从 lm:// URL 还原本地绝对路径；不是本地音频 URL 时返回 null */
+export function fromLocalAudioUrl(url: string): string | null {
+  const prefix = LOCAL_AUDIO_SCHEME + '://local/'
+  if (!url || !url.startsWith(prefix)) return null
+  try {
+    return decodeURIComponent(url.slice(prefix.length))
+  } catch {
+    return null
+  }
+}
+
+/** 扩展名 -> MIME，交给 <audio> 判断容器格式 */
+const AUDIO_MIME: Record<string, string> = {
+  '.mp3': 'audio/mpeg',
+  '.flac': 'audio/flac',
+  '.m4a': 'audio/mp4',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+}
+
+/** 解析 Range 请求头（只支持单区间，够 <audio> 用） */
+function parseRange(header: string | null, size: number): { start: number; end: number } | null {
+  if (!header) return null
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim())
+  if (!m) return null
+  const hasStart = m[1] !== ''
+  const hasEnd = m[2] !== ''
+  if (!hasStart && !hasEnd) return null
+  let start: number
+  let end: number
+  if (!hasStart) {
+    // bytes=-N：最后 N 字节
+    const suffix = Number(m[2])
+    if (!Number.isFinite(suffix) || suffix <= 0) return null
+    start = Math.max(0, size - suffix)
+    end = size - 1
+  } else {
+    start = Number(m[1])
+    end = hasEnd ? Math.min(Number(m[2]), size - 1) : size - 1
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) return null
+  return { start, end }
+}
+
+/**
+ * 注册 lm:// 的协议处理器。必须在 app ready 之后调用。
+ *
+ * 只放行音频扩展名：这个协议只服务于播放，不该变成任意文件读取通道。
+ *
+ * **为什么手工实现 Range 而不用 net.fetch 转发（实测结论）**：
+ * 早先版本直接 return await net.fetch(pathToFileURL(target))，虽然能出声，
+ * 但实测发现两个硬伤：
+ *   1. 响应没有 Content-Length —— <audio>.duration 恒为 Infinity，
+ *      进度条算不出总长、拖动进度条不可靠；
+ *   2. Range 请求返回 200 而非 206，等于每次都从头传整段。
+ * 现在显式读文件并正确回 Content-Length / Content-Range / Accept-Ranges，
+ * 长音频的 seek 才真正可用。
+ */
+export function registerLocalAudioProtocol(): void {
+  protocol.handle(LOCAL_AUDIO_SCHEME, async (request) => {
+    try {
+      const target = fromLocalAudioUrl(request.url)
+      if (!target) return new Response('bad request', { status: 400 })
+      const ext = path.extname(target).toLowerCase()
+      const mime = AUDIO_MIME[ext]
+      if (!mime || !(AUDIO_EXTS as readonly string[]).includes(ext)) {
+        return new Response('forbidden', { status: 403 })
+      }
+
+      let stat: fs.Stats
+      try {
+        stat = fs.statSync(target)
+      } catch {
+        return new Response('not found', { status: 404 })
+      }
+      const size = stat.size
+      const range = parseRange(request.headers.get('range'), size)
+
+      if (!range) {
+        // 无 Range：整段返回，但必须带 Content-Length，否则时长算不出来
+        const data = fs.readFileSync(target)
+        return new Response(data, {
+          status: 200,
+          headers: {
+            'Content-Type': mime,
+            'Content-Length': String(size),
+            'Accept-Ranges': 'bytes',
+          },
+        })
+      }
+
+      // 有 Range：只回请求的那一段，206 + Content-Range
+      const length = range.end - range.start + 1
+      const fd = fs.openSync(target, 'r')
+      try {
+        const buf = Buffer.alloc(length)
+        fs.readSync(fd, buf, 0, length, range.start)
+        return new Response(buf, {
+          status: 206,
+          headers: {
+            'Content-Type': mime,
+            'Content-Length': String(length),
+            'Content-Range': 'bytes ' + range.start + '-' + range.end + '/' + size,
+            'Accept-Ranges': 'bytes',
+          },
+        })
+      } finally {
+        fs.closeSync(fd)
+      }
+    } catch (err) {
+      return new Response('error: ' + (err instanceof Error ? err.message : String(err)), { status: 500 })
+    }
   })
 }
 

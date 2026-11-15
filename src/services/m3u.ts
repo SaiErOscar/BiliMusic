@@ -11,6 +11,7 @@
 // 播放地址统一用 Track.videoUrl（B 站视频页），导入时从地址里取回 bvid。
 
 import type { Playlist, Track } from '@/types'
+import { baseNameWithoutExt, localTrackId } from '@/services/localMusic'
 
 /** 解析出来的一条播放地址记录 */
 export interface ParsedM3uEntry {
@@ -51,9 +52,67 @@ export function extractBvid(url: string): string | undefined {
   return bare ? bare[1] : undefined
 }
 
-/** 该行是否是我们能认的播放地址（绝对 URL、协议相对或裸 BV 号） */
+/** 该行是否是我们能认的播放地址（绝对 URL、协议相对、裸 BV 号或本地文件路径） */
 function isAddressLine(line: string): boolean {
-  return /^[a-z][a-z0-9+.-]*:\/\//i.test(line) || line.startsWith('//') || /^BV[0-9A-Za-z]+$/.test(line)
+  return (
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(line) ||
+    line.startsWith('//') ||
+    /^BV[0-9A-Za-z]+$/.test(line) ||
+    isLocalFilePathLine(line)
+  )
+}
+
+/** 本地音频文件的扩展名（与 src/services/localMusic.ts 的 AUDIO_EXTS 一致） */
+const LOCAL_AUDIO_EXT = /\.(mp3|flac|m4a|wav|ogg)$/i
+
+/**
+ * v1.4.15-pre6：该行是否指向一个本地音频文件。
+ *
+ * M3U 里本地路径有三种常见写法：
+ *   file:///C:/Music/a.mp3   （标准 file URL，最规范）
+ *   C:\Music\a.mp3          （Windows 裸路径）
+ *   /home/u/Music/a.mp3      （POSIX 裸路径）
+ * 只认扩展名是音频的行，避免把任意裸字符串当成路径。
+ */
+export function isLocalFilePathLine(line: string): boolean {
+  const raw = String(line ?? '').trim()
+  if (!raw) return false
+  if (/^file:\/\//i.test(raw)) {
+    // file URL 还要看解码后的扩展名（中文/空格会被百分号编码）
+    let decoded = raw
+    try {
+      decoded = decodeURIComponent(raw)
+    } catch {
+      // 编码坏了就按原样判断
+    }
+    return LOCAL_AUDIO_EXT.test(decoded)
+  }
+  // 裸 Windows 路径（C:\...）或 POSIX 绝对路径（/...），且扩展名是音频
+  const looksLikePath = /^[a-zA-Z]:[\\/]/.test(raw) || raw.startsWith('/')
+  return looksLikePath && LOCAL_AUDIO_EXT.test(raw)
+}
+
+/**
+ * 从本地路径行里取出绝对路径。
+ * file:///C:/a.mp3 -> C:/a.mp3；file:///home/u/a.mp3 -> /home/u/a.mp3；
+ * 裸路径原样返回。取不出来返回 null。
+ */
+export function localPathFromLine(line: string): string | null {
+  const raw = String(line ?? '').trim()
+  if (!raw || !isLocalFilePathLine(raw)) return null
+  if (/^file:\/\//i.test(raw)) {
+    let decoded = raw
+    try {
+      decoded = decodeURIComponent(raw)
+    } catch {
+      return null
+    }
+    // 去掉 file:// 前缀：file:///C:/a.mp3 -> /C:/a.mp3，再判断是不是盘符
+    let rest = decoded.replace(/^file:\/\//i, '')
+    if (/^\/[a-zA-Z]:[\\/]/.test(rest)) rest = rest.slice(1)
+    return rest || null
+  }
+  return raw
 }
 
 /** #EXTINF:<秒数>,<标题> —— 时长缺失或非数字时按 0 处理并保留标题 */
@@ -173,6 +232,26 @@ export function buildM3u(playlist: Playlist): string {
 export function entryToTrack(entry: ParsedM3uEntry): Track {
   const bvid = entry.bvid || ''
   const url = entry.url || (bvid ? `https://www.bilibili.com/video/${bvid}` : '')
+
+  // v1.4.15-pre6：本地文件路径条目转成本地曲目，可直接播放。
+  // 用与「本地音乐」页同一个 id 派生规则，两个入口扫到同一个文件时是同一条曲目。
+  const localPath = bvid ? null : localPathFromLine(url)
+  if (localPath) {
+    return {
+      id: localTrackId(localPath),
+      title: entry.title || baseNameWithoutExt(localPath),
+      artist: entry.artist || '',
+      coverUrl: '',
+      duration: toWholeSeconds(entry.duration),
+      videoUrl: '',
+      bvid: '',
+      playCount: 0,
+      isLiked: false,
+      localPath,
+      addedAt: new Date().toISOString(),
+    }
+  }
+
   return {
     id: bvid || url,
     title: entry.title || bvid || url,

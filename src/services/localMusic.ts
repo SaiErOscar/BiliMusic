@@ -11,6 +11,27 @@ import type { AudioTags } from '@/services/audioTags'
 export const AUDIO_EXTS = ['.mp3', '.flac', '.m4a', '.wav', '.ogg'] as const
 
 /**
+ * v1.4.15-pre6 本地音频播放协议。
+ *
+ * **为什么不是 file://（实测结论，别改回去）**：
+ * 渲染层跑在自定义 app:// 标准安全源上，Chromium 直接拒绝 file:// 资源
+ * （控制台报 "Not allowed to load local resource"），audio 连元数据都加载不出来。
+ * 改由主进程的 lm:// 协议提供文件流后：加载正常、可 seek、
+ * createMediaElementSource 成功且 analyser 能拿到真实频谱（均衡器/可视化照常）。
+ */
+export const LOCAL_AUDIO_SCHEME = 'lm'
+
+/** 把本地绝对路径转成渲染层可播放的 lm:// URL（规则须与主进程 toLocalAudioUrl 一致） */
+export function toLocalAudioUrl(filePath: string): string {
+  return LOCAL_AUDIO_SCHEME + '://local/' + encodeURIComponent(filePath)
+}
+
+/** 该 URL 是否为本应用的本地音频 URL */
+export function isLocalAudioUrl(url: string): boolean {
+  return !!url && url.startsWith(LOCAL_AUDIO_SCHEME + '://local/')
+}
+
+/**
  * 本地曲目的稳定 id。
  *
  * 用路径派生而不是随机 UUID：同一个文件重复扫描必须得到同一个 id，
