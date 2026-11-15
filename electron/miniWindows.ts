@@ -807,7 +807,10 @@ export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserW
   onLyricVisibleChanged = opts.onLyricVisibleChange ?? null
 
   // 主窗口渲染层 → 主进程：推送完整播放状态
-  ipcMain.on('mini:state', (_event, state: MiniPlayerState) => {
+  // 入站状态不包含 fontList：字体列表是主进程自己枚举并缓存（cachedFontList），
+  // 广播时才合并进去（见下方 broadcast）。要求渲染层回传它是错的——
+  // 它既不知道系统字体，也没有理由知道。
+  ipcMain.on('mini:state', (_event, state: Omit<MiniPlayerState, 'fontList'>) => {
     if (!state || typeof state !== 'object') return
     miniState = {
       hasTrack: Boolean(state.hasTrack),
@@ -833,6 +836,8 @@ export function registerMiniWindowHandlers(opts: { getMainWindow: () => BrowserW
       autoLyricTextColor: typeof state.autoLyricTextColor === 'string' ? state.autoLyricTextColor : miniState.autoLyricTextColor,
       autoLyricControlColor: typeof state.autoLyricControlColor === 'string' ? state.autoLyricControlColor : miniState.autoLyricControlColor,
       noLyric: Boolean(state.noLyric),
+      // 字体列表不由渲染层提供：保留主进程已缓存的那份，广播时会再合并 cachedFontList
+      fontList: miniState.fontList,
     }
     broadcast()
     syncAutoColor()

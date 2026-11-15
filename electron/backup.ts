@@ -14,11 +14,16 @@ export function registerBackupHandlers(): void {
   ipcMain.handle('backup:saveFile', async (_e, content: string) => {
     const win = hostWindow()
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-').replace(/-\d\d$/, '')
-    const { canceled, filePath } = await dialog.showSaveDialog(win ?? undefined, {
+    // Electron 的 dialog 是双重重载：有窗口走 (window, options)，没有就走 (options)。
+    // 直接传 win ?? undefined 两个重载都不匹配，必须显式分支。
+    const saveOptions = {
       title: '导出备份文件',
       defaultPath: `bilimusic-backup-${stamp}.bmback`,
       filters: FILTERS,
-    })
+    }
+    const { canceled, filePath } = win
+      ? await dialog.showSaveDialog(win, saveOptions)
+      : await dialog.showSaveDialog(saveOptions)
     if (canceled || !filePath) return { ok: false, canceled: true }
     try {
       const target = filePath.toLowerCase().endsWith('.bmback') ? filePath : `${filePath}.bmback`
@@ -32,11 +37,14 @@ export function registerBackupHandlers(): void {
   // 打开：选择 .bmback 文件，读回文本内容交渲染层解密
   ipcMain.handle('backup:openFile', async () => {
     const win = hostWindow()
-    const { canceled, filePaths } = await dialog.showOpenDialog(win ?? undefined, {
+    const openOptions = {
       title: '选择备份文件',
       filters: FILTERS,
-      properties: ['openFile'],
-    })
+      properties: ['openFile'] as const,
+    }
+    const { canceled, filePaths } = win
+      ? await dialog.showOpenDialog(win, { ...openOptions, properties: ['openFile'] })
+      : await dialog.showOpenDialog({ ...openOptions, properties: ['openFile'] })
     if (canceled || !filePaths.length) return { ok: false, canceled: true }
     try {
       const content = fs.readFileSync(filePaths[0], 'utf8')

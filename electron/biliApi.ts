@@ -174,9 +174,12 @@ async function markFolderPurpose(downloadDir: string, kind: 'video' | 'audio') {
 /** 运行 ffmpeg 命令，返回 Promise */
 function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const proc = trackChild(spawn(ffmpegPath, args), { windowsHide: true })
+    // windowsHide 是 spawn 的选项，不是 trackChild 的——传错位置会让类型检查看不出问题，
+    // 但实际运行时控制台窗口仍会闪出来。
+    const proc = trackChild(spawn(ffmpegPath, args, { windowsHide: true }))
     let stderr = ''
-    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+    // stderr 在 spawn 类型上可空（stdio 未开启时），这里确实读了它，必须先断言
+    proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
     proc.on('error', (err: Error) => {
       reject(new Error(`ffmpeg 启动失败: ${err.message}. ffmpegPath=${ffmpegPath}`))
     })
@@ -221,7 +224,7 @@ function mergeWithFfmpegMeta(
       windowsHide: true,
     }))
     let stderr = ''
-    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+    proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
     proc.on('error', (err: Error) => {
       reject(new Error(`ffmpeg 启动失败: ${err.message}. ffmpegPath=${ffmpegPath}`))
     })
@@ -255,9 +258,9 @@ function mergeWithFfmpegDirectUrlMeta(
       '-y',
       outputPath,
     ]
-    const proc = trackChild(spawn(ffmpegPath, args), { windowsHide: true })
+    const proc = trackChild(spawn(ffmpegPath, args, { windowsHide: true }))
     let stderr = ''
-    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+    proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
     proc.on('error', (err: Error) => {
       reject(new Error(`ffmpeg direct URL 启动失败: ${err.message}`))
     })
@@ -322,7 +325,8 @@ async function downloadStreamToFile(
     }
     // 正常结束：等待写入缓冲 flush 到磁盘
     await new Promise<void>((resolve, reject) => {
-      writeStream.end((err) => (err ? reject(err) : resolve()))
+      // 回调参数显式标注：Node 的类型里这里是可选参数，隐式 any 会漏掉真实错误类型
+      writeStream.end((err?: Error | null) => (err ? reject(err) : resolve()))
     })
   } finally {
     if (!writeStream.closed) writeStream.destroy()
@@ -785,7 +789,16 @@ export function registerBiliApiHandlers() {
 
       // 监听 Cookie，检测登录成功（SESSDATA 出现即为已登录）
       let loggedIn = false
-      const onCookieChanged = async (_e: never, cookie: Electron.Cookie, _cause: string, removed: boolean) => {
+      // 监听器签名必须与 Electron 的 cookies 'changed' 事件完全一致：
+      // 第一个参数是事件对象（不是 never），cause 是固定的四个字面量联合。
+      // 写成 (_e: never, _cause: string) 虽然运行时能用，但类型上对不上，会让
+      // removeListener 一起报错——同一个函数被 on/removeListener 两处引用。
+      const onCookieChanged = async (
+        _e: { preventDefault: () => void; readonly defaultPrevented: boolean },
+        cookie: Electron.Cookie,
+        _cause: 'explicit' | 'overwrite' | 'expired' | 'evicted' | 'expired-overwrite',
+        removed: boolean,
+      ) => {
         if (removed || loggedIn) return
         if (cookie.name === 'SESSDATA' && cookie.value) {
           loggedIn = true

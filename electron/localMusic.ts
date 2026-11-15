@@ -341,10 +341,14 @@ export function registerLocalMusicHandlers(): void {
   // 选目录：返回用户选中的绝对路径，取消则 canceled
   ipcMain.handle('localMusic:pickDir', async () => {
     const win = hostWindow()
-    const { canceled, filePaths } = await dialog.showOpenDialog(win ?? undefined, {
+    // Electron 的 dialog 是双重重载：有窗口走 (window, options)，没有就走 (options)
+    const openOptions = {
       title: '选择本地音乐目录',
-      properties: ['openDirectory'],
-    })
+      properties: ['openDirectory'] as const,
+    }
+    const { canceled, filePaths } = win
+      ? await dialog.showOpenDialog(win, { ...openOptions, properties: ['openDirectory'] })
+      : await dialog.showOpenDialog({ ...openOptions, properties: ['openDirectory'] })
     if (canceled || !filePaths.length) return { ok: false, canceled: true }
     return { ok: true, path: filePaths[0] }
   })

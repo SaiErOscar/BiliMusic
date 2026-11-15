@@ -15,50 +15,23 @@ import path from 'path'
 /** 落盘文件名（userData 下）。不写注册表，也不用 localStorage。 */
 const CONFIG_FILE = 'ai.json'
 
-/** 代理模式：system = 跟随系统（默认）；manual = 用下面配置的地址 */
-export type AiProxyMode = 'system' | 'manual'
-
 /**
- * v1.4.12-pre2 推荐触发方式。
- * - auto：打开发现页即自动生成（消耗 API）
- * - click：显示「获取推荐」按钮，用户点击后才请求（默认，省费用）
- * - off：发现页不显示推荐板块
- */
-export type AiRecommendMode = 'auto' | 'click' | 'off'
-
-/**
- * v1.4.12-pre2 用户画像（与「听歌画像」是两件事）：
- * - 听歌画像 = 由播放统计自动聚合出的听歌习惯摘要（只读、数据驱动）
- * - 用户画像 = 用户可自行编辑的自我描述（偏好、场景、禁忌），用于个性化推荐
+ * v1.4.15-pre7 类型单一权威源。
  *
- * 隐私口径（用户明确要求，必须在 UI 里写清）：
- * **只存本地；仅在使用 AI 功能时随请求发送给你所配置的 AI 服务商；
- * 绝不上传开发者**。本应用没有开发者侧的任何上报通道。
+ * 这里曾经自己声明了一份 AiSettings / AiUserProfile / AiRecommendMode，
+ * 但 AiProviderConfig 从未在本文件定义（也从未 import），于是整份类型悄悄漂移：
+ * 渲染层 src/types 早就有 source / wbRegion / wbModel 等字段，主进程这份没有。
+ * 由于 electron/ 长期不在 tsconfig 范围，这个漂移一直没被发现。
+ *
+ * 现在直接复用渲染层的定义——两边共用一个结构，不会再各写一份。
  */
-export interface AiUserProfile {
-  /** 自由文本自我描述，作为推荐上下文 */
-  text: string
-  /** 最近更新时间，用于 UI 展示 */
-  updatedAt: string
-}
-
-export interface AiSettings extends AiProviderConfig {
-  /** 推荐触发方式，缺省 click */
-  recommendMode: AiRecommendMode
-  /** 用户自述画像 */
-  userProfile: AiUserProfile
-  /** AI 人设：影响推荐问候语的语气，不改变挑选逻辑 */
-  persona: string
-  /** v1.4.13-pre11 API 记忆（见渲染层 SavedApi） */
-  savedApis?: {
-    id: string
-    label: string
-    baseUrl: string
-    model: string
-    apiKey?: string
-    usedAt?: number
-  }[]
-}
+export type {
+  AiRecommendMode,
+  AiUserProfile,
+  AiProviderConfig,
+  AiSettings,
+} from '../src/types'
+import type { AiProviderConfig, AiSettings } from '../src/types'
 
 const DEFAULT_SETTINGS: AiSettings = {
   baseUrl: '',

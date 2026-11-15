@@ -401,7 +401,11 @@ async function buildStageSpectrum(
 async function downloadToFile(url: string, filePath: string, label: string, onPercent?: (p: number) => void): Promise<void> {
   // Referer 防盗链只对 https CDN 有意义；Chromium 对 http 目标注入 Referer 直接
   // ERR_BLOCKED_BY_CLIENT（harness 本地回环音源因此改走无 Referer 分支）
-  const headers = url.startsWith('https://') ? { Referer: BILI_REFERER, 'User-Agent': BILI_UA } : { 'User-Agent': BILI_UA }
+  // 显式标注 Record<string, string>：三元两分支的键不同，推断出的联合类型
+  // （{Referer, UA} | {UA, Referer?: undefined}）不满足 HeadersInit。
+  const headers: Record<string, string> = url.startsWith('https://')
+    ? { Referer: BILI_REFERER, 'User-Agent': BILI_UA }
+    : { 'User-Agent': BILI_UA }
   const response = await net.fetch(url, { headers })
   if (!response.ok) throw new Error(`下载失败: HTTP ${response.status} ${response.statusText}`)
   const total = Number(response.headers.get('content-length') || 0)
@@ -449,7 +453,7 @@ async function downloadToFile(url: string, filePath: string, label: string, onPe
         void label
       }
     }
-    await new Promise<void>((resolve, reject) => writeStream.end((err) => (err ? reject(err) : resolve())))
+    await new Promise<void>((resolve, reject) => writeStream.end((err?: Error | null) => (err ? reject(err) : resolve())))
   } finally {
     writeStream.off('error', onError)
     if (!writeStream.closed) writeStream.destroy()

@@ -1,0 +1,36 @@
+{
+  "_comment": [
+    "v1.4.15-pre7 主进程类型检查。",
+    "tsconfig.json 的 include 只有 [src, src/types]，electron/ 从未被类型检查过；",
+    "esbuild 转译不做类型检查，eslint 不查类型，于是形成三重掩盖——",
+    "v1.4.14-pre9 曾因此把 OTA 检查与下载全弄断而 tsc/vitest/eslint 三项全绿。",
+    "本文件只补类型检查，不参与构建（noEmit），也不改变 tsconfig.json。"
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "src/*"
+      ]
+    },
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "electron/**/*.ts"
+  ]
+}

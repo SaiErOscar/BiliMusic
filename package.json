@@ -1,7 +1,7 @@
 {
   "name": "bilimusic",
   "private": true,
-  "version": "1.4.15-pre6",
+  "version": "1.4.15-pre7",
   "description": "BiliMusic - 基于 Bilibili 的桌面音乐播放器",
   "author": "SaiErOscar",
   "license": "GPL-3.0",
@@ -18,6 +18,7 @@
     "electron:build": "npm run build && electron-builder",
     "lint": "eslint src/ electron/ --ext .ts,.tsx,.cjs",
     "lint:fix": "eslint src/ electron/ --ext .ts,.tsx,.cjs --fix",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "build:ota": "npm run build && node scripts/build-ota.mjs",

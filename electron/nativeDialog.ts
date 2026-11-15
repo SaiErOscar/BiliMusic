@@ -27,15 +27,19 @@ export function registerNativeDialogHandlers(): void {
     const detail = typeof options?.detail === 'string' ? options.detail : undefined
     const win = hostWindow()
     // parent + 非空则模态于当前窗口；无窗口时（如极早期调用）退回无 parent 的独立框
-    const { response } = await dialog.showMessageBox(win ?? undefined, {
-      type: 'question',
+    // Electron 的 dialog 是双重重载：有窗口走 (window, options)，没有就走 (options)
+    const boxOptions = {
+      type: 'question' as const,
       buttons: [...CONFIRM_BUTTONS],
       defaultId: 0,
       cancelId: 1,
       noLink: true,
       message,
       ...(detail ? { detail } : {}),
-    })
+    }
+    const { response } = win
+      ? await dialog.showMessageBox(win, boxOptions)
+      : await dialog.showMessageBox(boxOptions)
     return response === 0
   })
 }

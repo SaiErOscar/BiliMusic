@@ -26,8 +26,11 @@ vi.mock('electron', () => ({
     getAllWindows: () => [],
   },
   dialog: {
-    showSaveDialog: async (_win: unknown, opts: { defaultPath?: string }) => {
-      lastSaveOptions = opts
+    // Electron 的 dialog 是双重重载：有父窗口走 (win, options)，没有走 (options)。
+    // 替身必须同时接受两种形态——只认 (win, opts) 会在无窗口分支下把 opts 读成 undefined，
+    // 让「默认文件名」这类断言假失败（v1.4.15-pre7 修 dialog 重载时踩到过）。
+    showSaveDialog: async (...args: unknown[]) => {
+      lastSaveOptions = (args.length > 1 ? args[1] : args[0]) as { defaultPath?: string }
       return saveDialogResult
     },
     showOpenDialog: async () => openDialogResult,

@@ -50,11 +50,15 @@ export function registerPlaylistFileHandlers(): void {
     const content = typeof payload?.content === 'string' ? payload.content : ''
     if (!content) return { ok: false, message: '歌单内容为空，没有可导出的曲目' }
     const win = hostWindow()
-    const { canceled, filePath } = await dialog.showSaveDialog(win ?? undefined, {
+    // Electron 的 dialog 是双重重载：有窗口走 (window, options)，没有就走 (options)
+    const saveOptions = {
       title: '导出歌单为 M3U',
       defaultPath: `${sanitizeM3uFileName(name)}.m3u8`,
       filters: FILTERS,
-    })
+    }
+    const { canceled, filePath } = win
+      ? await dialog.showSaveDialog(win, saveOptions)
+      : await dialog.showSaveDialog(saveOptions)
     if (canceled || !filePath) return { ok: false, canceled: true }
     try {
       const target = ensureM3uExt(filePath)
@@ -68,11 +72,14 @@ export function registerPlaylistFileHandlers(): void {
   // 打开：选择 .m3u/.m3u8 文件，读回文本内容交渲染层解析成歌单
   ipcMain.handle('playlist:importM3u', async () => {
     const win = hostWindow()
-    const { canceled, filePaths } = await dialog.showOpenDialog(win ?? undefined, {
+    const openOptions = {
       title: '导入 M3U 歌单',
       filters: [...FILTERS, { name: '所有文件', extensions: ['*'] }],
-      properties: ['openFile'],
-    })
+      properties: ['openFile'] as const,
+    }
+    const { canceled, filePaths } = win
+      ? await dialog.showOpenDialog(win, { ...openOptions, properties: ['openFile'] })
+      : await dialog.showOpenDialog({ ...openOptions, properties: ['openFile'] })
     if (canceled || !filePaths.length) return { ok: false, canceled: true }
     try {
       const content = fs.readFileSync(filePaths[0], 'utf8')
