@@ -45,6 +45,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # v1.4.15 起主进程也参与类型检查（tsconfig.electron.json）。
+      # 此前 electron/ 从未被检查过：tsc 的 include 只有 src，esbuild 不做类型检查，
+      # eslint 不查类型——三重掩盖，v1.4.14-pre9 曾因此把 OTA 检查与下载全弄断而三项全绿。
+      - name: Typecheck (renderer + electron)
+        run: npm run typecheck
+
       - name: Test
         run: npm run test
 
