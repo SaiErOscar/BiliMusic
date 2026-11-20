@@ -12,6 +12,7 @@ import { registerColorPickerHandlers } from './colorPicker'
 import { registerBackupHandlers } from './backup'
 import { registerPlaylistFileHandlers } from './playlistFile'
 import { registerLocalAudioProtocol, registerLocalMusicHandlers } from './localMusic'
+import { resolveAppAssetPath } from './appPath'
 import { registerNativeDialogHandlers } from './nativeDialog'
 import { registerAiHandlers } from './ai'
 import { registerProfileHandlers } from './profile'
@@ -835,8 +836,15 @@ app.whenReady().then(() => {
   if (!process.env.VITE_DEV_SERVER_URL) {
     protocol.handle('app', async (request) => {
       const { pathname } = new URL(request.url)
-      // 渲染层根目录可能是包内 dist 或已生效的 OTA asar（net.fetch 透明读 asar 内部）
-      const filePath = path.join(getActiveRendererRoot(), decodeURIComponent(pathname))
+      // 渲染层根目录可能是包内 dist 或已生效的 OTA asar（net.fetch 透明读 asar 内部）。
+      // 路径必须过 resolveAppAssetPath 校验：直接把 pathname 拼进根目录会被
+      // "..%2f" 穿越到磁盘任意位置（已实测），解析与断言见 electron/appPath.ts。
+      const resolved = resolveAppAssetPath(getActiveRendererRoot(), pathname)
+      if (!resolved.ok) {
+        console.warn('[BiliMusic] app:// 拒绝越界请求:', pathname, '—', resolved.reason)
+        return new Response('forbidden', { status: 403 })
+      }
+      const filePath = resolved.filePath as string
       try {
         return await net.fetch(pathToFileURL(filePath).toString())
       } catch (err) {

@@ -13,6 +13,37 @@ export const FAVORITES_CHANGED_EVENT = 'bilimusic:favorites-changed'
 export const SETTINGS_CHANGED_EVENT = 'bilimusic:settings-changed'
 export const DOWNLOADS_CHANGED_EVENT = 'bilimusic:downloads-changed'
 
+/**
+ * v1.4.15-pre8 存储写入失败事件（修 R-05）。
+ *
+ * safeSetItem 一直正确返回 boolean，但 13 处调用方全部忽略了它——
+ * 配额满时拖排序、加歌、收藏、导入备份**全部"成功"但不落盘**，重启即回退，
+ * 用户对此毫无感知。这里把失败暴露成一个可订阅事件，由界面统一提示，
+ * 不必改动每个 save 函数的签名（那会波及几十个调用点，风险大于收益）。
+ */
+export const STORAGE_FAILED_EVENT = 'bilimusic:storage-failed'
+
+export interface StorageFailedDetail {
+  /** 失败的键名，便于排查 */
+  key: string
+}
+
+/** 写入失败时广播；UI 订阅后提示「存储空间不足，本次改动未保存」 */
+function notifyStorageFailed(key: string): void {
+  try {
+    window.dispatchEvent(new CustomEvent<StorageFailedDetail>(STORAGE_FAILED_EVENT, { detail: { key } }))
+  } catch {
+    // 非浏览器环境（测试）没有 window，忽略
+  }
+}
+
+/** 统一的落盘入口：返回是否真的写成功，失败时广播 */
+function persist(key: string, value: string): boolean {
+  const ok = safeSetItem(key, value)
+  if (!ok) notifyStorageFailed(key)
+  return ok
+}
+
 const DOWNLOADS_KEY = 'bilimusic_downloads'
 
 /**
@@ -264,11 +295,15 @@ export function loadFavoriteTracks(): Track[] {
   } catch { return [] }
 }
 
-export function saveFavoriteTracks(tracks: Track[]) {
+/** 保存收藏。返回是否真的落盘（v1.4.15-pre8 修 R-05） */
+export function saveFavoriteTracks(tracks: Track[]): boolean {
   try {
-    safeSetItem(FAVORITES_KEY, JSON.stringify(tracks))
-    window.dispatchEvent(new CustomEvent(FAVORITES_CHANGED_EVENT))
-  } catch { /* ignore */ }
+    const ok = persist(FAVORITES_KEY, JSON.stringify(tracks))
+    if (ok) window.dispatchEvent(new CustomEvent(FAVORITES_CHANGED_EVENT))
+    return ok
+  } catch {
+    return false
+  }
 }
 
 // ===== B站收藏夹本地缓存（按收藏夹 ID 保存，供离线回退显示）=====
@@ -400,12 +435,18 @@ export function loadPlaylists(): Playlist[] {
   }
 }
 
-export function savePlaylists(playlists: Playlist[]) {
+/**
+ * 保存歌单。**返回是否真的落盘**（v1.4.15-pre8 修 R-05）。
+ * 调用方拿 false 时应当回滚界面状态并提示，而不是当作成功。
+ */
+export function savePlaylists(playlists: Playlist[]): boolean {
   try {
-    safeSetItem(PLAYLISTS_KEY, JSON.stringify(playlists))
-    notifyPlaylistsChanged()
+    const ok = persist(PLAYLISTS_KEY, JSON.stringify(playlists))
+    // 写入失败就不广播「已变更」，否则各订阅方会拿内存里的新值渲染，看起来像保存成功了
+    if (ok) notifyPlaylistsChanged()
+    return ok
   } catch {
-    // ignore
+    return false
   }
 }
 

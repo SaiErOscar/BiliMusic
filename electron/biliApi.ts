@@ -305,30 +305,47 @@ async function downloadStreamToFile(
   // 用可写流替代逐块 fileHandle.write：Node 内部批量写，吞吐更高且天然处理背压。
   const writeStream = fsSync.createWriteStream(filePath)
   let received = 0
+
+  // **常驻 error 监听（v1.4.15-pre8 修 R-03）**。
+  // 旧写法只在背压分支里临时 once('error')，write() 返回 true 的那条路径完全没有监听者：
+  // 此刻磁盘满 / 权限被回收 / 网络盘断开，Node 会因无人监听的 'error' 事件
+  // 抛未捕获异常，**直接终止整个主进程**（批量下载、MV 导出、正在播放全部中断）。
+  // 已本地复现：手动 emit('error') 在无监听时确实进程退出。
+  // 现在把错误记进 streamError，循环内与结束时各检查一次。
+  let streamError: Error | null = null
+  const onStreamError = (err: Error) => {
+    if (!streamError) streamError = err
+  }
+  writeStream.on('error', onStreamError)
+
   try {
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
+      if (streamError) throw streamError
       if (value) {
         received += value.length
         if (!writeStream.write(value)) {
-          // 背压：等待内部缓冲排空，避免大文件下载时内存无限增长
-          await new Promise<void>((resolve, reject) => {
-            writeStream.once('drain', resolve)
-            writeStream.once('error', reject)
-          })
+          // 背压：等待内部缓冲排空，避免大文件下载时内存无限增长。
+          // 只等 drain —— 错误已由上面的常驻监听捕获，不再在这里注册一次性监听
+          // （旧写法每次背压都挂一个 once('error')，drain 先到时监听器会永久滞留，
+          //  大文件数千次背压后触发 MaxListenersExceededWarning）。
+          await new Promise<void>((resolve) => writeStream.once('drain', resolve))
         }
         if (total > 0 && progressLabel) {
           console.log(`[biliApi] ${progressLabel}: ${Math.round((received / total) * 100)}% (${received}/${total})`)
         }
       }
     }
+    if (streamError) throw streamError
     // 正常结束：等待写入缓冲 flush 到磁盘
     await new Promise<void>((resolve, reject) => {
       // 回调参数显式标注：Node 的类型里这里是可选参数，隐式 any 会漏掉真实错误类型
       writeStream.end((err?: Error | null) => (err ? reject(err) : resolve()))
     })
+    if (streamError) throw streamError
   } finally {
+    writeStream.off('error', onStreamError)
     if (!writeStream.closed) writeStream.destroy()
   }
   return received
@@ -586,11 +603,12 @@ export function registerBiliApiHandlers() {
     return result.filePaths[0]
   })
 
-  // 保存歌词文件到指定路径
-  ipcMain.handle('bili:saveLyricFile', async (_event, content: string, filePath: string) => {
-    await fs.writeFile(filePath, content, 'utf-8')
-    return { success: true, filePath }
-  })
+  // v1.4.15-pre8 删除 'bili:saveLyricFile'（审计 R-02）。
+  // 它把渲染层给的任意绝对路径直接 fs.writeFile，没有任何目录约束——
+  // 一旦渲染层被注入（配合 R-01 的读通道），就是「写任意可写文件」的通道，
+  // 例如写入启动目录实现开机自启。
+  // 核实发现全仓**没有任何调用方**（只有类型声明与 preload 包装），属于死代码：
+  // 与其给死代码补白名单，不如直接删掉，攻击面归零。
 
   // ===== 扫码登录 =====
 

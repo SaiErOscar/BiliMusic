@@ -33,7 +33,6 @@ export type PlatformDownload = Pick<
   | 'showRecordInFolder'
   | 'getDefaultDownloadDir'
   | 'selectDownloadFolder'
-  | 'saveLyricFile'
   | 'onDownloadProgress'
 >
 

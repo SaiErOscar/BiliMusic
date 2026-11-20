@@ -30,8 +30,7 @@ const biliApi = {
   selectDownloadFolder: () =>
     ipcRenderer.invoke('bili:selectDownloadFolder'),
   // 保存歌词文件
-  saveLyricFile: (content, filePath) =>
-    ipcRenderer.invoke('bili:saveLyricFile', content, filePath),
+
 
   // 下载进度回调
   onDownloadProgress: (callback) => {

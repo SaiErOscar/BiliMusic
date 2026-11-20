@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { AddToPlaylistProvider } from '@/contexts/AddToPlaylistContext'
 import LoginDialog from '@/components/LoginDialog'
 import GlobalShareSheet from '@/components/GlobalShareSheet'
+import StorageWarning from '@/components/StorageWarning'
 import MainLayout from '@/components/layout/MainLayout'
 import Discover from '@/pages/Discover'
 import LocalMusic from '@/pages/LocalMusic'
@@ -74,6 +75,7 @@ export default function App() {
             </Routes>
             <GlobalLoginDialog />
             <GlobalShareSheet />
+            <StorageWarning />
           </AddToPlaylistProvider>
         </NowPlayingProvider>
       </PlayerProvider>

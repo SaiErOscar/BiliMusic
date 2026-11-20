@@ -175,9 +175,6 @@ const download: PlatformDownload = {
     // Android 无系统目录选择器（调用方已按能力隐藏按钮）
     return null
   },
-  async saveLyricFile() {
-    return { success: false, filePath: '' }
-  },
   onDownloadProgress() {
     // Android 下载进度暂无原生字节级回调（MediaStore 插件直写），订阅返回空退订
     return () => {}

@@ -211,12 +211,6 @@ export async function selectDownloadFolder(): Promise<string | null> {
   return null
 }
 
-export async function saveLyricFile(content: string, filePath: string): Promise<void> {
-  if (platform.download) {
-    await platform.download.saveLyricFile(content, filePath)
-  }
-}
-
 /**
  * 下载当前播放曲目（音频或视频）
  * 需要先获取播放地址，再根据格式选择下载方式

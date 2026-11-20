@@ -115,7 +115,6 @@ export interface BiliApi {
   showRecordInFolder: (filePath: string) => Promise<{ success: boolean }>
   getDefaultDownloadDir: () => Promise<string>
   selectDownloadFolder: () => Promise<string | null>
-  saveLyricFile: (content: string, filePath: string) => Promise<{ success: boolean; filePath: string }>
   onDownloadProgress: (callback: (data: { filename: string; received: number; total: number; percent: number }) => void) => () => void
   qrGenerate: () => Promise<{
     url: string

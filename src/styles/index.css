@@ -6911,3 +6911,40 @@ span.eq-preset {
   white-space: nowrap;
   opacity: 0.9;
 }
+
+/* v1.4.15-pre8 存储写入失败提示（R-05）：配额满时告诉用户刚才的改动没保存 */
+.storage-warning {
+  position: fixed;
+  left: 50%;
+  bottom: 88px;
+  transform: translateX(-50%);
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(620px, calc(100vw - 48px));
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--color-destructive);
+  background: var(--glass-bg-heavy);
+  color: var(--color-foreground);
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+}
+
+.storage-warning > svg { flex-shrink: 0; color: var(--color-destructive); }
+
+.storage-warning button {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 2px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-muted);
+  cursor: pointer;
+}
+
+.storage-warning button:hover { opacity: 0.75; }
