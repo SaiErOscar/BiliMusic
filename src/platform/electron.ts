@@ -171,6 +171,7 @@ export const electronPlatform: Platform = {
           localMusicReadTags: a.localMusicReadTags,
           localMusicReadTagsFallback: a.localMusicReadTagsFallback,
           localMusicCheckExists: a.localMusicCheckExists,
+          localMusicAuthorizePaths: a.localMusicAuthorizePaths,
           localMusicOnProgress: a.localMusicOnProgress,
         }
       : undefined

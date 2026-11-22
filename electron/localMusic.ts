@@ -66,6 +66,55 @@ export interface ScanResult {
 /** 正在进行的扫描的取消标志；同一时间只允许一个扫描 */
 let activeCancel: (() => void) | null = null
 
+/**
+ * v1.4.16-pre2 已授权的音乐目录集合（绝对路径，小写）。
+ *
+ * 由用户通过系统对话框选定的目录登记而来。lm:// 只放行这些目录内的文件——
+ * 否则渲染层一旦出现注入面，这个协议就是「任意音频路径读取」通道
+ * （审计 R-30 指出的问题）。只校验扩展名是不够的。
+ */
+const authorizedDirs = new Set<string>()
+
+/** 登记一个已授权目录（用户通过对话框选定后调用） */
+export function authorizeMusicDir(dir: string): void {
+  if (!dir) return
+  try {
+    authorizedDirs.add(path.resolve(dir).toLowerCase())
+  } catch {
+    // 路径非法则忽略，不放宽任何权限
+  }
+}
+
+/**
+ * v1.4.16-pre2 为一个具体文件授权（用于 M3U 导入的本地路径条目）。
+ *
+ * 只授权该文件所在目录——用户从 M3U 引入的路径同样是他自己的文件，
+ * 但不应因此放开整个盘符。
+ */
+export function authorizeMusicFile(filePath: string): void {
+  try {
+    authorizeMusicDir(path.dirname(path.resolve(filePath)))
+  } catch {
+    // 忽略非法路径
+  }
+}
+
+/** 判断目标文件是否落在某个已授权目录内 */
+export function isAuthorizedMusicFile(filePath: string): boolean {
+  let target: string
+  try {
+    target = path.resolve(filePath).toLowerCase()
+  } catch {
+    return false
+  }
+  for (const dir of authorizedDirs) {
+    // 前缀断言带分隔符，避免 /music 放行 /music-evil
+    const withSep = dir.endsWith(path.sep) ? dir : dir + path.sep
+    if (target.startsWith(withSep)) return true
+  }
+  return false
+}
+
 function hostWindow(): BrowserWindow | null {
   return BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0] || null
 }
@@ -290,6 +339,12 @@ export function registerLocalAudioProtocol(): void {
       if (!mime || !(AUDIO_EXTS as readonly string[]).includes(ext)) {
         return new Response('forbidden', { status: 403 })
       }
+      // v1.4.16-pre2：只放行用户已导入目录内的文件。
+      // 光校验扩展名不够——那样任何 .mp3 都能读，等于「任意音频路径读取」通道。
+      if (!isAuthorizedMusicFile(target)) {
+        console.warn('[BiliMusic] lm:// 拒绝未授权路径:', target)
+        return new Response('forbidden', { status: 403 })
+      }
 
       let stat: fs.Stats
       try {
@@ -350,6 +405,8 @@ export function registerLocalMusicHandlers(): void {
       ? await dialog.showOpenDialog(win, { ...openOptions, properties: ['openDirectory'] })
       : await dialog.showOpenDialog({ ...openOptions, properties: ['openDirectory'] })
     if (canceled || !filePaths.length) return { ok: false, canceled: true }
+    // 用户显式选定的目录即视为授权，登记后 lm:// 才允许读它下面的文件
+    authorizeMusicDir(filePaths[0])
     return { ok: true, path: filePaths[0] }
   })
 
@@ -426,6 +483,15 @@ export function registerLocalMusicHandlers(): void {
     if (!target) return { ok: false, message: '没有指定文件' }
     const tags = await readTagsWithFfmpeg(target)
     return tags ? { ok: true, tags } : { ok: false, message: '无法读取标签' }
+  })
+
+  // v1.4.16-pre2：为一批本地文件授权（M3U 导入的本地路径条目走这里）
+  ipcMain.handle('localMusic:authorizePaths', (_e, paths: string[]) => {
+    const list = Array.isArray(paths) ? paths : []
+    for (const p of list) {
+      if (typeof p === 'string' && p) authorizeMusicFile(p)
+    }
+    return { ok: true }
   })
 
   // 检查文件是否还存在（渲染层用来标记失效条目，不自动删）

@@ -261,6 +261,7 @@ export type PlatformLocalMusic = Pick<
   | 'localMusicReadTags'
   | 'localMusicReadTagsFallback'
   | 'localMusicCheckExists'
+  | 'localMusicAuthorizePaths'
   | 'localMusicOnProgress'
 >
 

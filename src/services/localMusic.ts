@@ -112,6 +112,8 @@ export function buildLocalTrack(
   tags: AudioTags | null,
   /** 可选：把内嵌封面字节转成可显示的 URL（渲染层传 Blob URL 工厂，测试可传桩） */
   coverUrlFactory?: (cover: { data: Uint8Array; mime: string }) => string,
+  /** v1.4.16-pre2 文件指纹，供下次扫描做增量判断 */
+  fileMeta?: { mtime: string; size: number },
 ): Track {
   const guessed = parseFileName(filePath)
   const title = tags?.title?.trim() || guessed.title
@@ -131,7 +133,23 @@ export function buildLocalTrack(
     isLiked: false,
     localPath: filePath,
     addedAt: new Date().toISOString(),
+    ...(fileMeta ? { localMtime: fileMeta.mtime, localSize: fileMeta.size } : {}),
   }
+}
+
+/**
+ * v1.4.16-pre2 判断一个已索引的曲目是否需要重新读标签。
+ *
+ * 文件没变（mtime 与 size 都一致）就跳过——这是增量扫描的核心。
+ * 缺字段的旧索引一律视为「需要重读」，保证升级后第一次扫描会把指纹补齐。
+ */
+export function needsRescan(
+  existing: Track | undefined,
+  fileMeta: { mtime: string; size: number },
+): boolean {
+  if (!existing) return true
+  if (!existing.localMtime || existing.localSize === undefined) return true
+  return existing.localMtime !== fileMeta.mtime || existing.localSize !== fileMeta.size
 }
 
 /**

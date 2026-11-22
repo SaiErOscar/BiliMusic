@@ -466,6 +466,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [handleTrackEnd])
 
   // 当 currentTrack 变化时记录最近播放（去重）
+  // v1.4.16-pre2：本地曲目**也计入最近播放**——那是用户自己的收听历史，
+  // 刚听完的本地歌在「最近播放」里找不到会显得功能割裂。
   useEffect(() => {
     if (currentTrack) addRecentTrack(currentTrack)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -475,8 +477,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const playStatRef = useRef<{ id: string; lastPos: number; maxRatio: number } | null>(null)
   useEffect(() => {
     if (!currentTrack) return
-    recordPlayStart(currentTrack)
-    playStatRef.current = { id: currentTrack.id, lastPos: 0, maxRatio: 0 }
+    // v1.4.16-pre2：本地曲目**不计入 AI 听歌画像**。
+    // 画像是给推荐用的，分析的是 B 站听歌偏好；本地曲目没有 B 站元数据
+    // （无 bvid、无分区、无播放量），混进去只会稀释画像、把推荐带偏。
+    // 用户口径：计入最近播放，但不进画像。
+    const isLocal = !!currentTrack.localPath
+    if (!isLocal) recordPlayStart(currentTrack)
+    // 本地曲目不建埋点状态：下面的结算与 timeupdate 累计都靠它，
+    // 不建就等于整条画像链路对本地曲目彻底静默。
+    playStatRef.current = isLocal ? null : { id: currentTrack.id, lastPos: 0, maxRatio: 0 }
     return () => {
       const s = playStatRef.current
       if (!s) return

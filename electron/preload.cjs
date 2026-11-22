@@ -209,6 +209,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   localMusicReadTags: (filePath) => ipcRenderer.invoke('localMusic:readTags', filePath),
   localMusicReadTagsFallback: (filePath) => ipcRenderer.invoke('localMusic:readTagsFallback', filePath),
   localMusicCheckExists: (paths) => ipcRenderer.invoke('localMusic:checkExists', paths),
+  localMusicAuthorizePaths: (paths) => ipcRenderer.invoke('localMusic:authorizePaths', paths),
   localMusicOnProgress: (cb) => {
     const listener = (_e, p) => cb(p)
     ipcRenderer.on('localMusic:scanProgress', listener)

@@ -47,6 +47,8 @@ const EXPECTED_CHANNELS = [
   'localMusic:readTags',
   'localMusic:readTagsFallback',
   'localMusic:checkExists',
+  // v1.4.16-pre2：M3U 导入的本地路径需要显式授权才能被 lm:// 放行
+  'localMusic:authorizePaths',
 ]
 
 let tmpRoot = ''
@@ -86,8 +88,8 @@ describe('electron/localMusic 导出常量', () => {
 })
 
 describe('registerLocalMusicHandlers 注册的 channel', () => {
-  it('注册了 6 个 channel，且名字与 preload 一致', () => {
-    expect(handleCalls).toHaveLength(6)
+  it('注册了 7 个 channel，且名字与 preload 一致', () => {
+    expect(handleCalls).toHaveLength(7)
     expect(handleCalls.slice().sort()).toEqual(EXPECTED_CHANNELS.slice().sort())
   })
 

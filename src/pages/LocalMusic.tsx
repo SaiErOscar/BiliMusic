@@ -26,6 +26,7 @@ import {
   createCoverUrl,
   filterLocalTracks,
   mergeLocalTracks,
+  needsRescan,
   scanNotice,
   sortLocalTracks,
   sortLocalTracksBy,
@@ -108,11 +109,36 @@ export default function LocalMusic() {
       if (text) setNotice(text)
       if (!res.ok || !res.files?.length) return
 
-      // 逐首读标签：先走纯 JS 解析（毫秒级），读不出再走 ffmpeg 兜底（约 92ms/首）
+      /*
+       * v1.4.16-pre2 增量扫描：
+       * 先用现有索引建「路径 → 曲目」表，文件 mtime 与 size 都没变就**跳过读标签**，
+       * 直接复用已有条目。上千首的曲库重扫时，这一步能把绝大多数文件省掉。
+       */
+      const existingList = loadLocalTracks()
+      const existingByPath = new Map<string, Track>()
+      for (const t of existingList) {
+        if (t.localPath) existingByPath.set(t.localPath.toLowerCase(), t)
+      }
+
       const built: Track[] = []
+      let reused = 0
       for (let i = 0; i < res.files.length; i++) {
         const f = res.files[i]
         if (!aliveRef.current) return
+
+        const meta = { mtime: f.mtime, size: f.size }
+        const existing = existingByPath.get(f.filePath.toLowerCase())
+        if (!needsRescan(existing, meta) && existing) {
+          // 文件没变：沿用旧条目（保留收藏状态、加入时间），只刷新指纹
+          built.push({ ...existing, localMtime: meta.mtime, localSize: meta.size })
+          reused += 1
+          if (i % 20 === 0) {
+            setProgress({ scanned: i + 1, found: res.files.length, current: f.filePath, skipped: res.skipped || 0 })
+          }
+          continue
+        }
+
+        // 逐首读标签：先走纯 JS 解析（毫秒级），读不出再走 ffmpeg 兜底（约 92ms/首）
         let tags = null as ReturnType<typeof parseAudioTags>
         const raw = await cap.localMusicReadTags?.(f.filePath)
         if (raw?.ok && raw.head) {
@@ -131,19 +157,26 @@ export default function LocalMusic() {
           }
         }
         // v1.4.16-pre1：把内嵌封面转成 Blob URL（没有封面则留空走占位图）
-        built.push(buildLocalTrack(f.filePath, tags, createCoverUrl))
+        // v1.4.16-pre2：同时记录文件指纹，供下次增量判断
+        built.push(buildLocalTrack(f.filePath, tags, createCoverUrl, meta))
         if (i % 20 === 0) {
           setProgress({ scanned: i + 1, found: res.files.length, current: f.filePath, skipped: res.skipped || 0 })
         }
       }
 
-      const merged = sortLocalTracks(mergeLocalTracks(loadLocalTracks(), built))
+      const merged = sortLocalTracks(mergeLocalTracks(existingList, built))
       saveLocalTracks(merged)
       setTracks(merged)
       const nextDirs = dirs.includes(dir) ? dirs : [...dirs, dir]
       saveLocalDirs(nextDirs)
       setDirs(nextDirs)
-      if (!text) setNotice('已导入 ' + built.length + ' 首本地音乐')
+      if (!text) {
+        setNotice(
+          reused > 0
+            ? `已导入 ${built.length} 首本地音乐（${reused} 首未变化，已跳过重读）`
+            : '已导入 ' + built.length + ' 首本地音乐',
+        )
+      }
     } catch (err) {
       if (aliveRef.current) setNotice(err instanceof Error ? err.message : '扫描失败')
     } finally {

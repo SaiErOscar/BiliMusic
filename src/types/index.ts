@@ -19,6 +19,14 @@ export interface Track {
    * B 站曲目上恒为 undefined，旧记录同样没有这个字段。
    */
   localPath?: string
+  /**
+   * v1.4.16-pre2 本地文件的最后修改时间（ISO）。
+   * 与 localSize 一起构成「文件是否变过」的判据：重新扫描时两者都没变就跳过读标签，
+   * 避免每次重扫都把整个曲库重读一遍（上千首时是明显的等待）。
+   */
+  localMtime?: string
+  /** v1.4.16-pre2 本地文件字节数，与 localMtime 配合做增量判断 */
+  localSize?: number
 }
 
 export interface Playlist {

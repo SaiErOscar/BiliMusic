@@ -360,6 +360,8 @@ declare global {
       localMusicReadTagsFallback?: (filePath: string) => Promise<{ ok: boolean; tags?: { title?: string; artist?: string; album?: string; duration?: number }; message?: string }>
       /** v1.4.15-pre5 本地音乐：检查文件是否还存在，返回缺失列表 */
       localMusicCheckExists?: (paths: string[]) => Promise<{ ok: boolean; missing: string[] }>
+      /** v1.4.16-pre2 本地音乐：为一组本地文件授权（M3U 导入的本地路径条目） */
+      localMusicAuthorizePaths?: (paths: string[]) => Promise<{ ok: boolean }>
       /** v1.4.15-pre5 本地音乐：订阅扫描进度，返回退订函数 */
       localMusicOnProgress?: (cb: (p: LocalScanProgress) => void) => () => void
       platform: string
