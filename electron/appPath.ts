@@ -43,10 +43,16 @@ export function resolveAppAssetPath(rootPath: string, pathname: string): Resolve
   // 解码后仍可能出现裸 NUL（"%00" 已被上面挡掉，这里兜底）
   if (decoded.indexOf('\u0000') !== -1) return { ok: false, reason: 'null-byte' }
 
+  // **把反斜杠统一当分隔符**（v1.4.15-pre8 跨平台修正）。
+  // posix 的 path.resolve 不认 "\" 为分隔符，于是 "..%5c..%5cWindows/win.ini"
+  // 在 Linux/macOS 上会被当成一个普通文件名放行——本地 Windows 测不出来，
+  // 是 CI 的 ubuntu/macos 先暴露的。攻击串必须按"两种分隔符都算"来归一化。
+  const normalized = decoded.replace(/\\/g, '/')
+
   const root = path.resolve(rootPath)
-  // 关键：拼成 './' + decoded 再 resolve，让 ".." 真正参与归一化；
+  // 拼成 './' + normalized 再 resolve，让 ".." 真正参与归一化；
   // 直接 path.join(root, decoded) 在绝对路径片段（如 "/C:/x"）下会丢弃 root。
-  const target = path.resolve(root, '.' + decoded)
+  const target = path.resolve(root, '.' + normalized)
 
   // 前缀断言必须带分隔符，否则 root="…/dist" 会放行 "…/dist-evil/x"
   const withSep = root.endsWith(path.sep) ? root : root + path.sep
