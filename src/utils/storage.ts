@@ -665,7 +665,18 @@ export function loadLocalTracks(): Track[] {
 }
 
 export function saveLocalTracks(tracks: Track[]): void {
-  safeSetItem(LOCAL_TRACKS_KEY, JSON.stringify(tracks))
+  /*
+   * v1.4.16-pre1：落盘前剥掉 blob: 封面 URL。
+   *
+   * 封面是扫描时用 URL.createObjectURL 生成的，**只在当前页面生命周期内有效**，
+   * 刷新后全部失效。原样存进 localStorage 会让下次启动读到一堆死链，
+   * 界面上表现为「封面加载失败」而不是「没有封面」，比空着更糟。
+   * 这里只存元数据，封面下次扫描时重新生成。
+   */
+  const persistable = tracks.map((t) =>
+    t.coverUrl && t.coverUrl.startsWith('blob:') ? { ...t, coverUrl: '' } : t,
+  )
+  safeSetItem(LOCAL_TRACKS_KEY, JSON.stringify(persistable))
 }
 
 /** 已导入过的目录列表，供界面回显与「重新扫描」 */

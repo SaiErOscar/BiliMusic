@@ -231,6 +231,11 @@ export default function DownloadButton({
     }
   }, [actualBvid, actualAid, actualCid, actualId, actualTrack, actualTitle, qualityPref, settings.downloadDir, settings.mvWatermark, settings.mvCleanExport, settings.audioVisualizer])
 
+  // v1.4.16-pre1：本地曲目没有 B 站稿件，下载与 MV 导出都无从谈起。
+  // 旧守卫是 `!actualBvid || !actualId`，但本地曲目的 id 是路径派生的 local_xxx（非空），
+  // 于是守卫失效，下游把 local_xxx 当 bvid 去请求 B 站——必然 404。
+  // 本地音乐页每一行都会渲染默认操作组，所以这个入口必须在这里关掉。
+  if (actualTrack?.localPath || actualBvid?.startsWith('local_')) return null
   if (!actualBvid || !actualId) return null
 
   // MV 导出中按钮即取消入口（此前单曲导出无法取消，只能等它跑完）

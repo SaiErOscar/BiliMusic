@@ -7,8 +7,8 @@
  *
  * 能力探测沿用项目口径：platform.localMusic 缺失（非桌面端）时整块入口隐藏。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { FolderOpen, HardDriveDownload, RefreshCw, Trash2, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FolderOpen, HardDriveDownload, RefreshCw, Search, Trash2, X } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import {
   EmptyLibrary,
@@ -21,11 +21,16 @@ import VirtualList from '@/components/VirtualList'
 import { platform } from '@/platform'
 import { parseAudioTags } from '@/services/audioTags'
 import {
+  LOCAL_SORT_LABELS,
   buildLocalTrack,
+  createCoverUrl,
+  filterLocalTracks,
   mergeLocalTracks,
   scanNotice,
   sortLocalTracks,
+  sortLocalTracksBy,
 } from '@/services/localMusic'
+import type { LocalSortMode } from '@/services/localMusic'
 import { loadLocalDirs, loadLocalTracks, saveLocalDirs, saveLocalTracks } from '@/utils/storage'
 import type { Track } from '@/types'
 import type { LocalScanProgress } from '@/types/electron'
@@ -42,6 +47,14 @@ export default function LocalMusic() {
   /** 已确认丢失的文件路径集合（小写）；只用于界面标记，不参与删除判断 */
   const [missingPaths, setMissingPaths] = useState<Set<string>>(() => new Set())
   const missingCount = missingPaths.size
+  // v1.4.16-pre1 搜索与排序
+  const [query, setQuery] = useState('')
+  const [sortMode, setSortMode] = useState<LocalSortMode>('artist')
+  /** 过滤 + 排序后的展示列表（原 tracks 保持完整，用于存盘与失效检查） */
+  const visibleTracks = useMemo(
+    () => sortLocalTracksBy(filterLocalTracks(tracks, query), sortMode),
+    [tracks, query, sortMode],
+  )
   /** 卸载后不再 setState：扫描可能比页面存活更久 */
   const aliveRef = useRef(true)
   /** 供 effect 读取最新曲目而不必把它放进依赖（否则每加一首就重跑一轮 IO） */
@@ -117,7 +130,8 @@ export default function LocalMusic() {
             }
           }
         }
-        built.push(buildLocalTrack(f.filePath, tags))
+        // v1.4.16-pre1：把内嵌封面转成 Blob URL（没有封面则留空走占位图）
+        built.push(buildLocalTrack(f.filePath, tags, createCoverUrl))
         if (i % 20 === 0) {
           setProgress({ scanned: i + 1, found: res.files.length, current: f.filePath, skipped: res.skipped || 0 })
         }
@@ -151,6 +165,19 @@ export default function LocalMusic() {
   const handleCancel = useCallback(() => {
     void platform.localMusic?.localMusicCancel?.()
   }, [])
+
+  /**
+   * v1.4.16-pre1 移除一个已导入的目录。
+   *
+   * 只从「已导入目录」列表里移除，**不删曲目**——曲目可能来自多个目录，
+   * 也可能用户只是不想再看到这个目录的重新扫描入口。要清曲目用「清理失效」。
+   */
+  const handleRemoveDir = useCallback((dir: string) => {
+    const next = dirs.filter((d) => d !== dir)
+    saveLocalDirs(next)
+    setDirs(next)
+    setNotice('已移除目录：' + dir + '（曲目仍保留）')
+  }, [dirs])
 
   /** 一键清理失效条目：用户显式点击才删 */
   const handleCleanMissing = useCallback(async () => {
@@ -248,6 +275,15 @@ export default function LocalMusic() {
                   <RefreshCw size={13} />
                   重新扫描
                 </button>
+                <button
+                  type="button"
+                  className="local-dir-remove"
+                  onClick={() => handleRemoveDir(d)}
+                  title="从这个列表移除（不删除曲目）"
+                >
+                  <Trash2 size={13} />
+                  移除
+                </button>
               </div>
             ))}
           </div>
@@ -262,8 +298,44 @@ export default function LocalMusic() {
         />
       ) : (
         <MusicSection title="本地曲目" icon={<HardDriveDownload size={18} />}>
+          {/* v1.4.16-pre1 搜索与排序 */}
+          <div className="local-toolbar">
+            <div className="local-search">
+              <Search size={14} />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="搜索标题或歌手"
+                aria-label="搜索本地曲目"
+              />
+              {query && (
+                <button type="button" onClick={() => setQuery('')} title="清空" aria-label="清空搜索">
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+            <select
+              className="local-sort"
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as LocalSortMode)}
+              aria-label="排序方式"
+            >
+              {(Object.keys(LOCAL_SORT_LABELS) as LocalSortMode[]).map((m) => (
+                <option key={m} value={m}>{LOCAL_SORT_LABELS[m]}</option>
+              ))}
+            </select>
+            {query && (
+              <span className="local-filter-count">
+                {visibleTracks.length} / {tracks.length}
+              </span>
+            )}
+          </div>
+          {visibleTracks.length === 0 ? (
+            <p className="local-empty-filter">没有匹配「{query}」的曲目</p>
+          ) : (
           <VirtualList
-            items={tracks}
+            items={visibleTracks}
             rowHeight={56}
             renderRow={(track, i) => (
               <TrackListRow
@@ -281,6 +353,7 @@ export default function LocalMusic() {
               />
             )}
           />
+          )}
         </MusicSection>
       )}
     </MusicPageShell>

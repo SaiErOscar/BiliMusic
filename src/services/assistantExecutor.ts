@@ -563,7 +563,12 @@ const HANDLERS: Record<string, Handler> = {
     const resolved = await resolveTrack(ctx.params.track, ctx)
     if ('error' in resolved) return fail(resolved.error)
     const track = resolved.track
-    if (!track.bvid && !track.id) return fail('这首歌没有 bvid，下载不了。')
+    // v1.4.16-pre1：本地曲目不能被下载——它本来就在本地，且没有 B 站稿件号。
+    // 旧守卫只看 `!track.bvid && !track.id`，本地曲目的 id 是 local_xxx（非空）所以放行，
+    // 下游把 local_xxx 当 bvid 去请求 B 站，必然失败。
+    if (track.localPath || (!track.bvid && !track.id)) {
+      return fail('这是本地曲目，本来就在你电脑上，不需要下载。')
+    }
 
     const settings = loadAppSettings()
     /*
@@ -609,6 +614,12 @@ const HANDLERS: Record<string, Handler> = {
     for (let i = 0; i < playlist.tracks.length; i += 1) {
       const track = playlist.tracks[i]
       const filename = cleaned[i] || track.title
+      // v1.4.16-pre1：批量下载跳过本地曲目（它们没有 B 站稿件号，发请求只会失败）。
+      // 记进 failed 并带明确原因，用户能看到「哪几首被跳过、为什么」。
+      if (track.localPath) {
+        failed.push(track.title + '（本地曲目，无需下载）')
+        continue
+      }
       try {
         await ctx.deps.downloadTrack(
           track.bvid || track.id,

@@ -11,6 +11,25 @@ import type { AudioTags } from '@/services/audioTags'
 export const AUDIO_EXTS = ['.mp3', '.flac', '.m4a', '.wav', '.ogg'] as const
 
 /**
+ * v1.4.16-pre1 把内嵌封面字节转成可显示的 Blob URL。
+ *
+ * 用 Blob URL 而不是 data URL：封面动辄几十到几百 KB，base64 会再放大 33%，
+ * 且 data URL 会随曲目对象一起进 localStorage，把配额撑爆。
+ *
+ * 注意：调用方负责在曲目被移除/重新扫描时 revoke，否则每张封面泄漏一个 Blob。
+ * 目前封面只在内存里（不落 localStorage），刷新页面即全部释放。
+ */
+export function createCoverUrl(cover: { data: Uint8Array; mime: string }): string {
+  try {
+    const blob = new Blob([cover.data], { type: cover.mime || 'image/jpeg' })
+    return URL.createObjectURL(blob)
+  } catch {
+    // 非浏览器环境或 Blob 不可用：退回无封面，不影响曲目可用
+    return ''
+  }
+}
+
+/**
  * v1.4.15-pre6 本地音频播放协议。
  *
  * **为什么不是 file://（实测结论，别改回去）**：
@@ -91,15 +110,20 @@ export function parseFileName(filePath: string): { title: string; artist: string
 export function buildLocalTrack(
   filePath: string,
   tags: AudioTags | null,
+  /** 可选：把内嵌封面字节转成可显示的 URL（渲染层传 Blob URL 工厂，测试可传桩） */
+  coverUrlFactory?: (cover: { data: Uint8Array; mime: string }) => string,
 ): Track {
   const guessed = parseFileName(filePath)
   const title = tags?.title?.trim() || guessed.title
   const artist = tags?.artist?.trim() || guessed.artist
+  // v1.4.16-pre1 内嵌封面：有就转 URL，没有留空走占位图。
+  // 不在本模块直接造 Blob——本模块要能在 Node 测试环境跑，没有 URL.createObjectURL。
+  const coverUrl = tags?.cover && coverUrlFactory ? coverUrlFactory(tags.cover) : ''
   return {
     id: localTrackId(filePath),
     title,
     artist,
-    coverUrl: '',
+    coverUrl,
     duration: tags?.duration ?? 0,
     videoUrl: '',
     bvid: '',
@@ -130,6 +154,57 @@ export function mergeLocalTracks(existing: Track[], scanned: Track[]): Track[] {
     byPath.set(key, old ? { ...old, title: t.title, artist: t.artist, duration: t.duration, localPath: t.localPath } : t)
   }
   return [...byPath.values()]
+}
+
+/** v1.4.16-pre1 本地曲库排序方式 */
+export type LocalSortMode = 'artist' | 'title' | 'added' | 'duration'
+
+/** 排序标签，供界面下拉使用 */
+export const LOCAL_SORT_LABELS: Record<LocalSortMode, string> = {
+  artist: '按歌手',
+  title: '按标题',
+  added: '按加入时间',
+  duration: '按时长',
+}
+
+/**
+ * v1.4.16-pre1 按指定方式排序。
+ *
+ * 与 sortLocalTracks（固定「歌手 → 标题」）并存：后者是默认口径，
+ * 这里给用户显式选择。两者都不修改原数组。
+ */
+export function sortLocalTracksBy(tracks: Track[], mode: LocalSortMode): Track[] {
+  const list = [...tracks]
+  switch (mode) {
+    case 'title':
+      return list.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'zh-CN'))
+    case 'added':
+      // 新加的在前；没有 addedAt 的排最后（旧索引可能缺这个字段）
+      return list.sort((a, b) => {
+        const ta = a.addedAt ? Date.parse(a.addedAt) : 0
+        const tb = b.addedAt ? Date.parse(b.addedAt) : 0
+        return tb - ta
+      })
+    case 'duration':
+      return list.sort((a, b) => (b.duration || 0) - (a.duration || 0))
+    case 'artist':
+    default:
+      return sortLocalTracks(list)
+  }
+}
+
+/**
+ * v1.4.16-pre1 按关键词过滤本地曲目。
+ *
+ * 同时匹配标题与歌手，大小写不敏感；空关键词返回全部（返回原数组引用，
+ * 调用方可据此跳过重复计算）。
+ */
+export function filterLocalTracks(tracks: Track[], query: string): Track[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return tracks
+  return tracks.filter((t) =>
+    (t.title || '').toLowerCase().includes(q) || (t.artist || '').toLowerCase().includes(q),
+  )
 }
 
 /** 排序：按歌手，再按标题；都用中文排序规则 */

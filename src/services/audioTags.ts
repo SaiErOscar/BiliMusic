@@ -21,6 +21,17 @@ export interface AudioTags {
   duration?: number
   /** 命中的标签格式，便于排查「为什么这首没标签」 */
   source: 'id3v2' | 'id3v1' | 'flac' | 'mp4' | 'none'
+  /**
+   * v1.4.16-pre1 内嵌封面：原始图片字节。
+   *
+   * 三种格式的存放位置各不相同：
+   * - MP3：ID3v2 的 APIC 帧（v2.2 叫 PIC）
+   * - FLAC：PICTURE 元数据块（type=6）
+   * - M4A：moov/udta/meta/ilst 下的 covr atom
+   * 这里只取出字节与 MIME，不在这里生成 Blob URL——
+   * 那是渲染层的事（主进程解析出的对象要能跨进程传，Blob 不行）。
+   */
+  cover?: { data: Uint8Array; mime: string }
 }
 
 /** 读取文件头部时建议读多少字节：ID3v2 帧与 MP4 moov 一般都在这个范围内 */
@@ -89,6 +100,26 @@ export function decodeText(bytes: Uint8Array, encoding: number): string {
   return ''
 }
 
+/**
+ * 按文件头魔数猜图片 MIME。
+ *
+ * 标签里声明的 MIME 经常是错的（或干脆为空），以实际字节为准更可靠。
+ * 认不出来时退回 image/jpeg——封面绝大多数是 JPEG，且浏览器对错误 MIME
+ * 的图片仍会尝试解码，不会白屏。
+ */
+export function sniffImageMime(bytes: Uint8Array): string {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return 'image/png'
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg'
+  }
+  if (bytes.length >= 6 && isAscii(bytes, 0, 'GIF8')) return 'image/gif'
+  if (bytes.length >= 12 && isAscii(bytes, 0, 'RIFF') && isAscii(bytes, 8, 'WEBP')) return 'image/webp'
+  if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d) return 'image/bmp'
+  return 'image/jpeg'
+}
+
 /** 同步安全整数（ID3v2 的 size 字段每字节只用低 7 位） */
 function syncSafe(bytes: Uint8Array, offset: number): number {
   return (
@@ -118,6 +149,55 @@ const ID3_FRAMES: Record<string, TextField> = {
   TP1: 'artist',
   TALB: 'album',
   TAL: 'album',
+}
+
+/**
+ * 解析 ID3v2 的 APIC / PIC 帧体，取出图片字节。
+ *
+ * 帧体结构：编码(1) + MIME(以 0 结尾，v2.2 是 3 字符图片格式) + 图片类型(1) + 描述(以 0 结尾) + 图片数据。
+ * 描述字段的终止符宽度随编码变化（UTF-16 是 2 字节），跳过时必须按编码判断，
+ * 否则描述为中文时会从图片数据中间开始读，得到一堆乱码。
+ */
+function parseApicFrame(body: Uint8Array, isV22: boolean): { data: Uint8Array; mime: string } | null {
+  const encoding = body[0]
+  let p = 1
+
+  let mime = ''
+  if (isV22) {
+    // v2.2 的 PIC 用 3 字符图片格式（JPG/PNG），不是 MIME
+    if (p + 3 > body.length) return null
+    const fmt = String.fromCharCode(body[p], body[p + 1], body[p + 2]).toUpperCase()
+    mime = fmt === 'PNG' ? 'image/png' : 'image/jpeg'
+    p += 3
+  } else {
+    // MIME 是 ISO-8859-1 的 0 结尾串
+    const start = p
+    while (p < body.length && body[p] !== 0) p++
+    if (p >= body.length) return null
+    let raw = ''
+    for (let i = start; i < p; i++) raw += String.fromCharCode(body[i])
+    mime = raw.toLowerCase()
+    p += 1
+  }
+
+  // 图片类型（1 字节），随后是描述
+  if (p >= body.length) return null
+  p += 1
+
+  // 描述终止符：UTF-16（encoding 1/2）是 2 字节 0，其余是 1 字节
+  if (encoding === 1 || encoding === 2) {
+    while (p + 1 < body.length && !(body[p] === 0 && body[p + 1] === 0)) p += 2
+    p += 2
+  } else {
+    while (p < body.length && body[p] !== 0) p++
+    p += 1
+  }
+
+  if (p >= body.length) return null
+  const data = body.subarray(p)
+  if (data.length < 32) return null
+  // 声明的 MIME 常不可靠，以实际字节为准
+  return { data, mime: sniffImageMime(data) || mime }
 }
 
 /**
@@ -153,9 +233,16 @@ export function parseId3v2(bytes: Uint8Array): AudioTags | null {
     }
     if (size <= 0 || pos + headerLen + size > end) break
 
+    const body = bytes.subarray(pos + headerLen, pos + headerLen + size)
+
+    // v1.4.16-pre1 封面帧：APIC（v2.3/v2.4）与 PIC（v2.2）
+    if ((id === 'APIC' || id === 'PIC') && body.length > 4 && !tags.cover) {
+      const cover = parseApicFrame(body, id === 'PIC')
+      if (cover) tags.cover = cover
+    }
+
     const field = ID3_FRAMES[id]
     if (field) {
-      const body = bytes.subarray(pos + headerLen, pos + headerLen + size)
       if (body.length > 1) {
         const value = decodeText(body.subarray(1), body[0])
         // 同一字段出现多次时保留第一次：后面多半是翻译/备选版本
@@ -165,7 +252,9 @@ export function parseId3v2(bytes: Uint8Array): AudioTags | null {
     pos += headerLen + size
   }
 
-  return tags.title || tags.artist || tags.album ? tags : null
+  // v1.4.16-pre1：只有封面、没有文字标签的曲目也必须返回结果，
+  // 否则「有封面的纯音乐」会被整条丢弃（测试构造的正是这种情况）。
+  return tags.title || tags.artist || tags.album || tags.cover ? tags : null
 }
 
 /**
@@ -223,6 +312,27 @@ export function parseFlac(bytes: Uint8Array): AudioTags | null {
       sampleRate = (d[10] << 12) | (d[11] << 4) | (d[12] >> 4)
       // totalSamples 是 36 位：d[13] 低 4 位 + 后 4 字节
       totalSamples = (d[13] & 0x0f) * 0x100000000 + be32(d, 14)
+    } else if (type === 6 && !tags.cover) {
+      // v1.4.16-pre1 PICTURE 块：type(4) + MIME长度(4,BE) + MIME + 描述长度(4,BE) + 描述
+      //                    + 宽(4) + 高(4) + 色深(4) + 索引色数(4) + 数据长度(4) + 数据
+      const d = bytes.subarray(body, body + len)
+      let p = 4 // 跳过图片类型
+      if (p + 4 > d.length) break
+      const mimeLen = be32(d, p)
+      p += 4
+      if (p + mimeLen + 4 > d.length) break
+      let mime = ''
+      for (let i = 0; i < mimeLen; i++) mime += String.fromCharCode(d[p + i])
+      p += mimeLen
+      const descLen = be32(d, p)
+      p += 4 + descLen
+      p += 16 // 宽高色深索引色各 4 字节
+      if (p + 4 > d.length) break
+      const dataLen = be32(d, p)
+      p += 4
+      if (dataLen <= 0 || p + dataLen > d.length) break
+      const data = d.subarray(p, p + dataLen)
+      if (data.length >= 32) tags.cover = { data, mime: sniffImageMime(data) || mime.toLowerCase() }
     } else if (type === 4) {
       // VORBIS_COMMENT：厂商长度(LE32) + 厂商 + 条目数(LE32) + 每条(长度 + "KEY=value")
       const d = bytes.subarray(body, body + len)
@@ -255,7 +365,8 @@ export function parseFlac(bytes: Uint8Array): AudioTags | null {
   }
 
   if (sampleRate > 0 && totalSamples > 0) tags.duration = Math.round(totalSamples / sampleRate)
-  return tags.title || tags.artist || tags.album || tags.duration ? tags : null
+  // v1.4.16-pre1：只有封面的曲目也要返回
+  return tags.title || tags.artist || tags.album || tags.duration || tags.cover ? tags : null
 }
 
 /** 在 [start, end) 范围内按 atom 结构找子 atom，返回其数据区间 */
@@ -324,6 +435,16 @@ export function parseMp4(bytes: Uint8Array): AudioTags | null {
           const size = be32(bytes, pos)
           if (size < 8) break
           const type = String.fromCharCode(bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7])
+          // v1.4.16-pre1 封面：covr atom（iTunes 用它存封面）
+          if (type === 'covr' && !tags.cover) {
+            const data = findAtom(bytes, pos + 8, Math.min(ilst.dataEnd, pos + size), 'data')
+            if (data && data.dataEnd - data.dataStart > 8) {
+              const coverBytes = bytes.subarray(data.dataStart + 8, data.dataEnd)
+              if (coverBytes.length >= 32) {
+                tags.cover = { data: coverBytes, mime: sniffImageMime(coverBytes) }
+              }
+            }
+          }
           const field = MP4_ITEMS[type]
           if (field) {
             const data = findAtom(bytes, pos + 8, Math.min(ilst.dataEnd, pos + size), 'data')
@@ -339,7 +460,8 @@ export function parseMp4(bytes: Uint8Array): AudioTags | null {
     }
   }
 
-  return tags.title || tags.artist || tags.album || tags.duration ? tags : null
+  // v1.4.16-pre1：只有封面的曲目也要返回
+  return tags.title || tags.artist || tags.album || tags.duration || tags.cover ? tags : null
 }
 
 /**
