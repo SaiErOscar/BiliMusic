@@ -12,6 +12,7 @@ import {
   setEqualizerEnabled,
   setEqualizerGains,
   runCrossfade,
+  cancelCrossfade,
   normalizeCrossfadeSeconds,
 } from '@/services/audioGraph'
 import { normalizeEqualizer } from '@/services/equalizer'
@@ -113,7 +114,8 @@ interface PlayerContextValue {
   playNow: (track: Track) => void
   playNext: (track: Track) => void
   clearQueue: () => void
-  toggleLike: (trackId: string) => void
+  /** track 可选：列表页收藏不在队列中的曲目时必须传入，否则无法定位到该曲目 */
+  toggleLike: (trackId: string, track?: Track) => void
   playAll: (tracks: Track[]) => void
   playFromQueue: (index: number) => void
   /** v1.4.8-pre1 当前倍速（0.5~2.0） */
@@ -330,6 +332,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       audio.src = ''
       // v1.4.9-pre2：播放器卸载时释放分析分支；v1.4.15-pre1 起均衡器一并归零并断开，
       // 十个滤波器节点不再挂在链路上（元素本身不交还，见 audioGraph.ts 文件头第 2 条）
+      // v1.4.16-pre3：先作废进行中的淡出——否则它的 swap 会操作一个已卸载的元素
+      cancelCrossfade()
       disposeAudioGraph()
       audioGraphAttachedRef.current = false
     }
@@ -851,6 +855,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const clearQueue = useCallback(() => {
     shouldAutoplayRef.current = false
+    /*
+     * v1.4.16-pre3：清空队列必须先中止进行中的淡出。
+     *
+     * runCrossfade 在「淡出 → delay → swap」之间没有任何外部取消入口，
+     * 唯一能作废它的是内部序号。此前 cancelCrossfade 导出后无人调用，
+     * 于是淡出中途清空队列时，swap 仍会执行：把 src 写回一个已经被清空的
+     * 播放器并可能起播，用户看到「队列空了但还在放/又响了」。
+     */
+    cancelCrossfade()
     setQueue([])
     setCurrentTrack(null)
     setIsPlaying(false)
@@ -864,10 +877,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  const toggleLike = useCallback((trackId: string) => {
-    const track = queue.find(t => t.id === trackId) || currentTrack
-    if (track) {
-      toggleFavoriteTrack(track)
+  /**
+   * 切换收藏（v1.4.16-pre3）。
+   *
+   * 旧实现用 `queue.find(...) || currentTrack` 取曲目：队列里找不到时会把
+   * **当前正在播的另一首歌**写进收藏，而目标曲目什么都没发生——列表页收藏
+   * 任意不在队列中的曲目都会误伤正在播放的那首。
+   *
+   * 现在分两步：能从队列/当前曲目解析到就照旧；解析不到时回落到收藏库自身
+   * （`loadFavoriteTracks`），使「收藏一首不在队列里的歌」也能正确落地。
+   */
+  const toggleLike = useCallback((trackId: string, track?: Track) => {
+    const resolved = track
+      || queue.find(t => t.id === trackId)
+      || (currentTrack && currentTrack.id === trackId ? currentTrack : undefined)
+      || loadFavoriteTracks().find(t => t.id === trackId)
+    if (resolved) {
+      toggleFavoriteTrack(resolved)
     }
     setCurrentTrack(prev => prev && prev.id === trackId ? { ...prev, isLiked: !prev.isLiked } : prev)
     setQueue(prev => prev.map(t => t.id === trackId ? { ...t, isLiked: !t.isLiked } : t))

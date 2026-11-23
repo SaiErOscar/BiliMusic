@@ -9,7 +9,7 @@
 // 2. 路径平台相关：只处理 Electron 桌面端，其余平台在 platform 层就返回 undefined，
 //    入口整块隐藏。
 // 3. 文件会消失：本模块不删任何索引，只回报「这次扫到了什么」，失效清理是渲染层的显式动作。
-import { BrowserWindow, dialog, ipcMain, protocol } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain, protocol, safeStorage } from 'electron'
 import { execFile } from 'child_process'
 import fs from 'fs'
 import path from 'path'
@@ -75,11 +75,66 @@ let activeCancel: (() => void) | null = null
  */
 const authorizedDirs = new Set<string>()
 
-/** 登记一个已授权目录（用户通过对话框选定后调用） */
+/** 授权集合落盘文件（userData 下） */
+const AUTH_FILE = 'local-music-dirs.json'
+
+/**
+ * v1.4.16-pre3 授权集合的加密持久化。
+ *
+ * **为什么加密**：这份文件决定 lm:// 能读哪些目录。若以明文存盘，
+ * 任何能改 userData 的程序都能往里塞一个 "C:\\" 从而绕过白名单——
+ * 那样这个白名单就是装饰品。沿用项目已验证的 enc: 约定
+ * （与 electron/webdav.ts、electron/ai.ts 同一套 safeStorage）。
+ *
+ * **加密不可用时怎么办**：不落盘、明确告警，退回「仅本次运行有效」。
+ * 绝不降级成明文——那等于把安全边界换成纸糊的。
+ * 注意这与 webdav.ts 的 plain: 降级不同：那里存的是网盘密码（用户自己的凭据），
+ * 这里存的是**权限边界**，性质不一样。
+ */
+function authFilePath(): string {
+  return path.join(app.getPath('userData'), AUTH_FILE)
+}
+
+function persistAuthorizedDirs(): void {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) {
+      console.warn('[localMusic] safeStorage 不可用，目录授权只在本次运行内有效（不落盘）')
+      return
+    }
+    const payload = JSON.stringify([...authorizedDirs])
+    const stored = 'enc:' + safeStorage.encryptString(payload).toString('base64')
+    fs.writeFileSync(authFilePath(), JSON.stringify({ dirs: stored }, null, 2), 'utf8')
+  } catch (err) {
+    // 落盘失败不影响本次运行：内存里的授权照常生效
+    console.warn('[localMusic] 目录授权落盘失败：', err instanceof Error ? err.message : String(err))
+  }
+}
+
+/** 启动时读回授权集合。解不开就当空集合（用户重选一次即可），不抛错。 */
+export function loadAuthorizedDirs(): void {
+  try {
+    const raw = JSON.parse(fs.readFileSync(authFilePath(), 'utf8')) as { dirs?: string }
+    if (!raw?.dirs || !raw.dirs.startsWith('enc:')) return
+    if (!safeStorage.isEncryptionAvailable()) return
+    const json = safeStorage.decryptString(Buffer.from(raw.dirs.slice(4), 'base64'))
+    const list = JSON.parse(json)
+    if (!Array.isArray(list)) return
+    for (const d of list) {
+      if (typeof d === 'string' && d) authorizedDirs.add(d)
+    }
+  } catch {
+    // 文件不存在/换机器解不开：当作没有授权，不阻塞启动
+  }
+}
+
+/** 登记一个已授权目录（用户通过对话框选定后调用），并加密落盘 */
 export function authorizeMusicDir(dir: string): void {
   if (!dir) return
   try {
-    authorizedDirs.add(path.resolve(dir).toLowerCase())
+    const key = path.resolve(dir).toLowerCase()
+    if (authorizedDirs.has(key)) return
+    authorizedDirs.add(key)
+    persistAuthorizedDirs()
   } catch {
     // 路径非法则忽略，不放宽任何权限
   }
@@ -393,6 +448,9 @@ export function registerLocalAudioProtocol(): void {
 }
 
 export function registerLocalMusicHandlers(): void {
+  // v1.4.16-pre3：启动时读回上次的目录授权，否则重启后本地音乐播不了
+  loadAuthorizedDirs()
+
   // 选目录：返回用户选中的绝对路径，取消则 canceled
   ipcMain.handle('localMusic:pickDir', async () => {
     const win = hostWindow()

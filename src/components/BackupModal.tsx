@@ -369,6 +369,7 @@ export default function BackupModal({ onClose, webdavConfigured }: BackupModalPr
             {result.detail && (
               <p className="bm-hint">
                 歌单 {result.detail.playlists} · 我喜欢 {result.detail.favorites} · 最近播放 {result.detail.recent} · 下载记录 {result.detail.downloads}
+                {result.detail.localTracks ? ` · 本地曲库 ${result.detail.localTracks}` : ''}
               </p>
             )}
             {result.notes && result.notes.length > 0 && (

@@ -8,7 +8,7 @@
  * 能力探测沿用项目口径：platform.localMusic 缺失（非桌面端）时整块入口隐藏。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FolderOpen, HardDriveDownload, RefreshCw, Search, Trash2, X } from 'lucide-react'
+import { FolderOpen, HardDriveDownload, Heart, RefreshCw, Search, Trash2, X } from 'lucide-react'
 import { usePlayer } from '@/contexts/PlayerContext'
 import {
   EmptyLibrary,
@@ -32,7 +32,14 @@ import {
   sortLocalTracksBy,
 } from '@/services/localMusic'
 import type { LocalSortMode } from '@/services/localMusic'
-import { loadLocalDirs, loadLocalTracks, saveLocalDirs, saveLocalTracks } from '@/utils/storage'
+import {
+  FAVORITES_CHANGED_EVENT,
+  loadFavoriteTracks,
+  loadLocalDirs,
+  loadLocalTracks,
+  saveLocalDirs,
+  saveLocalTracks,
+} from '@/utils/storage'
 import type { Track } from '@/types'
 import type { LocalScanProgress } from '@/types/electron'
 
@@ -40,7 +47,12 @@ const canUseLocalMusic = Boolean(platform.localMusic?.localMusicScan && platform
 
 export default function LocalMusic() {
   const player = usePlayer()
-  const [tracks, setTracks] = useState<Track[]>(() => sortLocalTracks(loadLocalTracks()))
+  /** 把收藏库里的 isLiked 标注到本地曲目上（收藏页与本地页共用同一份 id） */
+  const withLiked = useCallback((list: Track[]): Track[] => {
+    const liked = new Set(loadFavoriteTracks().map(t => t.id))
+    return list.map(t => (Boolean(t.isLiked) === liked.has(t.id) ? t : { ...t, isLiked: liked.has(t.id) }))
+  }, [])
+  const [tracks, setTracks] = useState<Track[]>(() => sortLocalTracks(withLiked(loadLocalTracks())))
   const [dirs, setDirs] = useState<string[]>(() => loadLocalDirs())
   const [scanning, setScanning] = useState(false)
   const [progress, setProgress] = useState<LocalScanProgress | null>(null)
@@ -68,6 +80,20 @@ export default function LocalMusic() {
       aliveRef.current = false
     }
   }, [])
+
+  /*
+   * 收藏状态同步（v1.4.16-pre3）：行内收藏按钮改的是收藏库，不是本页 tracks。
+   * 监听 FAVORITES_CHANGED_EVENT 把最新 isLiked 贴回列表，否则按钮点亮后
+   * 图标不会变（本页是唯一一处收藏入口不在收藏页内的列表）。
+   */
+  useEffect(() => {
+    const refresh = () => {
+      if (!aliveRef.current) return
+      setTracks(prev => withLiked(prev))
+    }
+    window.addEventListener(FAVORITES_CHANGED_EVENT, refresh)
+    return () => window.removeEventListener(FAVORITES_CHANGED_EVENT, refresh)
+  }, [withLiked])
 
   // 订阅主进程扫描进度
   useEffect(() => {
@@ -379,9 +405,20 @@ export default function LocalMusic() {
                 isPlaying={player.isPlaying}
                 onPlay={() => player.playNow(track)}
                 extra={
-                  track.localPath && missingPaths.has(track.localPath.toLowerCase())
-                    ? <span className="local-track-missing" title="文件已丢失，可能被移动或删除">已丢失</span>
-                    : undefined
+                  <div className="am-extra-actions">
+                    {track.localPath && missingPaths.has(track.localPath.toLowerCase()) && (
+                      <span className="local-track-missing" title="文件已丢失，可能被移动或删除">已丢失</span>
+                    )}
+                    <button
+                      className="am-icon-button"
+                      onClick={(e) => { e.stopPropagation(); player.toggleLike(track.id, track) }}
+                      title={track.isLiked ? '取消收藏' : '收藏'}
+                      aria-label={track.isLiked ? '取消收藏' : '收藏'}
+                      aria-pressed={Boolean(track.isLiked)}
+                    >
+                      <Heart size={16} fill={track.isLiked ? 'currentColor' : 'none'} />
+                    </button>
+                  </div>
                 }
               />
             )}

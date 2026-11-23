@@ -19,6 +19,8 @@ import {
   loadDownloadRecords,
   loadFavoriteTombstones,
   loadFavoriteTracks,
+  loadLocalDirs,
+  loadLocalTracks,
   loadPlaylistTombstones,
   loadPlaylists,
   loadRecentTracks,
@@ -26,6 +28,8 @@ import {
   saveDownloadRecords,
   saveFavoriteTombstones,
   saveFavoriteTracks,
+  saveLocalDirs,
+  saveLocalTracks,
   savePlaylistTombstones,
   savePlaylists,
   saveRecentTracks,
@@ -107,6 +111,17 @@ export interface BackupPayload {
    * 与 API 密钥同一处理口径：明文落在 AES-256-GCM 密文负载内，保护级别不降级。
    */
   workbuddyCredential?: WorkBuddyBackupCredential | null
+  /**
+   * v1.4.16-pre3：本地音乐索引（`bilimusic_local_tracks`）。
+   *
+   * 此前备份不含本地曲库，跨机恢复后歌单/我喜欢里带 localPath 的条目
+   * 全部指向不存在的路径，本地页则是空的——用户看到的「导出所有数据」
+   * 缺了一整块自己产出的数据。这里只带**索引**，不带音频文件本身：
+   * 备份体积不因几百首曲目膨胀，恢复后由既有口径提示「文件已丢失」。
+   */
+  localTracks?: Track[]
+  /** 已导入过的目录列表（`bilimusic_local_dirs`），恢复后仍可一键重扫 */
+  localDirs?: string[]
 }
 
 /** 备份里的 WorkBuddy 凭据（与主进程 WorkBuddyCredential 同形） */
@@ -217,6 +232,9 @@ export async function collectBackup(): Promise<BackupPayload> {
     aiLearned: await loadLearnedForBackup(),
     // v1.4.14-pre10：WorkBuddy 凭证随备份一并导出（用户第 2 项）
     workbuddyCredential: await loadWorkBuddyCredentialForBackup(),
+    // v1.4.16-pre3：本地音乐索引与目录，见 BackupPayload 里的说明
+    localTracks: loadLocalTracks(),
+    localDirs: loadLocalDirs(),
   }
 }
 
@@ -358,6 +376,8 @@ export interface ApplyResult {
   favorites: number
   recent: number
   downloads: number
+  /** v1.4.16-pre3：本地曲库合并后的条目数（备份里有本地索引时才 > 0） */
+  localTracks?: number
 }
 
 export function applyBackup(payload: BackupPayload): ApplyResult {
@@ -391,6 +411,32 @@ export function applyBackup(payload: BackupPayload): ApplyResult {
   const downloads = dedupeById([...(payload.downloads || []), ...loadDownloadRecords()], 200)
     .sort((a, b) => ((b.downloadedAt || '') > (a.downloadedAt || '') ? 1 : -1))
   saveDownloadRecords(downloads)
+
+  /*
+   * 本地音乐索引（v1.4.16-pre3）：按 localPath 并集合并，本机条目优先。
+   *
+   * 只搬索引不搬音频：跨机恢复后这些条目指向的路径多半不存在，
+   * 播放时按既有口径提示「文件已丢失」并停下（localPlayback 的验收口径），
+   * 比整库静默消失更接近用户预期——至少看得见自己导入过什么。
+   * 目录列表同理并集：换机后路径不同，留着可让用户自行移除或重选。
+   */
+  const backupLocal = Array.isArray(payload.localTracks) ? payload.localTracks : []
+  if (backupLocal.length > 0) {
+    const byPath = new Map<string, Track>()
+    for (const t of loadLocalTracks()) {
+      if (t.localPath) byPath.set(t.localPath.toLowerCase(), t)
+    }
+    for (const t of backupLocal) {
+      if (!t?.localPath) continue
+      const key = t.localPath.toLowerCase()
+      if (!byPath.has(key)) byPath.set(key, t)
+    }
+    saveLocalTracks([...byPath.values()])
+  }
+  if (Array.isArray(payload.localDirs) && payload.localDirs.length > 0) {
+    const merged = [...new Set([...loadLocalDirs(), ...payload.localDirs])]
+    saveLocalDirs(merged)
+  }
 
   // 歌词偏移：本地优先合并
   saveLyricOffsetMap(mergeLyricOffsets(loadLyricOffsetMap(), payload.lyricOffsets))
@@ -446,7 +492,13 @@ export function applyBackup(payload: BackupPayload): ApplyResult {
   window.dispatchEvent(new CustomEvent(SETTINGS_CHANGED_EVENT))
   window.dispatchEvent(new CustomEvent(RECENT_EVENT))
 
-  return { playlists: playlists.length, favorites: favorites.length, recent: recent.length, downloads: downloads.length }
+  return {
+    playlists: playlists.length,
+    favorites: favorites.length,
+    recent: recent.length,
+    downloads: downloads.length,
+    localTracks: backupLocal.length > 0 ? loadLocalTracks().length : 0,
+  }
 }
 
 // ===== 账号恢复（v1.4.3-pre7）=====
