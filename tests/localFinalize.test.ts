@@ -43,7 +43,14 @@ function payload(over: Partial<BackupPayload> = {}): BackupPayload {
   }
 }
 
-const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), 'utf8')
+/*
+ * 读源码时统一换行。
+ *
+ * GitHub Actions 的 windows-latest 检出会把 LF 转成 CRLF，而本机是 LF。
+ * 任何跨行的 indexOf / toMatch 断言若按 LF 写死，就会「本地绿、CI 红」——
+ * 这类差异只在地域之外复现，事后极难定位，所以在这里一次性抹平。
+ */
+const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), 'utf8').replace(/\r\n/g, '\n')
 
 beforeEach(() => localStorage.clear())
 
@@ -168,9 +175,10 @@ describe('淡出中止：清空队列与卸载时作废进行中的淡出', () =
   })
 
   it('卸载清理里在 disposeAudioGraph 之前作废淡出', () => {
-    const idx = player.indexOf('disposeAudioGraph()\n      audioGraphAttachedRef.current = false')
-    expect(idx).toBeGreaterThan(-1)
-    const before = player.slice(Math.max(0, idx - 300), idx)
+    // 用 \s+ 而不是写死缩进/换行：源码缩进变化不该让这条断言失效
+    const m = /disposeAudioGraph\(\)\s+audioGraphAttachedRef\.current = false/.exec(player)
+    expect(m).not.toBeNull()
+    const before = player.slice(Math.max(0, (m as RegExpExecArray).index - 300), (m as RegExpExecArray).index)
     expect(before).toMatch(/cancelCrossfade\(\)/)
   })
 })
