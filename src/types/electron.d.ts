@@ -191,6 +191,23 @@ export interface LyricsApi {
   /** v1.3.7 手动匹配多源：LRCLIB（不支持翻页，失败返回空数组） */
   searchLrclib: (keyword: string) => Promise<LrclibSong[]>
   getLrclib: (id: string | number) => Promise<OiapiLyricData | null>
+  /**
+   * v1.4.17-pre1 本地歌词文件。
+   *
+   * readLocal：按「同目录同名」推导候选路径并逐个尝试（.lrc 优先 .txt），
+   * 命中返回内容与实际路径，未命中返回 null。用于本地曲目自动匹配。
+   *
+   * pickLocal：弹系统文件选择框手动挑一个歌词文件。
+   * 本地曲目与 B 站视频都能用——后者没有本地路径，只能手动导入。
+   */
+  readLocal: (audioPath: string) => Promise<LocalLyricFile | null>
+  pickLocal: () => Promise<LocalLyricFile | null>
+}
+
+/** 本地歌词文件（主进程读取结果） */
+export interface LocalLyricFile {
+  content: string
+  path: string
 }
 
 export interface PersistentStorageApi {

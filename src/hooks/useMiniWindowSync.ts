@@ -118,8 +118,16 @@ export function useMiniWindowSync() {
         if (settingsRef.current.desktopLyricSubline) {
           const subMap = new Map<number, string>()
           baseLines.forEach((line, i) => {
-            const translated = (line as { ttext?: string }).ttext
-            if (translated && translated.trim()) subMap.set(i, translated.trim())
+            /*
+             * v1.4.17-pre1 修根因：这里原本读的是 `(line as { ttext?: string }).ttext`，
+             * 而 LyricLine 的译文真名是 `translation`（lyrics.ts:26）——
+             * `ttext` 全项目仅此一处，永远取到 undefined，于是官方 tlyric 译文
+             * 从来没有进过歌词窗：开关打开也只是白开。
+             * 现在两个名字都认，兼容将来可能出现的中间形态。
+             */
+            const raw = line.translation || (line as { ttext?: string }).ttext
+            const translated = (raw || '').trim()
+            if (translated) subMap.set(i, translated)
           })
           if (subMap.size === 0 && settingsRef.current.autoAiLyricForeign) {
             const lang = detectLyricLanguage(baseLines)

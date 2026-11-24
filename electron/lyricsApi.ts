@@ -1,4 +1,5 @@
-import { ipcMain, net } from 'electron'
+import { BrowserWindow, dialog, ipcMain, net } from 'electron'
+import fs from 'fs'
 
 /**
  * 歌词服务层（QQ 音乐 OIAPI + 网易云 + LRCLIB）
@@ -17,6 +18,37 @@ const NETEASE_SEARCH = 'https://music.163.com/api/search/get'
 const NETEASE_LYRIC = 'https://music.163.com/api/song/lyric'
 const LRCLIB_SEARCH = 'https://lrclib.net/api/search'
 const LRCLIB_GET = 'https://lrclib.net/api/get'
+
+/** 本地歌词文件：只认这两种扩展名，且拒绝超大文件（歌词文本不会这么大） */
+const MAX_LYRIC_BYTES = 2 * 1024 * 1024
+const LYRIC_FILE_FILTERS = [
+  { name: '歌词文件', extensions: ['lrc', 'txt'] },
+  { name: '全部文件', extensions: ['*'] },
+]
+
+export interface LocalLyricFile {
+  content: string
+  /** 实际命中的文件路径，供界面回显「已使用 xxx.lrc」 */
+  path: string
+}
+
+/**
+ * 由音频路径推导「同目录同名」的歌词候选路径。
+ *
+ * 与渲染层 src/services/localLyrics.ts 的 siblingLyricPaths 同一口径：
+ * 文件名除扩展名外完全相同，且必须同目录。两边各有一份是因为
+ * 主进程不能 import 渲染层模块（构建产物分离），改动需同步。
+ */
+function siblingLyricCandidates(audioPath: string): string[] {
+  const normalized = audioPath.replace(/\\/g, '/')
+  const slash = normalized.lastIndexOf('/')
+  const dir = slash >= 0 ? normalized.slice(0, slash) : ''
+  const base = slash >= 0 ? normalized.slice(slash + 1) : normalized
+  const dot = base.lastIndexOf('.')
+  const stem = dot > 0 ? base.slice(0, dot) : base
+  if (!stem) return []
+  return ['.lrc', '.txt'].map((ext) => (dir ? `${dir}/${stem}${ext}` : `${stem}${ext}`))
+}
 
 /** 网易云 web 接口对裸请求（Electron 默认 UA）可能触发风控，统一伪装浏览器 */
 const NETEASE_HEADERS: Record<string, string> = {
@@ -191,5 +223,49 @@ export function registerLyricsApiHandlers() {
           ? (json.plainLyrics as string)
           : ''
     return lyric.trim() ? { content: lyric } : null
+  })
+
+  /*
+   * v1.4.17-pre1 本地歌词文件。
+   *
+   * 两条能力，都只读用户自己指定的文件，不做任何目录遍历：
+   * - `lyrics:read-local`：按「同目录同名」推导出的候选路径逐个尝试，命中即返回；
+   * - `lyrics:pick-local`：弹系统文件选择框，用户手动挑一个 .lrc/.txt。
+   *
+   * 安全口径：read-local 只允许 .lrc/.txt，且拒绝 NUL 与大文件——
+   * 渲染层传进来的路径来自本地曲目的 localPath，但仍做一次扩展名与体积校验，
+   * 避免「导入一个 .mp3 当歌词」这类误用把几十 MB 读进内存。
+   */
+  ipcMain.handle('lyrics:read-local', async (_event, audioPath: string): Promise<LocalLyricFile | null> => {
+    if (typeof audioPath !== 'string' || !audioPath.trim()) return null
+    const candidates = siblingLyricCandidates(audioPath)
+    for (const candidate of candidates) {
+      try {
+        const stat = await fs.promises.stat(candidate)
+        if (!stat.isFile() || stat.size > MAX_LYRIC_BYTES) continue
+        const raw = await fs.promises.readFile(candidate, 'utf8')
+        if (raw.trim()) return { content: raw, path: candidate }
+      } catch {
+        // 该候选不存在或无权限：换下一个
+      }
+    }
+    return null
+  })
+
+  ipcMain.handle('lyrics:pick-local', async (event): Promise<LocalLyricFile | null> => {
+    const win = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getFocusedWindow()
+    const result = win
+      ? await dialog.showOpenDialog(win, { properties: ['openFile'], filters: LYRIC_FILE_FILTERS })
+      : await dialog.showOpenDialog({ properties: ['openFile'], filters: LYRIC_FILE_FILTERS })
+    if (result.canceled || !result.filePaths.length) return null
+    const filePath = result.filePaths[0]
+    try {
+      const stat = await fs.promises.stat(filePath)
+      if (!stat.isFile() || stat.size > MAX_LYRIC_BYTES) return null
+      const raw = await fs.promises.readFile(filePath, 'utf8')
+      return raw.trim() ? { content: raw, path: filePath } : null
+    } catch {
+      return null
+    }
   })
 }

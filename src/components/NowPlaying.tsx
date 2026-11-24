@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronDown, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat,
-  Heart, Volume2, VolumeX, Search, Music, Loader2, Maximize2, Minimize2, X, MessageCircle, ExternalLink, ThumbsUp, RefreshCw, ChevronUp, RotateCcw, Star, Monitor, Sparkles,
+  Heart, Volume2, VolumeX, Search, Music, Loader2, Maximize2, Minimize2, X, MessageCircle, ExternalLink, ThumbsUp, RefreshCw, ChevronUp, RotateCcw, Star, Monitor, Sparkles, FileUp,
 } from 'lucide-react'
 import DownloadButton from '@/components/DownloadButton'
 import BiliFavoriteDialog from '@/components/BiliFavoriteDialog'
@@ -991,6 +991,28 @@ function LyricsPanel({
     toggleDesktopLyric()
   }
 
+  /**
+   * v1.4.17-pre1：手动导入本地歌词文件。
+   *
+   * 复用面板既有的 toast 提示（3 秒自动消失），不新开对话框——
+   * 导入是轻动作，成功就告诉用户「已使用 xxx.lrc」，失败说清原因即可。
+   */
+  const [importingLyric, setImportingLyric] = useState(false)
+  const handleImportLocalLyric = async () => {
+    if (importingLyric) return
+    setImportingLyric(true)
+    try {
+      const res = await lyrics.importLocal()
+      if (res.ok) {
+        showLyricToast(`已导入 ${res.lines} 行歌词（${res.synced ? '带时间轴' : '纯文本'}）`)
+      } else if (res.reason !== '已取消') {
+        showLyricToast(`导入失败：${res.reason}`)
+      }
+    } finally {
+      setImportingLyric(false)
+    }
+  }
+
   /** 跑一轮多源搜索（fresh=首搜重置游标；否则在已展示结果上追加下一页） */
   const runRound = async (q: string, fresh: boolean) => {
     if (!q.trim()) return
@@ -1090,6 +1112,18 @@ function LyricsPanel({
           <button type="button" className="lyrics-panel__ctrl-btn" onClick={openSearch} title="切换歌词版本">
             <Search size={15} />
             <span>切换歌词</span>
+          </button>
+          {/* v1.4.17-pre1 本地歌词：本地曲目会自动匹配同目录同名 .lrc，也可在这里手动选一个。
+              B 站视频没有本地路径，同样走这个入口导入。 */}
+          <button
+            type="button"
+            className="lyrics-panel__ctrl-btn"
+            onClick={() => void handleImportLocalLyric()}
+            disabled={importingLyric}
+            title="从本地选择一个 .lrc 歌词文件"
+          >
+            <FileUp size={15} />
+            <span>{importingLyric ? '导入中…' : '导入歌词'}</span>
           </button>
           {/* v1.4.11-pre6 AI 歌词翻译：翻译 / 逐句赏析，仅叠加显示、不改原歌词 */}
           {isAiSupported() && (

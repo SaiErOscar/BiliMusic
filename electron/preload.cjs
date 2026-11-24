@@ -86,6 +86,12 @@ const lyricsApi = {
     ipcRenderer.invoke('lyrics:search-lrclib', keyword),
   getLrclib: (id) =>
     ipcRenderer.invoke('lyrics:get-lrclib', id),
+
+  // v1.4.17-pre1 本地歌词：同目录同名自动匹配 / 手动选文件
+  readLocal: (audioPath) =>
+    ipcRenderer.invoke('lyrics:read-local', audioPath),
+  pickLocal: () =>
+    ipcRenderer.invoke('lyrics:pick-local'),
 }
 
 const persistentStorage = {

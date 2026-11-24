@@ -313,9 +313,24 @@ function getLyricHtml() {
   .close:active { transform: scale(.9); }
   body.light .close { background: rgba(0,0,0,.08); }
   body.light .close:hover { background: rgba(0,0,0,.16); }
-  .lyric { flex: 1; display: grid; place-items: center; position: relative; }
+  /* v1.4.17-pre1 歌词区：裁切 + 弹性收缩，保证任何情况下都不压到下方控制条。
+     此前 .lyric 只有 place-items:center，超长歌词会溢出并盖住按钮。 */
+  .lyric { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; overflow: hidden; min-height: 0; width: 100%; }
+  .line-wrap { max-width: 100%; width: 100%; overflow: hidden; }
   .line { font-family: var(--lyric-font-family, -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif); font-size: var(--lyric-font-size, 30px); font-weight: var(--lyric-font-weight, 820); text-align: center; line-height: 1.35; color: var(--lyric-color); text-shadow: 0 2px 20px rgba(0,0,0,.5); opacity: 0; transform: translateY(8px); transition: opacity .45s ease, transform .45s ease; max-width: 100%; }
   .line.show { opacity: 1; transform: translateY(0); }
+  /* 单语两行：放不下就折行，不滚动 */
+  .line.wrap { white-space: normal; overflow-wrap: anywhere; }
+  /* 双语/超长：单行 + 横向缓慢滚动一次（不循环）。
+     will-change 让 GPU 接管，滚动才稳；动画由 JS 设 --scroll-x / --scroll-ms 驱动。 */
+  .line.scroll { white-space: nowrap; display: inline-block; will-change: transform; }
+  .line.scroll.run { animation: lyric-scroll var(--scroll-ms, 2000ms) ease-in-out 1 forwards; }
+  @keyframes lyric-scroll {
+    from { transform: translateX(0); }
+    to { transform: translateX(calc(-1 * var(--scroll-x, 0px))); }
+  }
+  /* 副行（译文 / AI 增强）：主行下方，字号略小、透明度略低 */
+  .sub { font-family: var(--lyric-font-family, -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif); font-size: calc(var(--lyric-font-size, 30px) * .62); font-weight: calc(var(--lyric-font-weight, 820) * .85); line-height: 1.3; text-align: center; color: var(--lyric-color); opacity: .72; text-shadow: 0 2px 16px rgba(0,0,0,.5); margin-top: 2px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* v1.3.9-beta9 修复：idle 原硬编码 font-size:22px/font-weight:600，会覆盖 CSS 变量，
      导致无歌词(显示歌名)时调字号粗细毫无视觉变化，看起来像"改了没反应"。改为跟随变量，仅保留略小的视觉降级。 */
   .line.idle { opacity: .45; font-size: calc(var(--lyric-font-size, 30px) * .72); font-weight: var(--lyric-font-weight, 820); }
@@ -393,7 +408,8 @@ function getLyricHtml() {
       <div class="row"><label>字体</label><select id="apFontFamily"><option value="system-ui">默认（跟随系统）</option></select></div>
     </div>
     <div class="lyric">
-      <div id="line" class="line idle">未在播放</div>
+      <div class="line-wrap"><div id="line" class="line idle">未在播放</div></div>
+      <div class="line-wrap"><div id="sub" class="sub" style="display:none"></div></div>
     </div>
     <div class="controls">
       <button class="btn" id="prev" title="上一首">⏮</button>
@@ -449,22 +465,94 @@ function getLyricHtml() {
       return res
     }
 
+    /*
+     * v1.4.17-pre1 歌词布局：宽度估算与滚动规划。
+     *
+     * 与 src/services/desktopLyricLines.ts 的 planLyricLayout 同一口径——
+     * 但歌词窗是 data:text/html 里的独立文档，拿不到渲染层模块，
+     * 所以这里必须有一份等价实现。两边都由测试锁住，改动需同步。
+     */
+    const CJK_RE = /[\u3400-\u4dbf\u4e00-\u9fff]/
+    function estimateWidth(text, fontSize) {
+      let w = 0
+      for (const ch of String(text || '')) w += CJK_RE.test(ch) ? fontSize : fontSize * 0.55
+      return w
+    }
+    const SCROLL_PX_PER_SEC = 45, SCROLL_MIN_MS = 900, SCROLL_MAX_MS = 9000
+    function planLayout(text, fontSize, availableWidth, hasSub, lineSeconds) {
+      const width = estimateWidth(text, fontSize)
+      if (width <= availableWidth) return { mode: 'plain', distance: 0, ms: 0 }
+      if (!hasSub && width <= availableWidth * 2) return { mode: 'wrap', distance: 0, ms: 0 }
+      const distance = Math.max(0, Math.round(width - availableWidth))
+      let ms = (distance / SCROLL_PX_PER_SEC) * 1000
+      if (lineSeconds > 0) ms = Math.min(ms, lineSeconds * 1000 * 0.8)
+      ms = Math.round(Math.min(SCROLL_MAX_MS, Math.max(SCROLL_MIN_MS, ms)))
+      return { mode: 'scroll', distance, ms }
+    }
+
+    /** 当前这句的演唱时长：下一行时间 - 本行时间（末行未知则返回 0） */
+    function lineDuration(idx) {
+      const lines = state.lyricLines || []
+      if (idx < 0 || idx >= lines.length) return 0
+      const next = lines[idx + 1]
+      if (!next || typeof next.time !== 'number') return 0
+      return Math.max(0, next.time - lines[idx].time)
+    }
+
+    /** 上一句是第几行——用来判断「是否换了一句」，避免每次进度推送都重启动画 */
+    let lastRenderedIdx = -2
+
+    function applyLineLayout(el, text, hasSub, lineSeconds, forceRestart) {
+      const avail = el.parentElement ? el.parentElement.clientWidth : 0
+      const fontSize = Number(state.lyricFontSize) || 30
+      const plan = planLayout(text, fontSize, avail || 1, hasSub, lineSeconds)
+      el.classList.remove('wrap', 'scroll', 'run')
+      el.style.removeProperty('--scroll-x')
+      el.style.removeProperty('--scroll-ms')
+      if (plan.mode === 'wrap') { el.classList.add('wrap'); return }
+      if (plan.mode !== 'scroll') return
+      el.classList.add('scroll')
+      el.style.setProperty('--scroll-x', plan.distance + 'px')
+      el.style.setProperty('--scroll-ms', plan.ms + 'ms')
+      if (!forceRestart) return
+      // 只滚一次：加 .run 触发动画，animation-fill-mode: forwards 让它停在末尾不回弹
+      void el.offsetWidth
+      el.classList.add('run')
+    }
+
     function renderLyric() {
       const line = $('line')
+      const subEl = $('sub')
+      const hideSub = () => { if (subEl) { subEl.style.display = 'none'; subEl.textContent = '' } }
       if (!state.hasTrack) {
-        line.textContent = '未在播放'; line.className = 'line idle'; return
+        line.textContent = '未在播放'; line.className = 'line idle'; hideSub(); return
       }
       // v1.4.5：用户主动选「不显示歌词」→ 显示「无歌词」（区别于自动匹配失败时的标题回落）
       if (state.noLyric) {
-        line.textContent = '无歌词'; line.className = 'line idle'; return
+        line.textContent = '无歌词'; line.className = 'line idle'; hideSub(); return
       }
       if (!state.synced || !state.lyricLines || state.lyricLines.length === 0) {
-        line.textContent = state.title || state.artist || '暂无歌词'; line.className = 'line idle'; return
+        line.textContent = state.title || state.artist || '暂无歌词'; line.className = 'line idle'; hideSub(); return
       }
       const idx = activeIndex(state.progress || 0)
-      const text = idx >= 0 ? state.lyricLines[idx].text : (state.lyricLines[0] ? state.lyricLines[0].text : '')
+      const cur = idx >= 0 ? state.lyricLines[idx] : state.lyricLines[0]
+      const text = cur ? cur.text : ''
+      const sub = cur && cur.sub ? String(cur.sub).trim() : ''
+      const changed = idx !== lastRenderedIdx
+      lastRenderedIdx = idx
+
       line.textContent = text || '♪'
-      line.className = 'line show'
+      // 先归位再加布局 class：applyLineLayout 会按需补 wrap/scroll，
+      // 若在这里写死 className 会把上一步加的 class 全冲掉（滚动就永远不生效）
+      line.className = 'line'
+      applyLineLayout(line, text || '♪', Boolean(sub), lineDuration(idx), changed)
+      line.classList.add('show')
+
+      if (subEl) {
+        if (sub) { subEl.textContent = sub; subEl.style.display = '' }
+        else { subEl.style.display = 'none'; subEl.textContent = '' }
+      }
+
       if (lyricTimer) clearTimeout(lyricTimer)
       lyricTimer = setTimeout(() => { if (state.hasTrack && state.lyricLines && state.lyricLines.length) line.className = 'line show' }, 200)
     }
@@ -697,7 +785,15 @@ function createLyricWindow() {
   // 用户仍可拖动窗体改位置（本窗不持久化位置，每次新建回到此处）。
   const { workArea } = screen.getPrimaryDisplay()
   const WIN_W = 620
-  const WIN_H = 150
+  /*
+   * v1.4.17-pre1：150 → 170。
+   *
+   * 双语歌词要占「主行 + 副行」两行，150 高扣掉内边距与控制条后
+   * 歌词区只剩约 98px，默认字号下勉强够、调大字号就开始压到控制条。
+   * 加高 20px 后常见字号（30~45）都能完整显示两行。
+   * y 仍按底边反算，所以加高只是把顶边上移，歌词不会跳位置。
+   */
+  const WIN_H = 170
   const BOTTOM_GAP = 60
   lyricWindow = new BrowserWindow({
     width: WIN_W,

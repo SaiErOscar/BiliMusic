@@ -6,6 +6,7 @@ import {
   clearLyricCache,
   getLyricOffset,
   setLyricOffset,
+  importLocalLyricFile,
   type LyricResult,
   type LyricCandidate,
 } from '@/services/lyrics'
@@ -89,6 +90,23 @@ export function useLyrics(track: Track | null, enabled: boolean) {
     load(track)
   }, [track, load])
 
+  /**
+   * v1.4.17-pre1：手动导入本地歌词文件。
+   *
+   * 本地曲目与 B 站视频共用这一条路径——后者没有本地路径，
+   * 无法参与「同目录同名」自动匹配，只能手动选文件。
+   * 导入成功后立刻重载，让面板与桌面歌词同时切到新歌词。
+   */
+  const importLocal = useCallback(async () => {
+    if (!track) return { ok: false as const, reason: '当前没有播放中的曲目' }
+    const res = await importLocalLyricFile(track)
+    if (res.ok) {
+      setAiEnhance(null)
+      await load(track)
+    }
+    return res
+  }, [track, load])
+
   /** 清掉 AI 增强叠加层（切歌、关闭开关时调用） */
   const clearAiEnhance = useCallback(() => setAiEnhance(null), [])
 
@@ -145,6 +163,8 @@ export function useLyrics(track: Track | null, enabled: boolean) {
     rawResult: result,
     choose,
     retry,
+    /** v1.4.17-pre1：手动导入本地歌词文件（本地曲目与 B 站视频共用） */
+    importLocal,
     offset,
     adjustOffset,
     resetOffset,

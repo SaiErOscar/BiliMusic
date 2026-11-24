@@ -12,6 +12,7 @@ import type { Track } from '@/types'
 import { httpRequest } from './http'
 import { platform } from '@/platform'
 import type { LyricsApi } from '@/types/electron'
+import { checkLyricFileContent, localLyricCacheKey } from './localLyrics'
 
 export interface LyricLine {
   time: number
@@ -37,13 +38,19 @@ export interface LyricResult {
   noLyric?: boolean // v1.4.5：用户主动选择「不显示歌词」时为 true，视为内容为「无歌词」的歌词态
 }
 
-/** v1.3.7 歌词候选来源；v1.4.5 增 'none'（不显示歌词态，抽屉置顶项，无来源 tag） */
-export type LyricSource = 'qq' | 'netease' | 'lrclib' | 'none'
+/**
+ * 歌词候选来源。
+ *
+ * v1.3.7 建；v1.4.5 增 'none'（不显示歌词态）；
+ * v1.4.17-pre1 增 'local'（用户导入或同目录同名的 .lrc 文件）。
+ */
+export type LyricSource = 'qq' | 'netease' | 'lrclib' | 'local' | 'none'
 
 export const LYRIC_SOURCE_LABELS: Record<LyricSource, string> = {
   qq: 'QQ',
   netease: '网易',
   lrclib: 'LRCLIB',
+  local: '本地',
   none: '不显示歌词',
 }
 
@@ -723,7 +730,106 @@ export function applyLyricOffset(result: LyricResult, trackId: string): LyricRes
   }
 }
 
+/**
+ * v1.4.17-pre1：把一份本地歌词文本变成 LyricResult。
+ *
+ * 解析复用 parseLrc / plainToLines，与联网歌词同一条时间轴逻辑——
+ * 本地 .lrc 与在线歌词不该有任何行为差异。
+ * 带时间轴就 synced，纯文本就按 unsynced 逐行展示。
+ */
+function localLyricToResult(content: string, track: Track, filePath: string): LyricResult | null {
+  const checked = checkLyricFileContent(content)
+  if (!checked.ok) return null
+  const syncedLines = parseLrc(checked.content)
+  const lines = syncedLines.length ? syncedLines : plainToLines(checked.content)
+  if (!lines.length) return null
+  return {
+    lines,
+    synced: syncedLines.length > 0,
+    instrumental: false,
+    trackName: track.title || '',
+    artistName: track.artist || '',
+    // sourceId 存文件路径：界面能显示「已用 xxx.lrc」，也便于用户核对
+    sourceId: filePath,
+    offset: 0,
+  }
+}
+
+/**
+ * v1.4.17-pre1：取本地歌词（手动导入优先，其次同目录同名）。
+ *
+ * 手动导入的优先级高于自动匹配：用户明确挑过一个文件，
+ * 就不该被旁边恰好同名的 .lrc 顶掉。
+ *
+ * @returns 命中返回 result 与来源说明；未命中返回 null（调用方继续联网）
+ */
+export async function getLocalLyricForTrack(
+  track: Track,
+): Promise<{ result: LyricResult; filePath: string; imported: boolean } | null> {
+  const api = platform.lyrics
+  if (!api?.readLocal) return null
+
+  // 1. 手动导入过的：缓存里存的就是解析结果，直接用
+  const key = localLyricCacheKey(track)
+  const imported = readCache()[key]
+  if (imported?.status === 'ok') {
+    return { result: applyLyricOffset(imported.result, track.id), filePath: imported.result.sourceId, imported: true }
+  }
+
+  // 2. 同目录同名自动匹配：只有本地曲目有本地路径
+  if (!track.localPath) return null
+  try {
+    const file = await api.readLocal(track.localPath)
+    if (!file?.content) return null
+    const result = localLyricToResult(file.content, track, file.path)
+    if (!result) return null
+    // 自动匹配的也缓存：同一次会话里切歌来回不会反复读盘
+    cacheOk(key, result)
+    return { result: applyLyricOffset(result, track.id), filePath: file.path, imported: false }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * v1.4.17-pre1：手动导入一个歌词文件并写入缓存。
+ *
+ * 本地曲目与 B 站视频共用：后者没有本地路径，只能走这条。
+ * 返回导入结果供界面提示（成功几行 / 文件被拒的原因）。
+ */
+export async function importLocalLyricFile(
+  track: Track,
+): Promise<{ ok: true; lines: number; synced: boolean; filePath: string } | { ok: false; reason: string }> {
+  const api = platform.lyrics
+  if (!api?.pickLocal) return { ok: false, reason: '当前环境不支持选择文件' }
+
+  let file: { content: string; path: string } | null = null
+  try {
+    file = await api.pickLocal()
+  } catch {
+    return { ok: false, reason: '读取文件失败' }
+  }
+  if (!file) return { ok: false, reason: '已取消' }
+
+  const checked = checkLyricFileContent(file.content)
+  if (!checked.ok) {
+    return {
+      ok: false,
+      reason: checked.reason === 'binary' ? '这个文件看起来不是歌词文本' : '文件是空的',
+    }
+  }
+  const result = localLyricToResult(checked.content, track, file.path)
+  if (!result) return { ok: false, reason: '没有解析出歌词内容' }
+
+  cacheOk(localLyricCacheKey(track), result)
+  return { ok: true, lines: result.lines.length, synced: result.synced, filePath: file.path }
+}
+
 export async function getLyricForTrack(track: Track): Promise<LyricResult | null> {
+  // v1.4.17-pre1：本地歌词优先于联网搜索——用户放进来的文件就是他要的结果
+  const local = await getLocalLyricForTrack(track)
+  if (local) return local.result
+
   const entry = readCache()[track.id]
   // v1.4.5：用户主动标记「不显示歌词」优先于自动匹配，永久生效、不发起网络搜索
   if (entry?.status === 'none') return noneLyricResult()
